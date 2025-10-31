@@ -8,8 +8,8 @@ import splunklib.client as client
 from filigran_sseclient import SSEClient
 from stix2patterns.v21.pattern import Pattern
 
-from ta_opencti_add_on.constants import VERIFY_SSL, INDICATORS_KVSTORE_NAME
-from ta_opencti_add_on.utils import get_proxy_config
+from ta_opencti_for_splunk_enterprise.constants import VERIFY_SSL, INDICATORS_KVSTORE_NAME
+from ta_opencti_for_splunk_enterprise.utils import get_proxy_config
 
 SUPPORTED_TYPES = {
     "email-addr": {"value": "email-addr"},
