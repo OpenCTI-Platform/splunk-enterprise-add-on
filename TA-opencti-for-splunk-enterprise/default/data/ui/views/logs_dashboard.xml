@@ -14,7 +14,7 @@
             <title>App Logs</title>
             <table>
                 <search>
-                    <query>index=_internal sourcetype="taopenctiaddon:log" search *
+                    <query>index=_internal sourcetype="taopenctiforsplunkenterprise:log" search *
                         | eval time=strftime(_time, "%F %T")
                         | eval message=coalesce(event_message, _raw)
                         | table time sourcetype log_level message
