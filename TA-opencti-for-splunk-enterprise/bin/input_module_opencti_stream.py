@@ -91,11 +91,39 @@ def enrich_payload(splunk_helper, payload, msg_event):
     if created_by_id:
         payload["created_by"] = IDENTITY_DEFs.get(created_by_id)
 
+    # Marking definitions -> human readable markings
     payload["markings"] = []
     for marking_ref_id in payload.get("object_marking_refs", []):
         marking_value = MARKING_DEFs.get(marking_ref_id)
         if marking_value:
             payload["markings"].append(marking_value)
+
+    # --- LABELS ---
+    # If labels are already present at top level, keep them.
+    # Otherwise, try to extract from extensions before we delete them.
+    if "labels" in payload and payload["labels"] is not None:
+        # Ensure it's always a list (Splunk MV friendly)
+        if not isinstance(payload["labels"], list):
+            payload["labels"] = [payload["labels"]]
+    else:
+        extracted_labels = []
+        if "extensions" in payload:
+            for ext in payload["extensions"].values():
+                # Common patterns you might see from OpenCTI STIX
+                if "labels" in ext and ext["labels"]:
+                    if isinstance(ext["labels"], list):
+                        extracted_labels.extend(ext["labels"])
+                    else:
+                        extracted_labels.append(ext["labels"])
+                if "x_opencti_labels" in ext and ext["x_opencti_labels"]:
+                    if isinstance(ext["x_opencti_labels"], list):
+                        extracted_labels.extend(ext["x_opencti_labels"])
+                    else:
+                        extracted_labels.append(ext["x_opencti_labels"])
+        if extracted_labels:
+            payload["labels"] = list(set(extracted_labels))  # de-dup
+        else:
+            payload["labels"] = []
 
     parsed_stix = parse_stix_pattern(payload["pattern"])
     if parsed_stix is None:
@@ -138,6 +166,29 @@ def enrich_generic_payload(splunk_helper, payload, msg_event):
         marking_value = MARKING_DEFs.get(marking_ref_id)
         if marking_value:
             payload["markings"].append(marking_value)
+
+    # --- LABELS ---
+    if "labels" in payload and payload["labels"] is not None:
+        if not isinstance(payload["labels"], list):
+            payload["labels"] = [payload["labels"]]
+    else:
+        extracted_labels = []
+        if "extensions" in payload:
+            for ext in payload["extensions"].values():
+                if "labels" in ext and ext["labels"]:
+                    if isinstance(ext["labels"], list):
+                        extracted_labels.extend(ext["labels"])
+                    else:
+                        extracted_labels.append(ext["labels"])
+                if "x_opencti_labels" in ext and ext["x_opencti_labels"]:
+                    if isinstance(ext["x_opencti_labels"], list):
+                        extracted_labels.extend(ext["x_opencti_labels"])
+                    else:
+                        extracted_labels.append(ext["x_opencti_labels"])
+        if extracted_labels:
+            payload["labels"] = list(set(extracted_labels))
+        else:
+            payload["labels"] = []
 
     if "extensions" in payload:
         for ext in payload["extensions"].values():
