@@ -7,6 +7,9 @@ import six
 import splunklib.client as client
 from filigran_sseclient import SSEClient
 from stix2patterns.v21.pattern import Pattern
+from ta_opencti_for_splunk_enterprise.app_connector_helper import (
+    SplunkAppConnectorHelper,
+)
 
 from ta_opencti_for_splunk_enterprise.constants import (
     VERIFY_SSL,
@@ -33,6 +36,36 @@ SUPPORTED_TYPES = {
 
 MARKING_DEFs = {}
 IDENTITY_DEFs = {}
+
+# Map entity types → KV store collections.
+# For indicators we reuse INDICATORS_KVSTORE_NAME so you can point it at
+# either `opencti_indicators` or `opencti_lookup` via constants.py.
+ENTITY_KVSTORE_MAP = {
+    "indicator": INDICATORS_KVSTORE_NAME,
+    "report": "opencti_reports",
+    "marking-definition": "opencti_markings",
+}
+
+# Identity subtypes (x_opencti_type or identity_class) → KV store
+IDENTITY_KVSTORE_MAP = {
+    # You can expand this later for sectors, individuals, etc.
+    "organization": "opencti_identity",
+    "Organization": "opencti_identity",
+}
+
+
+def get_kvstore_name_for_entity(entity_type, data):
+    """
+    Decide which KV store collection to use based on STIX entity type
+    and, for identities, x_opencti_type / identity_class.
+    """
+    if entity_type == "identity":
+        x_type = data.get("x_opencti_type") or data.get("identity_class")
+        if not x_type:
+            return None
+        return IDENTITY_KVSTORE_MAP.get(x_type)
+
+    return ENTITY_KVSTORE_MAP.get(entity_type)
 
 
 def date_now_z():
@@ -148,7 +181,9 @@ def enrich_payload(splunk_helper, payload, msg_event):
 
     if "external_references" in payload:
         del payload["external_references"]
-
+    # Ensure we always have a _key for KV store operations
+    if "_key" not in payload and "id" in payload:
+        payload["_key"] = sanitize_key(payload["id"])
     return payload
 
 
@@ -199,13 +234,16 @@ def enrich_generic_payload(splunk_helper, payload, msg_event):
                 "creator_ids",
                 "updated_at",
                 "is_inferred",
+                "x_opencti_organization_type",
             ]:
                 if attr in ext:
                     payload["_key" if attr == "id" else attr] = ext[attr]
 
     if "external_references" in payload:
         del payload["external_references"]
-
+    # Ensure we always have a _key for KV store operations
+    if "_key" not in payload and "id" in payload:
+        payload["_key"] = sanitize_key(payload["id"])
     return payload
 
 
@@ -225,10 +263,20 @@ def collect_events(helper, ew):
     opencti_url = helper.get_global_setting("opencti_url")
     opencti_token = helper.get_global_setting("opencti_api_key")
     #
+    # Create Splunk App Connector Helper
+    #
+    connector_helper = SplunkAppConnectorHelper(
+        connector_id="splunk-stream-input",
+        connector_name="Splunk Stream Input",
+        opencti_url=opencti_url,
+        opencti_api_key=opencti_token,
+        splunk_helper=helper,
+    )
+    #
     # Reset Checkpoint
     #
-    helper.delete_check_point(helper.get_input_stanza_names())
-    helper.log_warning("Checkpoint Reset")
+    # helper.delete_check_point(helper.get_input_stanza_names())
+    # helper.log_warning("Checkpoint Reset")
     #
     #
     state = helper.get_check_point(input_name)
@@ -250,21 +298,23 @@ def collect_events(helper, ew):
         live_stream_url += f"?recover={state['recover_until']}"
     helper.log_debug(f"Live stream URL: {live_stream_url}")
 
-    kvstore = None
+    service = None
+    kvstore_handles = {}
+
     helper.log_debug(f"Input Type: {input_type}")
     if input_type == "kvstore":
         try:
-            helper.log_debug("Initializing KV Store")
+            helper.log_debug("Initializing Splunk service for KV Store")
             session_key = helper.context_meta.get("session_key")
             if not session_key:
                 raise ValueError("session_key not found in context_meta")
+
             service = client.connect(
                 token=session_key, app="TA-opencti-for-splunk-enterprise"
             )
-            helper.log_info("Connected to Splunk KV Store")
-            kvstore = service.kvstore[INDICATORS_KVSTORE_NAME].data
+            helper.log_info("Connected to Splunk service for KV Store access")
         except Exception as e:
-            helper.log_error(f"Failed to connect to KV Store: {e}")
+            helper.log_error(f"Failed to connect to Splunk service: {e}")
             return
 
     try:
@@ -280,12 +330,12 @@ def collect_events(helper, ew):
             verify=VERIFY_SSL,
             proxies=proxies,
         )
-
         for msg in messages:
             if msg.event not in ["create", "update", "delete"]:
                 continue
-
+            helper.log_debug(f"Received message ID: {msg.id} | Event: {msg.event}")
             message_payload = json.loads(msg.data)
+            helper.log_debug(f"Message payload: {message_payload}")
             data = message_payload.get("data", {})
             entity_type = data.get("type")
 
@@ -297,9 +347,18 @@ def collect_events(helper, ew):
             parsed_stix = None
             if entity_type == "indicator" and data.get("pattern_type") == "stix":
                 parsed_stix = enrich_payload(helper, data, msg.event)
+                try:
+                    enrich_row = connector_helper.get_indicator_enrichment(data["id"])
+                    if enrich_row:
+                        parsed_stix["attack_patterns"] = enrich_row["attack_patterns"]
+                        parsed_stix["malware"] = enrich_row["malware"]
+                        parsed_stix["threat_actors"] = enrich_row["threat_actors"]
+                except Exception as e:
+                    helper.log_warning(
+                        f"OpenCTI enrichment failed for {data['id']}: {e}"
+                    )
             else:
                 parsed_stix = enrich_generic_payload(helper, data, msg.event)
-
             if parsed_stix is None:
                 helper.log_error(f"Could not enrich data for msg {msg.id}")
                 continue
@@ -308,25 +367,49 @@ def collect_events(helper, ew):
             indicator_value = data.get("value")
             helper.log_info(f"Processing {indicator_value}")
             helper.log_debug(f"{data}")
-            if (
-                input_type == "kvstore"
-                and entity_type == "indicator"
-                and data.get("pattern_type") == "stix"
-            ):
-                try:
-                    if msg.event == "delete":
-                        if exist_in_kvstore(kvstore, key):
-                            kvstore.data.delete_by_id(parsed_stix["_key"])
-                            helper.log_info(f"KV Store: Deleted {key}")
-                    else:
-                        parsed_stix["added_at"] = datetime.now(timezone.utc).strftime(
-                            "%Y-%m-%dT%H:%M:%SZ"
+            if input_type == "kvstore":
+                # Decide which KV collection to use based on entity_type and x_opencti_type
+                kvstore_name = get_kvstore_name_for_entity(entity_type, parsed_stix)
+
+                if not kvstore_name:
+                    helper.log_debug(
+                        f"No KV store mapping for entity_type={entity_type}, "
+                        f"x_opencti_type={parsed_stix.get('x_opencti_type')}"
+                    )
+                else:
+                    try:
+                        # Lazily cache the kvstore.data handle per collection
+                        if kvstore_name not in kvstore_handles:
+                            kvstore_handles[kvstore_name] = service.kvstore[
+                                kvstore_name
+                            ].data
+                            helper.log_info(
+                                f"Initialized KV handle for collection: {kvstore_name}"
+                            )
+
+                        kv = kvstore_handles[kvstore_name]
+                        key_id = parsed_stix.get("_key")
+
+                        if msg.event == "delete":
+                            if key_id and exist_in_kvstore(kv, key_id):
+                                kv.delete_by_id(key_id)
+                                helper.log_info(
+                                    f"KV Store [{kvstore_name}]: Deleted {key_id}"
+                                )
+                        else:
+                            parsed_stix["added_at"] = datetime.now(
+                                timezone.utc
+                            ).strftime("%Y-%m-%dT%H:%M:%SZ")
+                            # Upsert into this KV collection
+                            kv.batch_save(parsed_stix)
+                            helper.log_info(
+                                f"KV Store [{kvstore_name}]: Inserted/Updated {key_id}"
+                            )
+                    except Exception as kv_ex:
+                        helper.log_error(
+                            f"KV Store operation failed for collection={kvstore_name}: {kv_ex}"
                         )
-                        kvstore.batch_save(*[parsed_stix])
-                        helper.log_info(f"KV Store: Inserted {key}")
-                except Exception as kv_ex:
-                    helper.log_error(f"KV Store operation failed: {kv_ex}")
-                    continue
+                        continue
 
             elif input_type == "index":
                 # Set event_time from updated_at, if available and parseable
