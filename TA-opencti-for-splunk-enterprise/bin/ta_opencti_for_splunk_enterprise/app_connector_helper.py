@@ -78,6 +78,10 @@ class SplunkAppConnectorHelper:
                       entity_type
                       name
                     }
+                    ... on Vulnerability {
+                      entity_type
+                      name
+                    }
                     ... on StixCyberObservable {
                       entity_type
                       observable_value
@@ -115,6 +119,7 @@ class SplunkAppConnectorHelper:
             "attack_patterns": _names_by_type("Attack-Pattern"),
             "malware": _names_by_type("Malware"),
             "threat_actors": _names_by_type("Threat-Actor"),
+            "vulnerabilities": _names_by_type("Vulnerability"),
         }
 
     def register(self):

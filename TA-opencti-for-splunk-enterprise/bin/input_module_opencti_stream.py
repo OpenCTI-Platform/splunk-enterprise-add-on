@@ -183,7 +183,7 @@ def enrich_payload(splunk_helper, payload, msg_event):
         del payload["external_references"]
     # Ensure we always have a _key for KV store operations
     if "_key" not in payload and "id" in payload:
-        payload["_key"] = sanitize_key(payload["id"])
+        payload["_key"] = payload["id"]
     return payload
 
 
@@ -243,7 +243,7 @@ def enrich_generic_payload(splunk_helper, payload, msg_event):
         del payload["external_references"]
     # Ensure we always have a _key for KV store operations
     if "_key" not in payload and "id" in payload:
-        payload["_key"] = sanitize_key(payload["id"])
+        payload["_key"] = payload["id"]
     return payload
 
 
@@ -302,20 +302,19 @@ def collect_events(helper, ew):
     kvstore_handles = {}
 
     helper.log_debug(f"Input Type: {input_type}")
-    if input_type == "kvstore":
-        try:
-            helper.log_debug("Initializing Splunk service for KV Store")
-            session_key = helper.context_meta.get("session_key")
-            if not session_key:
-                raise ValueError("session_key not found in context_meta")
+    try:
+        helper.log_debug("Initializing Splunk service for KV Store")
+        session_key = helper.context_meta.get("session_key")
+        if not session_key:
+            raise ValueError("session_key not found in context_meta")
 
-            service = client.connect(
-                token=session_key, app="TA-opencti-for-splunk-enterprise"
-            )
-            helper.log_info("Connected to Splunk service for KV Store access")
-        except Exception as e:
-            helper.log_error(f"Failed to connect to Splunk service: {e}")
-            return
+        service = client.connect(
+            token=session_key, app="TA-opencti-for-splunk-enterprise"
+        )
+        helper.log_info("Connected to Splunk service for KV Store access")
+    except Exception as e:
+        helper.log_error(f"Failed to connect to Splunk service: {e}")
+        return
 
     try:
         messages = SSEClient(
@@ -353,6 +352,7 @@ def collect_events(helper, ew):
                         parsed_stix["attack_patterns"] = enrich_row["attack_patterns"]
                         parsed_stix["malware"] = enrich_row["malware"]
                         parsed_stix["threat_actors"] = enrich_row["threat_actors"]
+                        parsed_stix["vulnerabilities"] = enrich_row["vulnerabilities"]
                 except Exception as e:
                     helper.log_warning(
                         f"OpenCTI enrichment failed for {data['id']}: {e}"
@@ -363,9 +363,11 @@ def collect_events(helper, ew):
                 helper.log_error(f"Could not enrich data for msg {msg.id}")
                 continue
 
-            key = sanitize_key(data.get("id", parsed_stix.get("_key", msg.id)))
-            indicator_value = data.get("value")
-            helper.log_info(f"Processing {indicator_value}")
+            key = parsed_stix.get("_key") or data.get("id") or msg.id
+            indicator_value = parsed_stix.get("value") or data.get("value")
+            helper.log_info(
+                f"[Indicator {parsed_stix.get('_key')}] Processing value={indicator_value} event={msg.event}"
+            )
             helper.log_debug(f"{data}")
             if input_type == "kvstore":
                 # Decide which KV collection to use based on entity_type and x_opencti_type
@@ -401,7 +403,7 @@ def collect_events(helper, ew):
                                 timezone.utc
                             ).strftime("%Y-%m-%dT%H:%M:%SZ")
                             # Upsert into this KV collection
-                            kv.batch_save(parsed_stix)
+                            kv.batch_save([parsed_stix])
                             helper.log_info(
                                 f"KV Store [{kvstore_name}]: Inserted/Updated {key_id}"
                             )
@@ -412,7 +414,36 @@ def collect_events(helper, ew):
                         continue
 
             elif input_type == "index":
-                # Set event_time from updated_at, if available and parseable
+                # If this is an indicator delete event, also purge it from the indicator KV
+                if entity_type == "indicator" and msg.event == "delete":
+                    try:
+                        # Lazily init the indicators KV handle via kvstore_handles
+                        if INDICATORS_KVSTORE_NAME not in kvstore_handles:
+                            kvstore_handles[INDICATORS_KVSTORE_NAME] = service.kvstore[
+                                INDICATORS_KVSTORE_NAME
+                            ].data
+                            helper.log_info(
+                                f"Initialized KV handle for collection: {INDICATORS_KVSTORE_NAME}"
+                            )
+
+                        kv_indicators = kvstore_handles[INDICATORS_KVSTORE_NAME]
+                        key_id = parsed_stix.get("id")
+
+                        if key_id and exist_in_kvstore(kv_indicators, key_id):
+                            kv_indicators.delete_by_id(key_id)
+                            helper.log_info(
+                                f"KV Store [{INDICATORS_KVSTORE_NAME}]: Deleted {key_id} on delete event"
+                            )
+                        else:
+                            helper.log_debug(
+                                f"No existing KV entry for {key_id} in [{INDICATORS_KVSTORE_NAME}]"
+                            )
+                    except Exception as e:
+                        helper.log_warning(
+                            f"Failed to delete indicator from KV store [{INDICATORS_KVSTORE_NAME}]: {e}"
+                        )
+
+                # Always write the event to the index (create/update/delete)
                 event_time = parsed_stix.get("updated_at")
                 if event_time:
                     try:
@@ -424,6 +455,7 @@ def collect_events(helper, ew):
                             f"Unable to parse updated_at timestamp: {event_time}"
                         )
                         event_time = None
+
                 ew.write_event(
                     helper.new_event(
                         json.dumps(parsed_stix),
