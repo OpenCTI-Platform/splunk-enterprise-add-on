@@ -13,3 +13,5 @@ output
 .idea/
 
 venv/
+
+.DS_Store
