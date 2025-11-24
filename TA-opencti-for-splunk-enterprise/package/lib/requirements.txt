@@ -1,0 +1,6 @@
+splunktaucclib
+splunk-sdk
+solnlib
+filigran-sseclient
+stix2
+six
