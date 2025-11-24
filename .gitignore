@@ -1,0 +1,9 @@
+/**/.idea/*
+__pycache__/
+
+# Splunk local meta file
+local.meta
+
+# Splunk local folder
+local
+.DS_Store

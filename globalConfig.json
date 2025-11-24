@@ -1,0 +1,9 @@
+{
+    "meta": {
+        "name": "TA-opencti-for-splunk-enterprise",
+        "restRoot": "TA-opencti-for-splunk-enterprise",
+        "displayName": "OpenCTI for Splunk Enterprise",
+        "version": "1.0.0",
+        "schemaVersion": "0.0.10"
+    }
+}

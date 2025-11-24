@@ -1,0 +1,11 @@
+
+[]
+access = read : [ * ], write : [ admin ]
+export = system
+
+[views]
+access = read : [ * ], write : [ admin ]
+export = none
+
+[TA_opencti_for_splunk_enterprise_settings]
+export = system

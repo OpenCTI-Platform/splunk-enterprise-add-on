@@ -1,0 +1,364 @@
+{
+  "meta": {
+    "name": "TA-opencti-for-splunk-enterprise",
+    "displayName": "OpenCTI for Splunk Enterprise",
+    "version": "0.0.0+b646b46",
+    "restRoot": "TA_opencti_for_splunk_enterprise",
+    "schemaVersion": "0.0.9",
+    "_uccVersion": "5.69.1"
+  },
+  "pages": {
+    "configuration": {
+      "title": "Configuration",
+      "description": "Set up your add-on",
+      "tabs": [
+        {
+          "name": "proxy",
+          "title": "Proxy",
+          "entity": [
+            {
+              "field": "proxy_enabled",
+              "label": "Enable",
+              "type": "checkbox"
+            },
+            {
+              "field": "proxy_type",
+              "label": "Proxy Type",
+              "type": "singleSelect",
+              "options": {
+                "disableSearch": true,
+                "autoCompleteFields": [
+                  {
+                    "label": "http",
+                    "value": "http"
+                  },
+                  {
+                    "label": "socks4",
+                    "value": "socks4"
+                  },
+                  {
+                    "label": "socks5",
+                    "value": "socks5"
+                  }
+                ]
+              },
+              "defaultValue": "http"
+            },
+            {
+              "field": "proxy_url",
+              "label": "Host",
+              "type": "text",
+              "validators": [
+                {
+                  "type": "string",
+                  "minLength": 0,
+                  "maxLength": 4096,
+                  "errorMsg": "Max host length is 4096"
+                }
+              ]
+            },
+            {
+              "field": "proxy_port",
+              "label": "Port",
+              "type": "text",
+              "validators": [
+                {
+                  "type": "number",
+                  "range": [1, 65535]
+                }
+              ]
+            },
+            {
+              "field": "proxy_username",
+              "label": "Username",
+              "type": "text",
+              "validators": [
+                {
+                  "type": "string",
+                  "minLength": 0,
+                  "maxLength": 50,
+                  "errorMsg": "Max length of username is 50"
+                }
+              ]
+            },
+            {
+              "field": "proxy_password",
+              "label": "Password",
+              "type": "text",
+              "encrypted": true,
+              "validators": [
+                {
+                  "type": "string",
+                  "minLength": 0,
+                  "maxLength": 8192,
+                  "errorMsg": "Max length of password is 8192"
+                }
+              ]
+            },
+            {
+              "field": "proxy_rdns",
+              "label": "Remote DNS resolution",
+              "type": "checkbox"
+            }
+          ],
+          "options": {
+            "saveValidator": "function(formData) { if(!formData.proxy_enabled || formData.proxy_enabled === '0') {return true; } if(!formData.proxy_url) { return 'Proxy Host can not be empty'; } if(!formData.proxy_port) { return 'Proxy Port can not be empty'; } return true; }"
+          }
+        },
+        {
+          "name": "logging",
+          "title": "Logging",
+          "entity": [
+            {
+              "type": "singleSelect",
+              "label": "Log level",
+              "options": {
+                "disableSearch": true,
+                "autoCompleteFields": [
+                  {
+                    "value": "DEBUG",
+                    "label": "DEBUG"
+                  },
+                  {
+                    "value": "INFO",
+                    "label": "INFO"
+                  },
+                  {
+                    "value": "WARNING",
+                    "label": "WARNING"
+                  },
+                  {
+                    "value": "ERROR",
+                    "label": "ERROR"
+                  },
+                  {
+                    "value": "CRITICAL",
+                    "label": "CRITICAL"
+                  }
+                ]
+              },
+              "defaultValue": "INFO",
+              "field": "loglevel",
+              "required": true,
+              "validators": [
+                {
+                  "type": "regex",
+                  "errorMsg": "Log level must be one of: DEBUG, INFO, WARNING, ERROR, CRITICAL",
+                  "pattern": "^DEBUG|INFO|WARNING|ERROR|CRITICAL$"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "additional_parameters",
+          "title": "Add-on Settings",
+          "entity": [
+            {
+              "field": "opencti_url",
+              "label": "OpenCTI URL",
+              "type": "text",
+              "help": "Enter the full URL of your OpenCTI platform (e.g., https://opencti.yourdomain.com). This is used to connect and pull threat intelligence data.",
+              "required": false,
+              "defaultValue": "",
+              "validators": [
+                {
+                  "type": "string",
+                  "minLength": 0,
+                  "maxLength": 8192,
+                  "errorMsg": "Max length of text input is 8192"
+                }
+              ]
+            },
+            {
+              "field": "opencti_api_key",
+              "label": "OpenCTI API Key",
+              "type": "text",
+              "help": "Enter your OpenCTI API token. This is used to authenticate and access the OpenCTI platform.",
+              "required": false,
+              "defaultValue": "",
+              "encrypted": true,
+              "validators": [
+                {
+                  "type": "string",
+                  "minLength": 0,
+                  "maxLength": 8192,
+                  "errorMsg": "Max length of password is 8192"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "inputs": {
+      "title": "Inputs",
+      "description": "Manage your data inputs",
+      "table": {
+        "header": [
+          {
+            "field": "name",
+            "label": "Name"
+          },
+          {
+            "field": "interval",
+            "label": "Interval"
+          },
+          {
+            "field": "index",
+            "label": "Index"
+          },
+          {
+            "field": "disabled",
+            "label": "Status"
+          }
+        ],
+        "moreInfo": [
+          {
+            "field": "name",
+            "label": "Name"
+          },
+          {
+            "field": "interval",
+            "label": "Interval"
+          },
+          {
+            "field": "index",
+            "label": "Index"
+          },
+          {
+            "field": "disabled",
+            "label": "Status"
+          },
+          {
+            "field": "stream_id",
+            "label": "Stream ID"
+          },
+          {
+            "field": "import_from",
+            "label": "Import From (Days)"
+          },
+          {
+            "field": "input_type",
+            "label": "Input Type"
+          }
+        ],
+        "actions": ["edit", "delete", "clone"]
+      },
+      "services": [
+        {
+          "name": "opencti_stream",
+          "title": "OpenCTI Stream",
+          "entity": [
+            {
+              "field": "name",
+              "label": "Name",
+              "type": "text",
+              "help": "Enter a unique name for the data input",
+              "required": true,
+              "validators": [
+                {
+                  "type": "regex",
+                  "pattern": "^[a-zA-Z]\\w*$",
+                  "errorMsg": "Input Name must start with a letter and followed by alphabetic letters, digits or underscores."
+                },
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100,
+                  "errorMsg": "Length of input name should be between 1 and 100"
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "field": "interval",
+              "label": "Interval",
+              "validators": [
+                {
+                  "type": "regex",
+                  "errorMsg": "Interval must be either a non-negative number, CRON interval or -1.",
+                  "pattern": "^((?:-1|\\d+(?:\\.\\d+)?)|(([\\*\\d{1,2}\\,\\-\\/]+\\s){4}[\\*\\d{1,2}\\,\\-\\/]+))$"
+                }
+              ],
+              "help": "Time interval of input in seconds.",
+              "required": true
+            },
+            {
+              "field": "index",
+              "label": "Index",
+              "type": "singleSelect",
+              "defaultValue": "default",
+              "options": {
+                "endpointUrl": "data/indexes",
+                "denyList": "^_.*$",
+                "createSearchChoice": true
+              },
+              "required": true,
+              "validators": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80,
+                  "errorMsg": "Length of index name should be between 1 and 80."
+                }
+              ]
+            },
+            {
+              "field": "stream_id",
+              "label": "Stream ID",
+              "help": "OpenCTI Stream Id to consume",
+              "required": false,
+              "type": "text",
+              "validators": [
+                {
+                  "type": "string",
+                  "minLength": 0,
+                  "maxLength": 8192,
+                  "errorMsg": "Max length of text input is 8192"
+                }
+              ]
+            },
+            {
+              "field": "import_from",
+              "label": "Import From (Days)",
+              "help": "The number of days to go back for the initial data collection. The start date is calculated on the basis of the current UTC time.",
+              "required": false,
+              "type": "text",
+              "defaultValue": "30",
+              "validators": [
+                {
+                  "type": "string",
+                  "minLength": 0,
+                  "maxLength": 8192,
+                  "errorMsg": "Max length of text input is 8192"
+                }
+              ]
+            },
+            {
+              "field": "input_type",
+              "label": "Input Type",
+              "help": "Choose where to store the data.\n\t•\tKV Store keeps structured data for lookups.\n\t•\tIndex saves events for searching and alerting.",
+              "required": false,
+              "type": "singleSelect",
+              "defaultValue": "kvstore",
+              "options": {
+                "disableSearch": true,
+                "autoCompleteFields": [
+                  {
+                    "value": "kvstore",
+                    "label": "KV Store"
+                  },
+                  {
+                    "value": "index",
+                    "label": "Index"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
