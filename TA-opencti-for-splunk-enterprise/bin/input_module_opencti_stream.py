@@ -158,11 +158,21 @@ def enrich_payload(splunk_helper, payload, msg_event):
         else:
             payload["labels"] = []
 
-    parsed_stix = parse_stix_pattern(payload["pattern"])
-    if parsed_stix is None:
-        return None
-    payload["type"] = parsed_stix["type"]
-    payload["value"] = parsed_stix["value"]
+    pattern = payload.get("pattern")
+    if pattern:
+        parsed_stix = parse_stix_pattern(pattern)
+        if parsed_stix:
+            payload["type"] = parsed_stix["type"]
+            payload["value"] = parsed_stix["value"]
+        else:
+            # Don't drop the event; just log that we couldn't extract type/value
+            splunk_helper.log_warning(
+                f"Could not parse STIX pattern for indicator {payload.get('id')}: {pattern}"
+            )
+    else:
+        splunk_helper.log_warning(
+            f"Indicator {payload.get('id')} has no pattern field; skipping type/value extraction"
+        )
 
     if "extensions" in payload:
         for ext in payload["extensions"].values():
@@ -181,9 +191,11 @@ def enrich_payload(splunk_helper, payload, msg_event):
 
     if "external_references" in payload:
         del payload["external_references"]
+
     # Ensure we always have a _key for KV store operations
     if "_key" not in payload and "id" in payload:
         payload["_key"] = payload["id"]
+
     return payload
 
 
