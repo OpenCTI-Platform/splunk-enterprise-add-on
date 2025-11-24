@@ -227,7 +227,7 @@
     "alerts": [
         {
             "name": "opencti_create_incident_response",
-            "label": "NEW OpenCTI - Create Incident Response",
+            "label": "OpenCTI - Create Incident Response",
             "description": "Create an Incident Response case in OpenCTI",
             "iconFileName": "alert_icon.png",
             "customScript": "alert_create_incident_response_helper",
@@ -372,7 +372,7 @@
         },
         {
             "name": "opencti_create_incident",
-            "label": "NEW OpenCTI - Create Incident",
+            "label": "OpenCTI - Create Incident",
             "description": "Create an Incident in OpenCTI",
             "iconFileName": "alert_icon.png",
             "customScript": "alert_create_incident_helper",
@@ -489,7 +489,7 @@
         },
         {
             "name": "opencti_create_sighting",
-            "label": "NEW OpenCTI - Create Sighting",
+            "label": "OpenCTI - Create Sighting",
             "description": "Create a Sighting in OpenCTI",
             "iconFileName": "alert_icon.png",
             "customScript": "alert_create_sighting_helper",
@@ -597,9 +597,10 @@
     "meta": {
         "name": "TA-opencti-for-splunk-enterprise",
         "restRoot": "TA-opencti-for-splunk-enterprise",
-        "version": "1.0.0",
+        "version": "0.0.0+30f8766",
         "displayName": "OpenCTI for Splunk Enterprise",
         "schemaVersion": "0.0.10",
+        "hideUCCVersion" : true,
         "supportedThemes": [
             "light",
             "dark"

@@ -17,10 +17,8 @@
         "releaseDate": null,
         "description": "OpenCTI for Splunk Enterprise",
         "classification": {
-            "intendedAudience": "IT Professionals",
-            "categories": [
-                "Security, Fraud & Compliance"
-            ],
+            "intendedAudience": "",
+            "categories": [],
             "developmentStatus": "Production/Stable"
         },
         "commonInformationModels": null,
@@ -46,9 +44,7 @@
     "incompatibleApps": null,
     "platformRequirements": null,
     "supportedDeployments": [
-        "_standalone",
-        "_distributed",
-        "_search_head_clustering"
+        "*"
     ],
     "targetWorkloads": [
         "_search_heads",
