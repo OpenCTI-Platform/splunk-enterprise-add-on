@@ -48,6 +48,7 @@ jobs:
           username: ${{ secrets.SPL_COM_USER }}
           password: ${{ secrets.SPL_COM_PASSWORD }}
           app_path: app-dir/
+          included_tags: "cloud,self-service"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
