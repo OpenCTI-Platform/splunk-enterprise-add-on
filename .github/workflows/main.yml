@@ -17,16 +17,15 @@ jobs:
       - name: Install UCC
         run: |
           pip install splunk-add-on-ucc-framework
-          pip install splunk-packaging-toolkit
 
       - name: Build an app using UCC
-        run: ucc-gen build --source TA-opencti-add-on
+        run: ucc-gen build --source TA-opencti-for-splunk-enterprise/package
 
       - name: Create tmp folder
         run: mkdir app-dir
 
       - name: Create package
-        run: ucc-gen package --path output/TA-opencti-add-on -o app-dir/
+        run: ucc-gen package --path output/TA-opencti-for-splunk-enterprise -o app-dir/
 
       - name: Upload package
         uses: actions/upload-artifact@v4
