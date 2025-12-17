@@ -12,6 +12,9 @@ from app_connector_helper import SplunkAppConnectorHelper
 from constants import (
     VERIFY_SSL,
     INDICATORS_KVSTORE_NAME,
+    REPORTS_KVSTORE_NAME,
+    MARKINGS_KVSTORE_NAME,
+    ADDON_NAME
 )
 from filigran_sseclient import SSEClient
 from stix2patterns.v21.pattern import Pattern
@@ -19,8 +22,6 @@ import six
 from datetime import datetime, timedelta, timezone
 import sys
 
-
-ADDON_NAME = "TA-opencti-for-splunk-enterprise"
 
 MARKING_DEFs = {}
 IDENTITY_DEFs = {}
@@ -55,8 +56,8 @@ IDENTITY_KVSTORE_MAP = {
 # either `opencti_indicators` or `opencti_lookup` via constants.py.
 ENTITY_KVSTORE_MAP = {
     "indicator": INDICATORS_KVSTORE_NAME,
-    "report": "opencti_reports",
-    "marking-definition": "opencti_markings",
+    "report": REPORTS_KVSTORE_NAME,
+    "marking-definition": MARKINGS_KVSTORE_NAME,
 }
 
 
@@ -74,20 +75,6 @@ def get_account_api_key(session_key: str, account_name: str):
 
     account_conf_file = cfm.get_conf("ta-opencti-for-splunk-enterprise_account")
     return account_conf_file.get(account_name).get("api_key")
-
-
-def get_data_from_api(logger: logging.Logger, api_key: str):
-    logger.info("Getting data from an external API")
-    dummy_data = [
-        {
-            "line1": "hello",
-        },
-        {
-            "line2": "world",
-        },
-    ]
-    return dummy_data
-
 
 def validate_input(definition: smi.ValidationDefinition):
     return
@@ -332,7 +319,6 @@ def stream_events(inputs: smi.InputDefinition, event_writer: smi.EventWriter):
             )
             logger.info(f"Proxies configuration: {proxies}")
 
-
             #
             # Create Splunk App Connector Helper
             #
@@ -343,13 +329,6 @@ def stream_events(inputs: smi.InputDefinition, event_writer: smi.EventWriter):
                 opencti_api_key=opencti_api_key,
                 proxies=proxies,
             )
-            #
-            # Reset Checkpoint
-            #
-            # helper.delete_check_point(helper.get_input_stanza_names())
-            # helper.log_warning("Checkpoint Reset")
-            #
-            #
 
             kvstore_checkpointer = checkpointer.KVStoreCheckpointer(
                 ADDON_NAME+"_checkpoints",
@@ -549,32 +528,11 @@ def stream_events(inputs: smi.InputDefinition, event_writer: smi.EventWriter):
 
                     state["start_from"] = msg.id
                     kvstore_checkpointer.update(input_name, json.dumps(state))
-                    #helper.save_check_point(input_name, json.dumps(state))
 
             except Exception as ex:
                 logger.error(f"Error in stream processing loop: {ex}")
                 sys.excepthook(*sys.exc_info())
 
-
-            """
-            for line in data:
-                event_writer.write_event(
-                    smi.Event(
-                        data=json.dumps(line, ensure_ascii=False, default=str),
-                        index=input_item.get("index"),
-                        sourcetype=sourcetype,
-                    )
-                )
-            log.events_ingested(
-                logger,
-                input_name,
-                sourcetype,
-                len(data),
-                input_item.get("index"),
-                account=input_item.get("account"),
-            )
-            log.modular_input_end(logger, normalized_input_name)
-        """
         except Exception as e:
-            log.log_exception(logger, e, "my custom error type", msg_before="Exception raised while ingesting data for demo_input: ")
+            log.log_exception(logger, e, "my custom error type", msg_before="Exception raised while ingesting data")
 
