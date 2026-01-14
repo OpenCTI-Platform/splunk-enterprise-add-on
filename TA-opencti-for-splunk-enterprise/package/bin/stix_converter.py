@@ -1,5 +1,5 @@
 import stix2
-from datetime import datetime
+from datetime import datetime, timezone
 
 from stix_constants import CustomObservableUserAgent, CustomObservableText, CustomObjectCaseIncident
 from utils import get_hash_type, is_ipv6, is_ipv4
@@ -16,7 +16,6 @@ def _get_stix_marking_id(value):
         return stix2.TLP_AMBER
     if value == "tlp_red":
         return stix2.TLP_RED
-
 
 
 def _extract_observables_from_cim_model(event, marking, creator):
@@ -269,7 +268,10 @@ def convert_to_incident_response(alert_params, event):
     bundle_objects = []
 
     # event date
-    event_date = datetime.utcfromtimestamp(float(event.get("_time")))
+    if "_time" in event and event.get("_time"):
+        event_date = datetime.fromtimestamp(float(event.get("_time")), timezone.utc)
+    else:
+        event_date = datetime.now(timezone.utc)
 
     # manage marking
     marking = alert_params.get("tlp")
@@ -333,7 +335,10 @@ def convert_to_incident(alert_params, event):
     bundle_objects = []
 
     # event date
-    event_date = datetime.utcfromtimestamp(float(event.get("_time")))
+    if "_time" in event and event.get("_time"):
+        event_date = datetime.fromtimestamp(float(event.get("_time")), timezone.utc)
+    else:
+        event_date = datetime.now(timezone.utc)
 
     # manage marking
     marking = alert_params.get("tlp")
@@ -401,6 +406,7 @@ def convert_to_incident(alert_params, event):
     bundle = stix2.Bundle(objects=bundle_objects, allow_custom=True)
     return bundle.serialize()
 
+
 def convert_to_sighting(alert_params, event):
     """
     :param alert_params:
@@ -410,7 +416,10 @@ def convert_to_sighting(alert_params, event):
     bundle_objects = []
 
     # event date
-    event_date = datetime.utcfromtimestamp(float(event.get("_time")))
+    if "_time" in event and event.get("_time"):
+        event_date = datetime.fromtimestamp(float(event.get("_time")), timezone.utc)
+    else:
+        event_date = datetime.now(timezone.utc)
 
     # manage marking
     marking = alert_params.get("tlp")
