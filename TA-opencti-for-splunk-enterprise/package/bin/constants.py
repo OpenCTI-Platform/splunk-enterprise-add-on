@@ -5,3 +5,4 @@ VERIFY_SSL = True  # SSL verification by default
 INDICATORS_KVSTORE_NAME = "opencti_indicators"
 REPORTS_KVSTORE_NAME = "opencti_reports"
 MARKINGS_KVSTORE_NAME = "opencti_markings"
+IDENTITIES_KVSTORE_NAME = "opencti_identities"

@@ -14,7 +14,8 @@ from constants import (
     INDICATORS_KVSTORE_NAME,
     REPORTS_KVSTORE_NAME,
     MARKINGS_KVSTORE_NAME,
-    ADDON_NAME
+    IDENTITIES_KVSTORE_NAME,
+    ADDON_NAME,
 )
 from filigran_sseclient import SSEClient
 from stix2patterns.v21.pattern import Pattern
@@ -46,9 +47,7 @@ SUPPORTED_TYPES = {
 
 # Identity subtypes (x_opencti_type or identity_class) → KV store
 IDENTITY_KVSTORE_MAP = {
-    # You can expand this later for sectors, individuals, etc.
-    "organization": "opencti_identity",
-    "Organization": "opencti_identity",
+    "organization": IDENTITIES_KVSTORE_NAME
 }
 
 # Map entity types → KV store collections.
