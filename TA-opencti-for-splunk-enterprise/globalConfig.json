@@ -219,9 +219,12 @@
         "dashboard": {
             "panels": [
                 {
-                    "name": "default"
+                    "name": "custom"
                 }
-            ]
+            ],
+            "settings": {
+                "custom_tab_name": "My custom tab name"
+            }
         }
     },
     "alerts": [
@@ -597,10 +600,10 @@
     "meta": {
         "name": "TA-opencti-for-splunk-enterprise",
         "restRoot": "TA-opencti-for-splunk-enterprise",
-        "version": "0.0.0+30f8766",
+        "version": "1.0.0",
         "displayName": "OpenCTI for Splunk Enterprise",
         "schemaVersion": "0.0.10",
-        "hideUCCVersion" : true,
+        "hideUCCVersion": true,
         "supportedThemes": [
             "light",
             "dark"
