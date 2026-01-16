@@ -88,7 +88,7 @@ When configuring a modular input, you have two options for storing intelligence 
 
 ### KV Store Data Inputs configuration
 
-Proceed as follows to enable the ingestion of data:
+Proceed as follows to enable the ingestion of data in pre-defined KV Store:
 
 1. From the "OpenCTI for Splunk Enterprise Add-on" sub menus, select the "Inputs" sub menu.
 2. Click on "Create new input" button.
@@ -129,42 +129,36 @@ You can also consult the "Monitoring Dashboard" which gives you an overview of i
 
 The ingestion process can also be monitored by consulting the log file ```ta-opencti-for-splunk-enterprise_{DATA_INPUT_NAME}.log``` present in the directory ```$SPLUNK_HOME/var/log/splunk/```
 
+### Index Data Inputs configuration
 
-### Splunk Index Data Inputs configuration
+Proceed as follows to enable the ingestion of data in a Splunk index.
 
-Indicators are stored in a dedicated kvstore named “opencti_indicators”.
-A default lookup definition named "opencti_lookup" is also implemented to facilitate indicator management.
+1. From the "OpenCTI for Splunk Enterprise Add-on" sub menus, select the "Inputs" sub menu.
+2. Click on "Create new input" button.
+3. Complete the form with the following settings:
 
-## Configuration
+| Parameter     | Description                                                                                                    |
+|---------------|----------------------------------------------------------------------------------------------------------------|
+| `Name`        | Unique name for the input being configured                                                                     |
+| `Interval`    | Time interval of input in seconds. Leave as default (0) to allow continuous execution of the ingestion process |
+| `Index`       | Select the Splunk Index to feed                                                                                |
+| `Stream Id`   | The Live Stream ID of the OpenCTI stream to consume                                                            |
+| `Import from` | The number of days to go back for the initial data collection (default: 30) (optional)                         |
+| `Input Type`  | Select Index entry                                                                                             |
 
-| Setting                   | Description                                             |
-|---------------------------| ------------------------------------------------------- |
-| **API URL**               | Base URL of your OpenCTI instance.                      |
-| **API Token**             | Access token used for authentication.                   |
-| **Collection Interval**   | Frequency (in seconds) at which data is collected.      |
-| **Object Types**          | Comma-separated list of OpenCTI entity types to ingest. |
+4. Once the Input parameters have been correctly configured click "Add".
 
+![](./.github/img/input_config_index.png "Index Input Configuration")
 
+5. Validate the newly created Input and ensure it's set to "Enabled".
 
----
+As soon as the input is created, the ingestion of data begins.
 
-## Index Configuration
+You can monitor the import of indicators using the following Splunk SPL query that list all data ingested in the selected Index.
 
-If you plan to store OpenCTI data in a dedicated index, define one manually.
-
-### For on-prem installs
-
-Create the following stanza in `default/indexes.conf` or your deployment tooling:
-
-```ini
-[opencti]
-homePath   = $SPLUNK_DB/opencti/db
-coldPath   = $SPLUNK_DB/opencti/colddb
-thawedPath = $SPLUNK_DB/opencti/thaweddb
-# frozenTimePeriodInSecs = 15552000   # optional retention (180 days)
 ```
-
----
+index="opencti_data" source="opencti" sourcetype="opencti:indicator"
+```
 
 ## Splunk Enterprise Security Integration
 
