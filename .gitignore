@@ -1,0 +1,17 @@
+/**/.idea/*
+__pycache__/
+
+# Splunk local meta file
+local.meta
+
+# Splunk local folder
+local
+
+# Splunk output package
+output
+
+.idea/
+
+venv/
+
+.DS_Store

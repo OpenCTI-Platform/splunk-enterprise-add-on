@@ -1,0 +1,53 @@
+{
+    "schemaVersion": "2.0.0",
+    "info": {
+        "title": "OpenCTI for Splunk Enterprise",
+        "id": {
+            "group": null,
+            "name": "TA-opencti-for-splunk-enterprise",
+            "version": "1.0.0"
+        },
+        "author": [
+            {
+                "name": "Filigran",
+                "email": "contact@filigran.io",
+                "company": "Filigran"
+            }
+        ],
+        "releaseDate": null,
+        "description": "OpenCTI for Splunk Enterprise",
+        "classification": {
+            "intendedAudience": "",
+            "categories": [],
+            "developmentStatus": "Production/Stable"
+        },
+        "commonInformationModels": null,
+        "license": {
+            "name": "LICENSE.txt",
+            "text": "./LICENSES/LICENSE.txt",
+            "uri": null
+        },
+        "privacyPolicy": {
+            "name": null,
+            "text": null,
+            "uri": null
+        },
+        "releaseNotes": {
+            "name": "README",
+            "text": "README.txt",
+            "uri": ""
+        }
+    },
+    "dependencies": null,
+    "tasks": null,
+    "inputGroups": null,
+    "incompatibleApps": null,
+    "platformRequirements": null,
+    "supportedDeployments": [
+        "*"
+    ],
+    "targetWorkloads": [
+        "_search_heads",
+        "_indexers"
+    ]
+}

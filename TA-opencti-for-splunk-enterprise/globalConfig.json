@@ -1,0 +1,612 @@
+{
+    "pages": {
+        "configuration": {
+            "tabs": [
+                {
+                    "name": "account",
+                    "title": "Account",
+                    "entity": [
+                        {
+                            "type": "text",
+                            "label": "OpenCTI URL",
+                            "validators": [
+                                {
+                                    "type": "string",
+                                    "errorMsg": "Max length of text input is 8192",
+                                    "minLength": 0,
+                                    "maxLength": 8192
+                                }
+                            ],
+                            "field": "opencti_url",
+                            "help": "OpenCTI URL",
+                            "required": true
+                        },
+                        {
+                            "type": "text",
+                            "label": "OpenCTI API Key",
+                            "field": "opencti_api_key",
+                            "help": "OpenCTI API Key",
+                            "required": true,
+                            "encrypted": true,
+                            "validators": [
+                                {
+                                    "type": "string",
+                                    "errorMsg": "Max length of password is 8192",
+                                    "minLength": 0,
+                                    "maxLength": 8192
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "type": "proxyTab",
+                    "proxy_type": true,
+                    "username": true,
+                    "password": true,
+                    "dns_resolution": true
+                },
+                {
+                    "type": "loggingTab"
+                }
+            ],
+            "title": "Configuration",
+            "description": "Set up your add-on"
+        },
+        "inputs": {
+            "services": [
+                {
+                    "name": "opencti_stream",
+                    "entity": [
+                        {
+                            "type": "text",
+                            "label": "Name",
+                            "validators": [
+                                {
+                                    "type": "regex",
+                                    "errorMsg": "Input Name must begin with a letter and consist exclusively of alphanumeric characters and underscores.",
+                                    "pattern": "^[a-zA-Z]\\w*$"
+                                },
+                                {
+                                    "type": "string",
+                                    "errorMsg": "Length of input name should be between 1 and 100",
+                                    "minLength": 1,
+                                    "maxLength": 100
+                                }
+                            ],
+                            "field": "name",
+                            "help": "A unique name for the data input.",
+                            "required": true
+                        },
+                        {
+                            "type": "interval",
+                            "label": "Interval",
+                            "defaultValue": "0",
+                            "field": "interval",
+                            "options": {
+                                "range": [
+                                    0,
+                                    301
+                                ]
+                            },
+                            "help": "Time interval of the data input, in seconds.",
+                            "required": true
+                        },
+                        {
+                            "type": "index",
+                            "field": "index",
+                            "label": "Index"
+                        },
+                        {
+                            "field": "stream_id",
+                            "label": "Stream ID",
+                            "help": "OpenCTI Stream Id to consume",
+                            "required": false,
+                            "type": "text",
+                            "validators": [
+                                {
+                                    "type": "string",
+                                    "minLength": 0,
+                                    "maxLength": 8192,
+                                    "errorMsg": "Max length of text input is 8192"
+                                }
+                            ]
+                        },
+                        {
+                            "field": "import_from",
+                            "label": "Import From (Days)",
+                            "help": "The number of days to go back for the initial data collection. The start date is calculated on the basis of the current UTC time.",
+                            "required": false,
+                            "type": "text",
+                            "defaultValue": "30",
+                            "validators": [
+                                {
+                                    "type": "string",
+                                    "minLength": 0,
+                                    "maxLength": 8192,
+                                    "errorMsg": "Max length of text input is 8192"
+                                }
+                            ]
+                        },
+                        {
+                            "field": "input_type",
+                            "label": "Input Type",
+                            "help": "Choose where to store the data.\n\t•\tKV Store keeps structured data for lookups.\n\t•\tIndex saves events for searching and alerting.",
+                            "required": false,
+                            "type": "singleSelect",
+                            "defaultValue": "kvstore",
+                            "options": {
+                                "disableSearch": true,
+                                "autoCompleteFields": [
+                                    {
+                                        "value": "kvstore",
+                                        "label": "KV Store"
+                                    },
+                                    {
+                                        "value": "index",
+                                        "label": "Index"
+                                    }
+                                ]
+                            }
+                        }
+                    ],
+                    "inputHelperModule": "opencti_stream_helper",
+                    "title": "OpenCTI Stream"
+                }
+            ],
+            "title": "Inputs",
+            "description": "Manage your data inputs",
+            "table": {
+                "actions": [
+                    "edit",
+                    "delete",
+                    "clone"
+                ],
+                "header": [
+                    {
+                        "label": "Name",
+                        "field": "name"
+                    },
+                    {
+                        "label": "Interval",
+                        "field": "interval"
+                    },
+                    {
+                        "label": "Index",
+                        "field": "index"
+                    },
+                    {
+                        "label": "Status",
+                        "field": "disabled"
+                    }
+                ],
+                "moreInfo": [
+                    {
+                        "label": "Name",
+                        "field": "name"
+                    },
+                    {
+                        "label": "Interval",
+                        "field": "interval"
+                    },
+                    {
+                        "label": "Index",
+                        "field": "index"
+                    },
+                    {
+                        "label": "Status",
+                        "field": "disabled",
+                        "mapping": {
+                            "true": "Inactive",
+                            "false": "Active"
+                        }
+                    },
+                    {
+                        "field": "stream_id",
+                        "label": "Stream ID"
+                    },
+                    {
+                        "field": "import_from",
+                        "label": "Import From (Days)"
+                    },
+                    {
+                        "field": "input_type",
+                        "label": "Input Type"
+                    }
+                ]
+            }
+        },
+        "dashboard": {
+            "panels": [
+                {
+                    "name": "custom"
+                }
+            ],
+            "settings": {
+                "custom_tab_name": "My custom tab name"
+            }
+        }
+    },
+    "alerts": [
+        {
+            "name": "opencti_create_incident_response",
+            "label": "OpenCTI - Create Incident Response",
+            "description": "Create an Incident Response case in OpenCTI",
+            "iconFileName": "alert_icon.png",
+            "customScript": "alert_create_incident_response_helper",
+            "entity": [
+                {
+                    "type": "text",
+                    "label": "Name",
+                    "field": "name",
+                    "defaultValue": "$name$",
+                    "required": true
+                },
+                {
+                    "type": "text",
+                    "label": "Description",
+                    "field": "description",
+                    "defaultValue": "$description$",
+                    "required": false
+                },
+                {
+                    "type": "text",
+                    "label": "Type",
+                    "field": "type",
+                    "defaultValue": "",
+                    "required": false
+                },
+                {
+                    "type": "singleSelect",
+                    "label": "Severity",
+                    "field": "severity",
+                    "options": {
+                        "items": [
+                            {
+                                "value": "low",
+                                "label": "Low"
+                            },
+                            {
+                                "value": "medium",
+                                "label": "Medium"
+                            },
+                            {
+                                "value": "high",
+                                "label": "High"
+                            },
+                            {
+                                "value": "critical",
+                                "label": "Critical"
+                            }
+                        ]
+                    },
+                    "help": "Select any one option from the list",
+                    "required": false,
+                    "defaultValue": "medium"
+                },
+                {
+                    "type": "singleSelect",
+                    "label": "Priority",
+                    "field": "priority",
+                    "options": {
+                        "items": [
+                            {
+                                "value": "p1",
+                                "label": "P1"
+                            },
+                            {
+                                "value": "p2",
+                                "label": "P2"
+                            },
+                            {
+                                "value": "p3",
+                                "label": "P3"
+                            },
+                            {
+                                "value": "p4",
+                                "label": "P4"
+                            }
+                        ]
+                    },
+                    "help": "Select any one option from the list",
+                    "required": false,
+                    "defaultValue": "p2"
+                },
+                {
+                    "type": "text",
+                    "label": "Labels",
+                    "field": "labels",
+                    "defaultValue": "",
+                    "required": false
+                },
+                {
+                    "type": "singleSelect",
+                    "label": "TLP",
+                    "field": "tlp",
+                    "options": {
+                        "items": [
+                            {
+                                "value": "tlp_clear",
+                                "label": "TLP:CLEAR"
+                            },
+                            {
+                                "value": "tlp_green",
+                                "label": "TLP:GREEN"
+                            },
+                            {
+                                "value": "tlp_amber",
+                                "label": "TLP:AMBER"
+                            },
+                            {
+                                "value": "tlp_red",
+                                "label": "TLP:RED"
+                            }
+                        ]
+                    },
+                    "help": "Select any one option from the list",
+                    "required": false,
+                    "defaultValue": "tlp_amber"
+                },
+                {
+                    "type": "singleSelect",
+                    "label": "Observables Extraction",
+                    "field": "observables_extraction",
+                    "options": {
+                        "items": [
+                            {
+                                "value": "disable",
+                                "label": "Disable"
+                            },
+                            {
+                                "value": "cim_model",
+                                "label": "CIM Model"
+                            },
+                            {
+                                "value": "field_mapping",
+                                "label": "Field Mapping"
+                            }
+                        ]
+                    },
+                    "help": "Enable extraction of observables",
+                    "required": false,
+                    "defaultValue": "disable"
+                }
+            ]
+        },
+        {
+            "name": "opencti_create_incident",
+            "label": "OpenCTI - Create Incident",
+            "description": "Create an Incident in OpenCTI",
+            "iconFileName": "alert_icon.png",
+            "customScript": "alert_create_incident_helper",
+            "entity": [
+                {
+                    "type": "text",
+                    "label": "Name",
+                    "field": "name",
+                    "defaultValue": "$name$",
+                    "required": true
+                },
+                {
+                    "type": "text",
+                    "label": "Description",
+                    "field": "description",
+                    "defaultValue": "$description$",
+                    "required": false
+                },
+                {
+                    "type": "text",
+                    "label": "Type",
+                    "field": "type",
+                    "defaultValue": "",
+                    "required": false
+                },
+                {
+                    "type": "singleSelect",
+                    "label": "Severity",
+                    "field": "severity",
+                    "options": {
+                        "items": [
+                            {
+                                "value": "low",
+                                "label": "Low"
+                            },
+                            {
+                                "value": "medium",
+                                "label": "Medium"
+                            },
+                            {
+                                "value": "high",
+                                "label": "High"
+                            },
+                            {
+                                "value": "critical",
+                                "label": "Critical"
+                            }
+                        ]
+                    },
+                    "help": "Select any one option from the list",
+                    "required": false,
+                    "defaultValue": "medium"
+                },
+                {
+                    "type": "text",
+                    "label": "Labels",
+                    "field": "labels",
+                    "defaultValue": "",
+                    "required": false
+                },
+                {
+                    "type": "singleSelect",
+                    "label": "TLP",
+                    "field": "tlp",
+                    "options": {
+                        "items": [
+                            {
+                                "value": "tlp_clear",
+                                "label": "TLP:CLEAR"
+                            },
+                            {
+                                "value": "tlp_green",
+                                "label": "TLP:GREEN"
+                            },
+                            {
+                                "value": "tlp_amber",
+                                "label": "TLP:AMBER"
+                            },
+                            {
+                                "value": "tlp_red",
+                                "label": "TLP:RED"
+                            }
+                        ]
+                    },
+                    "help": "Select any one option from the list",
+                    "required": false,
+                    "defaultValue": "tlp_amber"
+                },
+                {
+                    "type": "singleSelect",
+                    "label": "Observables Extraction",
+                    "field": "observables_extraction",
+                    "options": {
+                        "items": [
+                            {
+                                "value": "disable",
+                                "label": "Disable"
+                            },
+                            {
+                                "value": "cim_model",
+                                "label": "CIM Model"
+                            },
+                            {
+                                "value": "field_mapping",
+                                "label": "Field Mapping"
+                            }
+                        ]
+                    },
+                    "help": "Enable extraction of observables",
+                    "required": false,
+                    "defaultValue": "disable"
+                }
+            ]
+        },
+        {
+            "name": "opencti_create_sighting",
+            "label": "OpenCTI - Create Sighting",
+            "description": "Create a Sighting in OpenCTI",
+            "iconFileName": "alert_icon.png",
+            "customScript": "alert_create_sighting_helper",
+            "entity": [
+                {
+                    "type": "text",
+                    "label": "Sighting of Value",
+                    "field": "sighting_of_value",
+                    "defaultValue": "",
+                    "required": true
+                },
+                {
+                    "type": "singleSelect",
+                    "label": "Sighting of Type",
+                    "field": "sighting_of_type",
+                    "options": {
+                        "items": [
+                            {
+                                "value": "url_observable",
+                                "label": "URL Observable"
+                            },
+                            {
+                                "value": "domain_observable",
+                                "label": "Domain Observable"
+                            },
+                            {
+                                "value": "ipv4_observable",
+                                "label": "IPV4 Observable"
+                            },
+                            {
+                                "value": "ipv6_observable",
+                                "label": "IPV6 Observable"
+                            }
+                        ]
+                    },
+                    "help": "Select any one option from the list",
+                    "required": false,
+                    "defaultValue": "domain_observable"
+                },
+                {
+                    "type": "text",
+                    "label": "Where Sighted (value)",
+                    "field": "where_sighted_value",
+                    "defaultValue": "",
+                    "required": true
+                },
+                {
+                    "type": "singleSelect",
+                    "label": "Where Sighted (type)",
+                    "field": "where_sighted_type",
+                    "options": {
+                        "items": [
+                            {
+                                "value": "Organization",
+                                "label": "organization"
+                            },
+                            {
+                                "value": "system",
+                                "label": "System"
+                            }
+                        ]
+                    },
+                    "help": "Select any one option from the list",
+                    "required": false,
+                    "defaultValue": "system"
+                },
+                {
+                    "type": "text",
+                    "label": "Labels",
+                    "field": "labels",
+                    "defaultValue": "",
+                    "required": false
+                },
+                {
+                    "type": "singleSelect",
+                    "label": "TLP",
+                    "field": "tlp",
+                    "options": {
+                        "items": [
+                            {
+                                "value": "tlp_clear",
+                                "label": "TLP:CLEAR"
+                            },
+                            {
+                                "value": "tlp_green",
+                                "label": "TLP:GREEN"
+                            },
+                            {
+                                "value": "tlp_amber",
+                                "label": "TLP:AMBER"
+                            },
+                            {
+                                "value": "tlp_red",
+                                "label": "TLP:RED"
+                            }
+                        ]
+                    },
+                    "help": "Select any one option from the list",
+                    "required": false,
+                    "defaultValue": "tlp_amber"
+                }
+            ]
+        }
+    ],
+    "meta": {
+        "name": "TA-opencti-for-splunk-enterprise",
+        "restRoot": "TA-opencti-for-splunk-enterprise",
+        "version": "1.0.0",
+        "displayName": "OpenCTI for Splunk Enterprise",
+        "schemaVersion": "0.0.10",
+        "hideUCCVersion": true,
+        "supportedThemes": [
+            "light",
+            "dark"
+        ]
+    }
+}
