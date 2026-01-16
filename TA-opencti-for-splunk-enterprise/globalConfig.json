@@ -151,7 +151,7 @@
                         }
                     ],
                     "inputHelperModule": "opencti_stream_helper",
-                    "title": "opencti_stream"
+                    "title": "OpenCTI Stream"
                 }
             ],
             "title": "Inputs",
