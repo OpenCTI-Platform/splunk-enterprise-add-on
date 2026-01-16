@@ -160,176 +160,153 @@ You can monitor the import of indicators using the following Splunk SPL query th
 index="opencti_data" source="opencti" sourcetype="opencti:indicator"
 ```
 
-## Splunk Enterprise Security Integration
+## Index-Based Ingestion Configuration (Required for Saved Searches)
 
-The add-on can expose OpenCTI indicators to the Splunk Enterprise Security (ES) Threat Intelligence Framework by populating an ES-compliant lookup called `opencti_threatintel`.
-
-At a high level:
-
-1. The modular input writes OpenCTI events into a Splunk index (for example, `opencti_stream`).
-2. Normalization searches populate a catalog of indicators in the `opencti_indicators` KV store.
-3. A scheduled search maps `opencti_indicators` into an ES-friendly lookup named `opencti_threatintel`.
-4. ES is configured to treat `opencti_threatintel` as a threat intelligence source.
-
-> **Note:** The `opencti_threatintel` lookup can be defined either in this add-on **or** in the ES app (`SA-ThreatIntelligence`).  
-> A saved search running in the OpenCTI app can populate it as long as:
->
-> - The lookup definition is shared **Global**, and
-> - There is no other lookup with the same name shadowing it in the OpenCTI app.
-
-### Prerquisites
-
-- Splunk Enterprise Security installed on the search head where this add-on is installed.
-- The OpenCTI modular input is configured and successfully ingesting data.
-- The `opencti_indicators` KV store lookup is populated
-- You have admin (or equivalent) permissions in Splunk and ES.
-
-### 1. Create the `opencti_threatintel` KV Store lookup
-
-1. In Splunk Web, go to **Settings ▸ Lookups ▸ Lookup definitions**.
-2. Click **Add new** and create a KV Store lookup:
-    - **Destination app:** `SA-ThreatIntelligence`
-    - **Name:** `opencti_threatintel`
-    - **Type:** KV Store
-    - **KV store collection name:** `opencti_threatintel`
-    - **Fields:** \_key, threat_key, threat_match_value, threat_type, threat_description, threat_group, threat_category, threat_first_seen, threat_last_seen, threat_confidence, threat_weight
-3. After saving, click on the **Permissions** link for the `opencti_threatintel` lookup definition:
-    - Set **Sharing** to **Global** so ES (in apps like `TA-opencti-for-splunk-enterprise`) can read it.
-
-> If you prefer to manage collections via config files, you can instead define this collection in `collections.conf` and the lookup in `transforms.conf`.
+When using **Index mode** ingestion, OpenCTI data is first written to a Splunk index and then synchronized into KV Store collections via saved searches.  
+This section explains **how to define the index**, **configure macros**, and **enable the required saved searches**.
 
 ---
 
-### 2. Verify the `opencti_indicators` lookup
+## 1. Choose or Create a Splunk Index
 
-The shipped searches in this add-on maintain a canonical indicator lookup in the `opencti_indicators` KV store. ES integration builds on top of this lookup.
+By default, the add-on **does not assume a fixed index name**.
 
-To verify it has data:
+### Recommended default index
+```
+opencti_data
+```
+### Create a dedicated index (recommended)
 
-1. Open **Search & Reporting**.
-2. Run:
+In Splunk Web:
 
-   ```spl
-   | inputlookup opencti_indicators
-   | head 10
-   ```
+1. Go to **Settings ▸ Indexes**
+2. Click **New Index**
+3. Set:
+   - **Index name:** `opencti_data`
+   - Leave other settings at defaults (or align with your data retention policy)
+4. Save
 
-3. You should see one row per OpenCTI indicator, with fields such as id, name, pattern, value, score, confidence, main_observable_type, etc.
-
-If this lookup is empty, review your OpenCTI inputs and the “Update OpenCTI Indicators Lookup” / “Nightly Rebuild OpenCTI Indicators Lookup” saved searches before proceeding.
-
----
-
-### 3. Enable the Update Enterprise Security Threat Intelligence saved search
-
-The OpenCTI add-on ships with a saved search called `Update Enterprise Security Threat Intelligence` that transforms the opencti_indicators catalog into the ES Threat Intelligence schema and writes it into the opencti_threatintel KV Store lookup.
-
-Saved search properties (default):
-
-- **Name:** `Update Enterprise Security Threat Intelligence`
-- **App context:** TA-opencti-for-splunk-enterprise
-- **Schedule:** _/5 _ \* \* \* (every 5 minutes)
-- **Core SPL (conceptual):**
-
-    - Reads from opencti_indicators via | inputlookup opencti_indicators
-    - Maps OpenCTI fields into ES fields:
-
-| ES field             | Source OpenCTI field(s)                                   | Notes                                                                                                 |
-| -------------------- | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `threat_key`         | `id`                                                      | Stable identifier for the indicator (OpenCTI ID).                                                     |
-| `threat_match_value` | `value`                                                   | Actual indicator value (IP, domain, URL, hash, email, etc.).                                          |
-| `threat_type`        | `main_observable_type`, `type`                            | Mapped to ES types such as `ip_intel`, `domain_intel`, `url_intel`, `file_intel`, `email_intel`, etc. |
-| `threat_description` | `name`                                                    | Human-readable name/title of the indicator.                                                           |
-| `threat_group`       | `created_by`                                              | Origin or owner of the indicator (e.g., group, organization, actor).                                  |
-| `threat_category`    | `labels`, `attack_patterns`, `malware`, `vulnerabilities` | Combined, multi-valued category/tactic/context information.                                           |
-| `threat_first_seen`  | `valid_from`, `created`, `created_at`                     | First time the indicator was observed or became valid.                                                |
-| `threat_last_seen`   | `valid_until`, `modified`, `updated_at`                   | Last time the indicator was observed or considered valid.                                             |
-| `threat_confidence`  | `confidence`                                              | Numeric or ordinal confidence score from OpenCTI.                                                     |
-| `threat_weight`      | `score`                                                   | Severity/priority score used by ES for weighting during correlation.                                  |
-
-To verify or adjust this saved search:
-
-1. In Splunk Web, go to **Settings ▸ Searches, reports, and alerts**.
-2. Set App to TA-opencti-for-splunk-enterprise.
-3. Locate `Update Enterprise Security Threat Intelligence`
-4. Open the search:
-    - Confirm it begins with | inputlookup opencti_indicators.
-    - Confirm it ends with | outputlookup opencti_threatintel.
-5. On the Schedule tab:
-    - Ensure the search is enabled.
-    - Adjust the schedule if needed (for example, to run less or more frequently based on your OpenCTI update cadence). 6. Save your changes.
-
-On each run, this search rebuilds the ES Threat Intelligence KV from the enriched opencti_indicators KV.
+> ⚠️ If you choose a **custom index name**, you must update the OpenCTI macro configuration (see below).
 
 ---
 
-### 4. Validate that opencti_threatintel is being populated
+## 2. Configure the OpenCTI Modular Input (Index Mode)
 
-After the `Update Enterprise Security Threat Intelligence` search has run at least once:
+When creating a modular input:
 
-1. Go to **Settings ▸ Lookups ▸ KV Store lookups**
-2. Click Lookup contents for opencti_threatintel.
-3. You should see rows of indicators with ES threat fields populated.
+| Field          | Value |
+|----------------|-------|
+| **Input Type** | `Index entry` |
+| **Index**      | `opencti_data` (or your custom index) |
+| **Stream ID**  | OpenCTI Live Stream ID |
+| **Interval**   | `0` (continuous) |
 
-Or from search:
+Once enabled:
+- Each **OpenCTI stream event** is written as a **Splunk event**
+- Events are **append-only**
+- The same indicator may appear multiple times as it evolves over time
+
+### Event metadata
+
+| Field | Value |
+|------|------|
+| `source` | `opencti` |
+| `sourcetype` | `opencti:indicator`, `opencti:report`, etc. |
+
+---
+
+## 3. Configure the OpenCTI Index Macro (Required)
+
+All shipped saved searches rely on a macro to locate OpenCTI data.
+
+### Macro name
 
 ```
-| inputlookup opencti_threatintel
-| head 20
+opencti_index
 ```
 
-If you see no results:
+### Default definition
 
-- Confirm the saved search `Update Enterprise Security Threat Intelligence` has run successfully (check Activity ▸ Jobs).
-- Confirm opencti_indicators contains data.
-- Check lookup permissions:
-- opencti_indicators and opencti_threatintel must both be shared Global and readable by ES.
+```
+index=opencti_data
+```
 
----
+### How to configure
 
-### 5. Register opencti_threatintel as a Threat Intelligence source in ES
+1. Go to **Settings ▸ Advanced Search ▸ Search macros**
+2. Locate `opencti_index`
+3. Edit the macro definition:
+```
+index=<YOUR_INDEX_NAME>
+```
+4. Save
 
-Once opencti_threatintel contains data, register it as a threat intelligence source:
-
-1. In Splunk Enterprise Security, go to
-   **Configure ▸ Data Enrichment ▸ Threat Intelligence Management** (menu name may vary slightly by ES version).
-2. Under Threat Intelligence Sources, add a new source:
-   **Type:** KV Store
-   **Name:** OpenCTI Threat Intelligence (or any clear label)
-   **Collection / Lookup:** `opencti_threatintel`
-3. Enable the source.
-4. Confirm that field mappings align with your lookup structure:
-   **Indicator value** → threat_match_value
-   **Type** → threat_type
-   **Description / group / category** → threat_description, threat_group, threat_category
-   **Temporal / scoring fields** → threat_first_seen, threat_last_seen, threat_confidence, threat_weight
-
-At this point, ES correlation searches and threat intel–aware dashboards can use opencti_threatintel as a live feed of indicators from OpenCTI.
+> ⚠️ If this macro is not updated correctly:
+> - Saved searches will return **zero results**
+> - KV Store synchronization will silently fail
 
 ---
 
-### 6. Troubleshooting
+## 4. Enable Required Saved Searches (Index → KV Store Sync)
 
-No indicators appear in ES correlation searches
+Index mode relies on scheduled searches to populate KV Store collections.
 
-- Check opencti_indicators:
+### Required saved searches
+
+| Saved Search Name | Purpose |
+|------------------|--------|
+| `Update OpenCTI Indicators Lookup` | Sync indicators into `opencti_indicators` KV Store |
+| `Update OpenCTI Reports Lookup` | Sync reports into `opencti_reports` |
+| `Nightly Rebuild OpenCTI Indicators Lookup` | Full rebuild safety net |
+
+### Enable them
+
+1. Go to **Settings ▸ Searches, reports, and alerts**
+2. Set **App context** to `TA-opencti-for-splunk-enterprise`
+3. Enable:
+- `Update OpenCTI Indicators Lookup`
+- `Update OpenCTI Reports Lookup`
+4. Verify schedules are enabled (default is sufficient)
+
+---
+
+## 5. Data Flow Summary (Index Mode)
+```
+OpenCTI Stream
+↓
+Splunk Index (opencti_data)
+↓
+Saved Searches
+↓
+KV Store Collections
+↓
+Dashboards / Alert Actions
+```
+---
+
+## 6. Common Failure Modes (and How to Avoid Them)
+
+| Issue | Cause | Fix |
+|-----|------|-----|
+| No indicators in dashboards | Macro points to wrong index | Update `opencti_index` |
+| KV Stores empty | Saved searches disabled | Enable saved searches |
+| Duplicate indicators | Expected behavior | Events are versioned |
+
+---
+
+## 7. Verification Checklist
+
+Run these searches to confirm everything is working:
+
+### Index ingestion
+```
+`opencti_index`
+| stats count by sourcetype
+```
+
+### KV Store population
 
 ```
 | inputlookup opencti_indicators
-| stats count
+| head 10
 ```
-
-- Check the job history of `Update Enterprise Security Threat Intelligence` for errors.
-- Confirm that opencti_threatintel has rows:
-
-```
-| inputlookup opencti_threatintel
-| stats count
-```
-
-- Verify that ES has a Threat Intelligence source configured for opencti_threatintel.
-
-Permission or lookup issues
-Ensure: - opencti_indicators KV Store lookup is shared Global. - opencti_threatintel KV Store lookup is defined in SA-ThreatIntelligence and shared Global. - Verify that the roles used by ES and the OpenCTI add-on have read/write access to these lookups.
-
-With these steps completed, OpenCTI becomes a first-class Threat Intelligence provider for Splunk Enterprise Security via the opencti_threatintel KV Store, maintained by the `Update Enterprise Security Threat Intelligence` saved search.
