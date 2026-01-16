@@ -8,14 +8,14 @@
 
 ## Overview
 
-The **OpenCTI for Splunk Enterprise Add-on** provides a modular framework for integrating threat intelligence from [OpenCTI](https://www.opencti.io) into Splunk.  
+The **OpenCTI for Splunk Enterprise Add-on** provides a modular framework for integrating threat intelligence from [OpenCTI](https://filigran.io/platforms/opencti/) into Splunk.  
 It enables analysts to collect, normalize, and enrich OpenCTI indicators and observables, making them searchable within Splunk Enterprise for correlation, detection, and incident response.
 
 ---
 
 ## Key Features
 
-- Modular inputs for ingesting OpenCTI data via the OpenCTI API.
+- Modular inputs for ingesting OpenCTI data via the OpenCTI Stream API.
 - Support for multiple object types (Indicators, Observables, Relationships, Sightings).
 - Pre-configured eventtypes, tags, and alert actions.
 - Custom REST endpoints for configuration and health-checks.
@@ -52,13 +52,13 @@ To create this service account, please refer to [Create a Service Account](https
 
 ### General Add-On settings
 
-1. Navigate to Splunk Web UI home page, open the "OpenCTI add-on for Splunk" and navigate to "Configuration" page.
-2. Click on "Add-on settings" tab and complete the form with the required settings:
+1. Navigate to Splunk Web UI home page, open the "OpenCTI for Splunk Enterprise Add-on" and navigate to "Configuration" page.
+2. Click on "Account" tab and complete the form with the required settings:
 
-| Parameter                  | Description                                                     |
-|----------------------------|-----------------------------------------------------------------|
-| `OpenCTI URL`              | The URL of the OpenCTI platform (A HTTPS connection is required |
-| `OpenCTI API Key`          | The API Token of the previously created user                    |
+| Parameter                  | Description                                                      |
+|----------------------------|------------------------------------------------------------------|
+| `OpenCTI URL`              | The URL of the OpenCTI platform (A HTTPS connection is required) |
+| `OpenCTI API Key`          | The API Token of the previously created user                     |
 
 ![](./.github/img/addon_settings.png "Add-on settings")
 
@@ -78,20 +78,20 @@ If a proxy configuration is required to connect to OpenCTI platform, you can con
 
 ## OpenCTI Data Inputs Configuration
 
-The "OpenCTI for Splunk Enterprise Add-on" enables Splunk to be feed with intelligence exposed through a live stream. 
+The "OpenCTI for Splunk Enterprise Add-on" enables Splunk to be feed with intelligence exposed through an OpenCTI live stream. 
 To do this, the add-on implements and manages Splunk modular inputs.
 
 When configuring a modular input, you have two options for storing intelligence data:
-- Write directly to a dedicated kvstore collection defined by the application
-- Write to a Splunk index, which will then propagate the data to a kvstore using saved searches
+- Write directly to dedicated KV Store collections defined by the application
+- Write to a Splunk index, which will then propagate the data to a KV Store using saved searches
 
 
-### Kvstore Data Inputs configuration
+### KV Store Data Inputs configuration
 
-Proceed as follows to enable the ingestion of indicators:
+Proceed as follows to enable the ingestion of data:
 
 1. From the "OpenCTI for Splunk Enterprise Add-on" sub menus, select the "Inputs" sub menu.
-2. Click on "Create new input" button to define a new indicators input.
+2. Click on "Create new input" button.
 3. Complete the form with the following settings:
 
 | Parameter     | Description                                                                                                    |
@@ -103,7 +103,6 @@ Proceed as follows to enable the ingestion of indicators:
 | `Import from` | The number of days to go back for the initial data collection (default: 30) (optional)                         |
 | `Input Type`  | Select KV Store entry                                                                                          |
 
-
 4. Once the Input parameters have been correctly configured click "Add".
 
 ![](./.github/img/input_config_kvstore.png "KV Store Input Configuration")
@@ -113,22 +112,25 @@ Proceed as follows to enable the ingestion of indicators:
 As soon as the input is created, the ingestion of data begins.
 
 Here are the KV Store names used to store intelligence: 
-- opencti_indicators: store STIX indicators and related context information
+- opencti_indicators: store STIX indicators and related context information (related threat actors, vulnerabilities, malware, attack patterns...)
 - opencti_reports: store STIX reports
-- opencti_markings: store STIX marking definitions
+- opencti_markings: store STIX markings definitions
+- opencti_identities: store STIX identities definitions
 
-You can monitor the import of indicators using the following Splunk query that list all indicators ingested in the 'opencti_indicators' KV Store:
+You can monitor the import of indicators using the following Splunk SPL query that list all indicators ingested in the 'opencti_indicators' KV Store:
 
 ```
 | inputlookup opencti_indicators
 ```
 
+You can also consult the "Monitoring Dashboard" which gives you an overview of indicators ingested in the 'opencti_indicators' KV Store.
+
+![](./.github/img/indicators_dashboard.png "Indicators Dashboard")
+
 The ingestion process can also be monitored by consulting the log file ```ta-opencti-for-splunk-enterprise_{DATA_INPUT_NAME}.log``` present in the directory ```$SPLUNK_HOME/var/log/splunk/```
 
 
 ### Splunk Index Data Inputs configuration
-
-
 
 Indicators are stored in a dedicated kvstore named “opencti_indicators”.
 A default lookup definition named "opencti_lookup" is also implemented to facilitate indicator management.
