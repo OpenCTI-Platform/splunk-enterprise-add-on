@@ -1,4 +1,4 @@
-# TA-opencti-for-splunk-enterprise
+# OpenCTI for Splunk Enterprise (TA-opencti-for-splunk-enterprise)
 
 **Version 1.0.0**  
 **Author:** Filigran
@@ -86,7 +86,11 @@ When configuring a modular input, you have two options for storing intelligence 
 - Write to a Splunk index, which will then propagate the data to a KV Store using saved searches
 
 
-### KV Store Data Inputs configuration
+### KV Store Ingestion Configuration
+
+The KV Store data input type mode allows pre-defined KV Store to be directly fed with intelligence exposed by the OpenCTI live stream.
+
+![](./.github/img/kvstore_based_ingestion.png "KV Store based ingestion")
 
 Proceed as follows to enable the ingestion of data in pre-defined KV Store:
 
@@ -129,53 +133,24 @@ You can also consult the "Monitoring Dashboard" which gives you an overview of i
 
 The ingestion process can also be monitored by consulting the log file ```ta-opencti-for-splunk-enterprise_{DATA_INPUT_NAME}.log``` present in the directory ```$SPLUNK_HOME/var/log/splunk/```
 
-### Index Data Inputs configuration
-
-Proceed as follows to enable the ingestion of data in a Splunk index.
-
-1. From the "OpenCTI for Splunk Enterprise Add-on" sub menus, select the "Inputs" sub menu.
-2. Click on "Create new input" button.
-3. Complete the form with the following settings:
-
-| Parameter     | Description                                                                                                    |
-|---------------|----------------------------------------------------------------------------------------------------------------|
-| `Name`        | Unique name for the input being configured                                                                     |
-| `Interval`    | Time interval of input in seconds. Leave as default (0) to allow continuous execution of the ingestion process |
-| `Index`       | Select the Splunk Index to feed                                                                                |
-| `Stream Id`   | The Live Stream ID of the OpenCTI stream to consume                                                            |
-| `Import from` | The number of days to go back for the initial data collection (default: 30) (optional)                         |
-| `Input Type`  | Select Index entry                                                                                             |
-
-4. Once the Input parameters have been correctly configured click "Add".
-
-![](./.github/img/input_config_index.png "Index Input Configuration")
-
-5. Validate the newly created Input and ensure it's set to "Enabled".
-
-As soon as the input is created, the ingestion of data begins.
-
-You can monitor the import of indicators using the following Splunk SPL query that list all data ingested in the selected Index.
-
-```
-index="opencti_data" source="opencti" sourcetype="opencti:indicator"
-```
-
-## Index-Based Ingestion Configuration (Required for Saved Searches)
+---
+### Index-Based Ingestion Configuration (Required for Saved Searches)
 
 When using **Index mode** ingestion, OpenCTI data is first written to a Splunk index and then synchronized into KV Store collections via saved searches.  
+![](./.github/img/index_based_ingestion.png "Index based ingestion")
+
 This section explains **how to define the index**, **configure macros**, and **enable the required saved searches**.
 
----
 
-## 1. Choose or Create a Splunk Index
+#### 1. Choose or Create a Splunk Index
 
-By default, the add-on **does not assume a fixed index name**.
+By default, the add-on **does not assume a fixed Index name**.
 
-### Recommended default index
+#### Recommended default index
 ```
 opencti_data
 ```
-### Create a dedicated index (recommended)
+#### Create a dedicated index (recommended)
 
 In Splunk Web:
 
@@ -190,48 +165,56 @@ In Splunk Web:
 
 ---
 
-## 2. Configure the OpenCTI Modular Input (Index Mode)
+#### 2. Configure the OpenCTI Modular Input (Index Mode)
 
-When creating a modular input:
+1. From the "OpenCTI for Splunk Enterprise Add-on" sub menus, select the "Inputs" sub menu.
+2. Click on "Create new input" button.
+3. Complete the form with the following settings:
 
-| Field          | Value |
-|----------------|-------|
-| **Input Type** | `Index entry` |
-| **Index**      | `opencti_data` (or your custom index) |
-| **Stream ID**  | OpenCTI Live Stream ID |
-| **Interval**   | `0` (continuous) |
+| Parameter     | Description                                                                                                    |
+|---------------|----------------------------------------------------------------------------------------------------------------|
+| `Name`        | Unique name for the input being configured                                                                     |
+| `Interval`    | Time interval of input in seconds. Leave as default (0) to allow continuous execution of the ingestion process |
+| `Index`       | `opencti_data` (or your custom index)                                                                          |
+| `Stream Id`   | The Live Stream ID of the OpenCTI stream to consume                                                            |
+| `Import from` | The number of days to go back for the initial data collection (default: 30) (optional)                         |
+| `Input Type`  | Select `Index entry`                                                                                           |
+
+![](./.github/img/input_config_index.png "Index based Input Configuration")
+
+4. Once the Input parameters have been correctly configured click "Add".
 
 Once enabled:
 - Each **OpenCTI stream event** is written as a **Splunk event**
 - Events are **append-only**
 - The same indicator may appear multiple times as it evolves over time
 
-### Event metadata
+#### Event metadata
 
-| Field | Value |
-|------|------|
-| `source` | `opencti` |
+| Field        | Value                                       |
+|--------------|---------------------------------------------|
+| `source`     | `opencti`                                   |
 | `sourcetype` | `opencti:indicator`, `opencti:report`, etc. |
 
 ---
 
-## 3. Configure the OpenCTI Index Macro (Required)
+#### 3. Configure the OpenCTI Index Macro (Required)
 
 All shipped saved searches rely on a macro to locate OpenCTI data.
 
-### Macro name
+#### Macro name
 
 ```
 opencti_index
 ```
 
-### Default definition
+#### Default definition
 
 ```
 index=opencti_data
 ```
 
-### How to configure
+#### How to configure
 
 1. Go to **Settings ▸ Advanced Search ▸ Search macros**
 2. Locate `opencti_index`
@@ -247,19 +230,19 @@ index=<YOUR_INDEX_NAME>
 
 ---
 
-## 4. Enable Required Saved Searches (Index → KV Store Sync)
+#### 4. Enable Required Saved Searches (Index → KV Store Sync)
 
 Index mode relies on scheduled searches to populate KV Store collections.
 
-### Required saved searches
+#### Required saved searches
 
-| Saved Search Name | Purpose |
-|------------------|--------|
-| `Update OpenCTI Indicators Lookup` | Sync indicators into `opencti_indicators` KV Store |
-| `Update OpenCTI Reports Lookup` | Sync reports into `opencti_reports` |
-| `Nightly Rebuild OpenCTI Indicators Lookup` | Full rebuild safety net |
+| Saved Search Name                           | Purpose                                            |
+|---------------------------------------------|----------------------------------------------------|
+| `Update OpenCTI Indicators Lookup`          | Sync indicators into `opencti_indicators` KV Store |
+| `Update OpenCTI Reports Lookup`             | Sync reports into `opencti_reports`                |
+| `Nightly Rebuild OpenCTI Indicators Lookup` | Full rebuild safety net                            |
 
-### Enable them
+#### Enable them
 
 1. Go to **Settings ▸ Searches, reports, and alerts**
 2. Set **App context** to `TA-opencti-for-splunk-enterprise`
@@ -270,7 +253,7 @@ Index mode relies on scheduled searches to populate KV Store collections.
 
 ---
 
-## 5. Data Flow Summary (Index Mode)
+#### 5. Data Flow Summary (Index Mode)
 ```
 OpenCTI Stream
 ↓
@@ -284,27 +267,27 @@ Dashboards / Alert Actions
 ```
 ---
 
-## 6. Common Failure Modes (and How to Avoid Them)
+#### 6. Common Failure Modes (and How to Avoid Them)
 
-| Issue | Cause | Fix |
-|-----|------|-----|
+| Issue                       | Cause                       | Fix                    |
+|-----------------------------|-----------------------------|------------------------|
 | No indicators in dashboards | Macro points to wrong index | Update `opencti_index` |
-| KV Stores empty | Saved searches disabled | Enable saved searches |
-| Duplicate indicators | Expected behavior | Events are versioned |
+| KV Stores empty             | Saved searches disabled     | Enable saved searches  |
+| Duplicate indicators        | Expected behavior           | Events are versioned   |
 
 ---
 
-## 7. Verification Checklist
+#### 7. Verification Checklist
 
 Run these searches to confirm everything is working:
 
-### Index ingestion
+#### Index ingestion
 ```
 `opencti_index`
 | stats count by sourcetype
 ```
 
-### KV Store population
+#### KV Store population
 
 ```
 | inputlookup opencti_indicators
