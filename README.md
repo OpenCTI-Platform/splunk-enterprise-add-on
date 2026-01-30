@@ -3,7 +3,6 @@
 Version 1.0.0  
 Author: Filigran  
 Package: TA-opencti-for-splunk-enterprise
----
 
 
 ## Overview
@@ -11,15 +10,12 @@ Package: TA-opencti-for-splunk-enterprise
 The **OpenCTI for Splunk Enterprise Add-on** provides a modular framework for integrating threat intelligence from [OpenCTI](https://filigran.io/platforms/opencti/) into Splunk.  
 It enables analysts to collect, normalize, and enrich OpenCTI indicators and observables, making them searchable within Splunk Enterprise for correlation, detection, and incident response.
 
----
 
 ## Key Features
 
 - Modular inputs for ingesting OpenCTI data via the OpenCTI Stream API.
+- Ability to trigger OpenCTI actions in response of Alerts and to investigate them directly in OpenCTI
 - Support for multiple object types (Indicators, Observables, Relationships, Sightings).
-- Pre-configured eventtypes, tags, and alert actions.
-- Custom REST endpoints for configuration and health-checks.
-- Automatic reload triggers for modular input changes.
 
 ---
 
