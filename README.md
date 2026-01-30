@@ -1,8 +1,8 @@
 # OpenCTI for Splunk Enterprise
 
 **Version 1.0.0**  
-**Author:** Filigran
-**Package: ** TA-opencti-for-splunk-enterprise
+**Author: Filigran**  
+**Package: TA-opencti-for-splunk-enterprise**
 ---
 
 
