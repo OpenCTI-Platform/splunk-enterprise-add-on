@@ -163,7 +163,7 @@ In Splunk Web:
 
 #### 2. Configure the OpenCTI Modular Input (Index Mode)
 
-1. From the "OpenCTI for Splunk Enterprise Add-on" sub menus, select the "Inputs" sub menu.
+1. From the "OpenCTI for Splunk Enterprise" Add-on sub menus, select the "Inputs" sub menu.
 2. Click on "Create new input" button.
 3. Complete the form with the following settings:
 
@@ -289,3 +289,109 @@ Run these searches to confirm everything is working:
 | inputlookup opencti_indicators
 | head 10
 ```
+
+## OpenCTI custom alert actions
+
+You can use the "OpenCTI for Splunk Enterprise" to create custom alert actions that automatically create 'incidents' or/and 'incident response cases' or/and 'sighting' in response to alert trigger by Splunk.
+
+### Create an incident or/and an incident response case or/and a sighting in OpenCTI
+
+You can create an incident or an incident response case in OpenCTI from a custom alert action.
+1. Write a Splunk search query.
+2. Click Save As > Alert.
+3. Fill out the Splunk Alert form. Give your alert a unique name and indicate whether the alert is a real-time alert or a scheduled alert.
+4. Under Trigger Actions, click Add Actions.
+5. From the list, select "OpenCTI - Create Incident" if you want the alert to create an incident in OpenCTI or "OpenCTI - Create Incident Response" if you want to create an incident response case in OpenCTI or "OpenCTI - Create Sighting" if you want to create a sighting in OpenCTI.
+
+![](./.github/img/alert_actions.png "Custom Alert Actions")
+
+6. To create and incident or an incident response case, complete the form with the following settings:
+
+| Parameter                | Description                                           | Scope                             |
+|--------------------------|-------------------------------------------------------|-----------------------------------|
+| `Name`                   | Name of the incident                                  | Incident & Incident response case |
+| `Description`            | Description of the incident or incident response case | Incident & Incident response case |                              
+| `Type`                   | Incident Type or incident response case type          | Incident & Incident response case |                              
+| `Severity`               | Severity of the incident or incident response case    | Incident & Incident response case | 
+| `Priority`               | Priority of the incident response case                | Incident response case            | 
+| `Labels`                 | Labels (separated by a comma) to be applied           | Incident & Incident response case | 
+| `TLP`                    | Markings to be applied                                | Incident & Incident response case | 
+| `Observables extraction` | Method for extracting observables                     | Incident & Incident response case | 
+
+7. To create a sighting, complete the form with the following settings:
+
+| Parameter                | Description                                                   | Scope      |
+|--------------------------|---------------------------------------------------------------|------------|
+| `Sighting Of (value)`    | Value of what was sighted                                     | Sighting   |
+| `Sighting Of (type)`     | Type of what was sighted (URL, Domain, IPV4, IPV6)            | Sighting   |                              
+| `Where Sighted (value)`  | Value of the 'System' or 'Organization' that saw the sighting | Sighting   |                              
+| `Where Sighted (type)`   | 'System' or 'Organization' that saw the sighting              | Sighting   | 
+| `Labels`                 | Labels (separated by a comma) to be applied                   | Sighting   | 
+| `TLP`                    | Markings to be applied                                        | Sighting   | 
+
+You can use [Splunk "tokens"](https://docs.splunk.com/Documentation/Splunk/9.2.2/Alert/EmailNotificationTokens#Result_tokens) as variables in the form to contextualize the data imported into OpenCTI.
+Tokens represent data that a search generates. They work as placeholders or variables for data values that populate when the search completes.
+
+Example of a configuration to create an incident in OpenCTI
+
+![](./.github/img/alert_example.png "Alert Example")
+
+### Observables extraction
+
+To extract and model alert fields as OpenCTI observables attached to the incident or incident response case, the Add-on purpose two methods describe below.
+
+#### CIM model
+
+The “CIM model” method is based on the definition of CIM model fields. With this method, the Add-on will extract all the following fields and model them as follows:
+
+| CIM Field         | Observable type                     |
+|-------------------|-------------------------------------|
+| `url`             | URL observable                      | 
+| `url_domain`      | Domain observable                   |                       
+| `user`            | User account observable             |                            
+| `user_name`       | User account observable             | 
+| `user_agent`      | User agent Observable               |
+| `http_user_agent` | User agent Observable               |
+| `dest`            | IPv4 or IPv6 or Hostname observable |
+| `dest_ip`         | IPv4 or IPv6 observable             |
+| `src`             | IPv4 or IPv6 or Hostname observable |
+| `src_ip`          | IPv4 or IPv6 observable             |
+| `file_hash`       | File observable                     |
+| `file_name`       | File observable                     |
+
+
+#### Field mapping
+
+The “Field mapping” method searches for event fields starting with the string “octi_” and ending with an observable type.
+The following list describe list of supported fields:
+
+| OCTI Field                         | Observable type                       |
+|------------------------------------|---------------------------------------|
+| `octi_ip`                          | IPv4 or IPv6 observable               | 
+| `octi_url`                         | URL observable                        |
+| `octi_domain`                      | Domain observable                     |                       
+| `octi_hash`                        | File observable                       |                       
+| `octi_email_addr`                  | Email address observable              |                       
+| `octi_user_agent`                  | User agent observable                 |                       
+| `octi_mutex`                       | Mutex observable                      |                       
+| `octi_text`                        | Text observable                       |                       
+| `octi_windows_registry_key`        | Windows Registry Key observable       |                       
+| `octi_windows_registry_value_type` | Windows Registry Key Value observable |                       
+| `octi_directory`                   | Directory observable                  |                       
+| `octi_email_message`               | Email message observable              |    
+| `octi_file_name`                   | File observable                       |    
+| `octi_mac_addr`                    | MAC address observable                | 
+| `octi_user_account`                | User account address observable       |    
+
+You can use the Splunk ```eval``` command to create a new field based on the value of another field.
+
+Example:
+
+```sourcetype=* | lookup opencti_lookup value as url_domain OUTPUT id as match_ioc_id | search match_ioc_id=* | eval octi_domain=url_domain | eval octi_url=url ```
+
+
+Logs related to OpenCTI customer alerts are available in the following two log file:
+
+```$SPLUNK_HOME/var/log/splunk/opencti_create_incident_modalert.log```
+
+```$SPLUNK_HOME/var/log/splunk/opencti_create_incident_response_modalert.log```
