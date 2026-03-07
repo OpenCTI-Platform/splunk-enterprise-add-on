@@ -2,5 +2,5 @@ splunktaucclib==8.0.0
 splunk-sdk==2.1.1
 solnlib==7.0.0
 filigran-sseclient==1.0.2
-stix2==3.0.1
+stix2==3.0.2
 six==1.17.0
