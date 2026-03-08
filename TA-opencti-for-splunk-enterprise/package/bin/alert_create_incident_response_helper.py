@@ -35,7 +35,8 @@ def create_incident_response(helper, event):
 
     opencti_url = helper.get_global_setting("opencti_url")
     opencti_api_key = helper.get_global_setting("opencti_api_key")
-    proxies = helper.get_proxy()
+    proxy_settings = helper.get_proxy()
+    helper.log_debug(f"Proxy settings: {proxy_settings}")
 
     # init splunk connector helper
     splunk_app_connector = SplunkAppConnectorHelper(
@@ -43,7 +44,7 @@ def create_incident_response(helper, event):
         connector_name=CONNECTOR_NAME,
         opencti_url=opencti_url,
         opencti_api_key=opencti_api_key,
-        proxies=proxies
+        proxy_settings=proxy_settings
     )
 
     # convert to_stix

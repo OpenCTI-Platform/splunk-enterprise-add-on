@@ -6,7 +6,7 @@ import splunklib.client as client
 from solnlib import conf_manager, log
 from solnlib.modular_input import checkpointer
 from splunklib import modularinput as smi
-
+import utils
 
 from app_connector_helper import SplunkAppConnectorHelper
 from constants import (
@@ -22,7 +22,6 @@ from stix2patterns.v21.pattern import Pattern
 import six
 from datetime import datetime, timedelta, timezone
 import sys
-
 
 MARKING_DEFs = {}
 IDENTITY_DEFs = {}
@@ -310,23 +309,22 @@ def stream_events(inputs: smi.InputDefinition, event_writer: smi.EventWriter):
             logger.info(f"Fetching data from OpenCTI stream.id: {stream_id}")
             logger.info(f"Selected input type: {input_type}")
 
-            proxies = conf_manager.get_proxy_dict(
+            # resolve proxy configurations
+            proxy_settings = conf_manager.get_proxy_dict(
                 logger=logger,
                 session_key=session_key,
                 app_name=ADDON_NAME,
                 conf_name="ta-opencti-for-splunk-enterprise_settings",
             )
-            logger.info(f"Proxies configuration: {proxies}")
+            logger.info(f"Proxy settings: {proxy_settings}")
 
-            #
             # Create Splunk App Connector Helper
-            #
             connector_helper = SplunkAppConnectorHelper(
                 connector_id="splunk-stream-input",
                 connector_name="Splunk Stream Input",
                 opencti_url=opencti_url,
                 opencti_api_key=opencti_api_key,
-                proxies=proxies,
+                proxy_settings=proxy_settings,
             )
 
             kvstore_checkpointer = checkpointer.KVStoreCheckpointer(
@@ -370,6 +368,7 @@ def stream_events(inputs: smi.InputDefinition, event_writer: smi.EventWriter):
                 logger.error(f"Failed to connect to Splunk service: {e}")
                 return
 
+            proxies = utils.get_proxy_config(proxy_settings=proxy_settings)
             try:
                 messages = SSEClient(
                     live_stream_url,
