@@ -1,6 +1,6 @@
 # OpenCTI for Splunk Enterprise
 
-Version 1.0.0  
+Version 1.0.1  
 Author: Filigran  
 Package: TA-opencti-for-splunk-enterprise
 
@@ -30,10 +30,10 @@ It enables analysts to collect, normalize, and enrich OpenCTI indicators and obs
 
 ### Installing from file through the UI
 
-1. Download latest version of the Splunk App: [TA-opencti-for-splunk-enterprise-1.0.0.tar.gz](https://github.com/OpenCTI-Platform/splunk-enterprise-add-on/releases/download/1.0.0/TA-opencti-for-splunk-enterprise-1.0.0.tar.gz)
+1. Download latest version of the Splunk App: [TA-opencti-for-splunk-enterprise-1.0.1.tar.gz](https://github.com/OpenCTI-Platform/splunk-enterprise-add-on/releases/download/1.0.1/TA-opencti-for-splunk-enterprise-1.0.1.tar.gz)
 2. Log in to the Splunk Web UI and navigate to "Apps" and click on "Manage Apps"
 3. Click "Install app from file"
-4. Choose file and select the "TA-opencti-for-splunk-enterprise-1.0.0.tar.gz" file
+4. Choose file and select the "TA-opencti-for-splunk-enterprise-1.0.1.tar.gz" file
 5. Click on Upload
    The app is installed
 
