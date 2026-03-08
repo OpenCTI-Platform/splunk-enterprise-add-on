@@ -40,11 +40,103 @@
                     ]
                 },
                 {
-                    "type": "proxyTab",
-                    "proxy_type": true,
-                    "username": true,
-                    "password": true,
-                    "dns_resolution": true
+                    "name": "proxy",
+                    "title": "Proxy",
+                    "entity": [
+                        {
+                            "type": "checkbox",
+                            "label": "Enable",
+                            "field": "proxy_enabled"
+                        },
+                        {
+                            "type": "singleSelect",
+                            "label": "Proxy Type",
+                            "options": {
+                                "disableSearch": true,
+                                "autoCompleteFields": [
+                                    {
+                                        "value": "http",
+                                        "label": "http"
+                                    },
+                                    {
+                                        "value": "socks4",
+                                        "label": "socks4"
+                                    },
+                                    {
+                                        "value": "socks5",
+                                        "label": "socks5"
+                                    }
+                                ]
+                            },
+                            "defaultValue": "http",
+                            "field": "proxy_type"
+                        },
+                        {
+                            "type": "text",
+                            "label": "Host",
+                            "validators": [
+                                {
+                                    "type": "string",
+                                    "errorMsg": "Max length of host is 4096",
+                                    "minLength": 0,
+                                    "maxLength": 4096
+                                },
+                                {
+                                    "type": "regex",
+                                    "errorMsg": "Proxy Host is invalid. Provide a valid hostname, FQDN, or IP address.",
+                                    "pattern": "^$|^[a-zA-Z0-9\\-\\.]+$"
+                                }
+                            ],
+                            "field": "proxy_url"
+                        },
+                        {
+                            "type": "text",
+                            "label": "Port",
+                            "validators": [
+                                {
+                                    "type": "number",
+                                    "range": [
+                                        1,
+                                        65535
+                                    ],
+                                    "isInteger": true
+                                }
+                            ],
+                            "field": "proxy_port"
+                        },
+                        {
+                            "type": "text",
+                            "label": "Username",
+                            "validators": [
+                                {
+                                    "type": "string",
+                                    "errorMsg": "Max length of username is 4096",
+                                    "minLength": 0,
+                                    "maxLength": 4096
+                                }
+                            ],
+                            "field": "proxy_username"
+                        },
+                        {
+                            "type": "text",
+                            "label": "Password",
+                            "encrypted": true,
+                            "validators": [
+                                {
+                                    "type": "string",
+                                    "errorMsg": "Max length of password is 8192",
+                                    "minLength": 0,
+                                    "maxLength": 8192
+                                }
+                            ],
+                            "field": "proxy_password"
+                        },
+                        {
+                            "type": "checkbox",
+                            "label": "Reverse DNS resolution",
+                            "field": "proxy_rdns"
+                        }
+                    ]
                 },
                 {
                     "type": "loggingTab"
@@ -600,7 +692,7 @@
     "meta": {
         "name": "TA-opencti-for-splunk-enterprise",
         "restRoot": "TA-opencti-for-splunk-enterprise",
-        "version": "1.0.0",
+        "version": "1.0.1",
         "displayName": "OpenCTI for Splunk Enterprise",
         "schemaVersion": "0.0.10",
         "hideUCCVersion": true,
