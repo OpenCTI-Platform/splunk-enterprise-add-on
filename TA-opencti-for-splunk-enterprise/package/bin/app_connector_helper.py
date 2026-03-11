@@ -1,18 +1,17 @@
 import requests
-import utils
 import constants
-
+import utils
 
 class SplunkAppConnectorHelper:
     def __init__(
-        self, connector_id, connector_name, opencti_url, opencti_api_key, proxies
+        self, connector_id, connector_name, opencti_url, opencti_api_key, proxy_settings
     ):
         """
         :param connector_id:
         :param connector_name:
         :param opencti_url:
         :param opencti_api_key:
-        :param proxies:
+        :param proxy_settings:
         """
         self.connector_id = connector_id
         self.connector_name = connector_name
@@ -21,9 +20,7 @@ class SplunkAppConnectorHelper:
             "Authorization": "Bearer " + opencti_api_key,
         }
         self.api_url = self.opencti_url + "/graphql"
-
-        # manage proxies configuration
-        self.proxies = utils.get_proxy_config(proxies)
+        self.proxies = utils.get_proxy_config(proxy_settings=proxy_settings)
 
     def graphql_query(self, query, variables=None):
         """

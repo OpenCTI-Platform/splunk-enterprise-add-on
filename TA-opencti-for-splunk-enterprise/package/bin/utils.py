@@ -10,17 +10,54 @@ regex_sha256 = r"[0-9a-fA-F]{64}"
 regex_sha1 = r"[0-9a-fA-F]{40}"
 regex_md5 = r"[0-9a-fA-F]{32}"
 
-def get_proxy_config(proxies):
-    if proxies.get("proxy_enabled"):
+def get_bool_val(value):
+    """
+    :param value:
+    :return:
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return bool(value)
+    if isinstance(value, str):
+        return value != "0" and value != "false"
+
+def get_proxy_config(proxy_settings):
+    """
+    :param proxy_settings:
+    :return:
+    """
+    if get_bool_val(proxy_settings.get('proxy_enabled', False)):
+
+        proxy_credentials = ""
+        if proxy_settings.get('proxy_username', False) and proxy_settings.get('proxy_password', False):
+            proxy_credentials = "{}:{}@".format(
+                proxy_settings['proxy_username'],
+                proxy_settings['proxy_password']
+            )
+        proxy_port = ""
+        if proxy_settings.get('proxy_port', False):
+            proxy_port = ":{}".format(proxy_settings['proxy_port'])
+
+
+        proxy_uri = "{}://{}{}{}".format(
+            proxy_settings.get('proxy_type', 'http'),
+            proxy_credentials,
+            proxy_settings.get('proxy_url'),
+            proxy_port
+        )
         return {
-            "http": proxies.get("proxy_url"),
-            "https": proxies.get("proxy_url")
+            "http": proxy_uri,
+            "https": proxy_uri
         }
     else:
         return None
 
-def is_ipv6(value):
-    """Determine whether the provided string is an IPv6 address or valid IPv6 CIDR."""
+def is_ipv6(value: str):
+    """
+    :param value:
+    :return:
+    """
     try:
         ipaddress.IPv6Address(value)  # Check for individual IP
         return True
@@ -31,8 +68,11 @@ def is_ipv6(value):
         except (ipaddress.AddressValueError, ipaddress.NetmaskValueError):
             return False
 
-def is_ipv4(value):
-    """Determine whether the provided string is an IPv4 address or valid IPv4 CIDR."""
+def is_ipv4(value: str):
+    """
+    :param value:
+    :return:
+    """
     try:
         ipaddress.IPv4Address(value)  # Check for individual IP
         return True
@@ -43,7 +83,11 @@ def is_ipv4(value):
         except (ipaddress.AddressValueError, ipaddress.NetmaskValueError):
             return False
 
-def get_hash_type(value):
+def get_hash_type(value: str):
+    """
+    :param value:
+    :return:
+    """
     if re.match(regex_sha512, value):
         return "sha512"
     elif re.match(regex_sha256, value):
@@ -55,7 +99,7 @@ def get_hash_type(value):
     else:
         return None
 
-def generate_identity_id(name, identity_class):
+def generate_identity_id(name: str, identity_class: str):
     """
     :param name:
     :param identity_class:
@@ -66,7 +110,7 @@ def generate_identity_id(name, identity_class):
     entity_id = str(uuid.uuid5(uuid.UUID("00abedb4-aa42-466c-9c01-fed23315a9b7"), data))
     return "identity--" + entity_id
 
-def generate_incident_id(name, created):
+def generate_incident_id(name: str, created: str):
     """
     :param name:
     :param created:
