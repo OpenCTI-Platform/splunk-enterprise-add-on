@@ -1,5 +1,6 @@
 import json
 import logging
+import hashlib
 
 import import_declare_test
 import splunklib.client as client
@@ -43,20 +44,32 @@ SUPPORTED_TYPES = {
     },
 }
 
-
-# Identity subtypes (x_opencti_type or identity_class) → KV store
+# Identity subtypes (x_opencti_type or identity_class) -> KV store
 IDENTITY_KVSTORE_MAP = {
     "organization": IDENTITIES_KVSTORE_NAME
 }
 
-# Map entity types → KV store collections.
-# For indicators we reuse INDICATORS_KVSTORE_NAME so you can point it at
-# either `opencti_indicators` or `opencti_lookup` via constants.py.
+# Map entity types -> KV store collections.
 ENTITY_KVSTORE_MAP = {
     "indicator": INDICATORS_KVSTORE_NAME,
     "report": REPORTS_KVSTORE_NAME,
     "marking-definition": MARKINGS_KVSTORE_NAME,
 }
+
+# ---------------------------------------------------------------------------
+# Splunk ES Threat Intel collections
+# Maps OpenCTI main_observable_type -> (ES collection name, ES key field)
+# ---------------------------------------------------------------------------
+ES_INTEL_MAP = {
+    "IPv4-Addr":   ("ip_intel",     "ip"),
+    "IPv6-Addr":   ("ip_intel",     "ip"),
+    "Domain-Name": ("domain_intel", "domain"),
+    "Url":         ("url_intel",    "url"),
+    "StixFile":    ("file_intel",   "file_hash"),
+    "Email-Addr":  ("email_intel",  "src_user"),
+}
+
+ES_APP_NAME = "SplunkEnterpriseSecuritySuite"
 
 
 def logger_for_input(input_name: str) -> logging.Logger:
@@ -69,20 +82,30 @@ def get_account_api_key(session_key: str, account_name: str):
         ADDON_NAME,
         realm=f"__REST_CREDENTIAL__#{ADDON_NAME}#configs/conf-ta-opencti-for-splunk-enterprise_account",
     )
-
-
     account_conf_file = cfm.get_conf("ta-opencti-for-splunk-enterprise_account")
     return account_conf_file.get(account_name).get("api_key")
+
 
 def validate_input(definition: smi.ValidationDefinition):
     return
 
+
 def exist_in_kvstore(kv_store, key_id):
+    """
+    Check whether a record exists in a KV store collection by _key.
+    Only treats HTTP 404 as 'not found'; re-raises all other exceptions
+    so genuine errors are not silently swallowed.
+    """
     try:
         kv_store.query_by_id(key_id)
         return True
-    except:
-        return False
+    except client.HTTPError as e:
+        if e.status == 404:
+            return False
+        raise
+    except Exception:
+        raise
+
 
 def parse_stix_pattern(stix_pattern):
     try:
@@ -102,17 +125,13 @@ def parse_stix_pattern(stix_pattern):
                             "value": data_value.strip("'"),
                         }
     except Exception as e:
-        print(f"[!] STIX pattern parse error: {e} | pattern = {stix_pattern}")
+        logging.getLogger(__name__).warning(
+            f"STIX pattern parse error: {e} | pattern = {stix_pattern}"
+        )
         return None
 
+
 def enrich_payload(stream_id, input_name, payload, msg_event):
-    """
-    :param stream_id:
-    :param input_name:
-    :param payload:
-    :param msg_event:
-    :return:
-    """
     payload["stream_id"] = stream_id
     payload["input_name"] = input_name
     payload["event"] = msg_event
@@ -121,25 +140,19 @@ def enrich_payload(stream_id, input_name, payload, msg_event):
     if created_by_id:
         payload["created_by"] = IDENTITY_DEFs.get(created_by_id)
 
-    # Marking definitions -> human-readable markings
     payload["markings"] = []
     for marking_ref_id in payload.get("object_marking_refs", []):
         marking_value = MARKING_DEFs.get(marking_ref_id)
         if marking_value:
             payload["markings"].append(marking_value)
 
-    # --- LABELS ---
-    # If labels are already present at top level, keep them.
-    # Otherwise, try to extract from extensions before we delete them.
     if "labels" in payload and payload["labels"] is not None:
-        # Ensure it's always a list (Splunk MV friendly)
         if not isinstance(payload["labels"], list):
             payload["labels"] = [payload["labels"]]
     else:
         extracted_labels = []
         if "extensions" in payload:
             for ext in payload["extensions"].values():
-                # Common patterns you might see from OpenCTI STIX
                 if "labels" in ext and ext["labels"]:
                     if isinstance(ext["labels"], list):
                         extracted_labels.extend(ext["labels"])
@@ -150,14 +163,16 @@ def enrich_payload(stream_id, input_name, payload, msg_event):
                         extracted_labels.extend(ext["x_opencti_labels"])
                     else:
                         extracted_labels.append(ext["x_opencti_labels"])
-        if extracted_labels:
-            payload["labels"] = list(set(extracted_labels))  # de-dup
-        else:
-            payload["labels"] = []
+        payload["labels"] = list(set(extracted_labels)) if extracted_labels else []
 
     parsed_stix = parse_stix_pattern(payload["pattern"])
     if parsed_stix is None:
+        logging.getLogger(__name__).warning(
+            f"Unsupported or unparseable STIX pattern, skipping indicator "
+            f"{payload.get('id')}: {payload.get('pattern')}"
+        )
         return None
+
     payload["type"] = parsed_stix["type"]
     payload["value"] = parsed_stix["value"]
 
@@ -178,19 +193,14 @@ def enrich_payload(stream_id, input_name, payload, msg_event):
 
     if "external_references" in payload:
         del payload["external_references"]
-    # Ensure we always have a _key for KV store operations
+
     if "_key" not in payload and "id" in payload:
         payload["_key"] = payload["id"]
+
     return payload
 
+
 def enrich_generic_payload(stream_id, input_name, payload, msg_event):
-    """
-    :param stream_id:
-    :param input_name:
-    :param payload:
-    :param msg_event:
-    :return:
-    """
     payload["stream_id"] = stream_id
     payload["input_name"] = input_name
     payload["event"] = msg_event
@@ -205,7 +215,6 @@ def enrich_generic_payload(stream_id, input_name, payload, msg_event):
         if marking_value:
             payload["markings"].append(marking_value)
 
-    # --- LABELS ---
     if "labels" in payload and payload["labels"] is not None:
         if not isinstance(payload["labels"], list):
             payload["labels"] = [payload["labels"]]
@@ -223,10 +232,7 @@ def enrich_generic_payload(stream_id, input_name, payload, msg_event):
                         extracted_labels.extend(ext["x_opencti_labels"])
                     else:
                         extracted_labels.append(ext["x_opencti_labels"])
-        if extracted_labels:
-            payload["labels"] = list(set(extracted_labels))
-        else:
-            payload["labels"] = []
+        payload["labels"] = list(set(extracted_labels)) if extracted_labels else []
 
     if "extensions" in payload:
         for ext in payload["extensions"].values():
@@ -241,13 +247,17 @@ def enrich_generic_payload(stream_id, input_name, payload, msg_event):
             ]:
                 if attr in ext:
                     payload["_key" if attr == "id" else attr] = ext[attr]
+        # Fix: delete extensions to avoid bloating the KV store record
+        del payload["extensions"]
 
     if "external_references" in payload:
         del payload["external_references"]
-    # Ensure we always have a _key for KV store operations
+
     if "_key" not in payload and "id" in payload:
         payload["_key"] = payload["id"]
+
     return payload
+
 
 def get_kvstore_name_for_entity(entity_type, data):
     """
@@ -259,21 +269,128 @@ def get_kvstore_name_for_entity(entity_type, data):
         if not x_type:
             return None
         return IDENTITY_KVSTORE_MAP.get(x_type)
-
     return ENTITY_KVSTORE_MAP.get(entity_type)
 
+
+def map_score_to_weight(score):
+    """Map OpenCTI score (0-100) to Splunk ES intel weight (1-3)."""
+    try:
+        score = int(score or 0)
+    except (ValueError, TypeError):
+        return 1
+    if score >= 75:
+        return 3
+    if score >= 40:
+        return 2
+    return 1
+
+
+def parse_event_timestamp(timestamp_str, logger):
+    """
+    Parse an OpenCTI ISO timestamp to a Unix float.
+    Handles both microsecond and non-microsecond variants.
+    Returns None if unparseable.
+    """
+    for fmt in ("%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ"):
+        try:
+            return datetime.strptime(timestamp_str, fmt).timestamp()
+        except (ValueError, TypeError):
+            continue
+    logger.warning(f"Unable to parse timestamp: {timestamp_str}")
+    return None
+
+
+# ---------------------------------------------------------------------------
+# ES Intel helpers
+# ---------------------------------------------------------------------------
+
+def _es_intel_key(value, source):
+    """Stable, collision-resistant _key for ES intel records."""
+    return hashlib.md5(f"{value}|{source}".encode()).hexdigest()
+
+
+def write_to_es_intel(es_service, parsed_stix, es_kvstore_handles, logger):
+    """
+    Upsert a parsed indicator into the appropriate Splunk ES intel KV store.
+    Only indicators with a recognised main_observable_type are written.
+    """
+    obs_type = parsed_stix.get("main_observable_type")
+    if obs_type not in ES_INTEL_MAP:
+        logger.debug(f"ES intel: no mapping for observable type '{obs_type}', skipping.")
+        return
+
+    collection_name, field = ES_INTEL_MAP[obs_type]
+    value = parsed_stix.get("value")
+    if not value:
+        logger.warning("ES intel: indicator has no value, skipping.")
+        return
+
+    source = "opencti:{}".format(
+        parsed_stix.get("input_name") or parsed_stix.get("stream_id") or "unknown"
+    )
+    record = {
+        "_key":            _es_intel_key(value, source),
+        field:             value,
+        "description":     parsed_stix.get("name", ""),
+        "source":          source,
+        "weight":          map_score_to_weight(parsed_stix.get("score")),
+        "expiration_date": parsed_stix.get("valid_until", ""),
+    }
+
+    try:
+        if collection_name not in es_kvstore_handles:
+            es_kvstore_handles[collection_name] = es_service.kvstore[collection_name].data
+            logger.info(f"ES intel: initialised KV handle for '{collection_name}'")
+
+        es_kvstore_handles[collection_name].batch_save(record)
+        logger.info(f"ES intel [{collection_name}]: upserted {field}={value} source={source}")
+    except Exception as e:
+        logger.error(f"ES intel: failed to write to '{collection_name}': {e}")
+
+
+def delete_from_es_intel(es_service, parsed_stix, es_kvstore_handles, logger):
+    """
+    Delete an indicator from the appropriate Splunk ES intel KV store.
+    Scoped by both indicator value and source to avoid cross-feed deletions.
+    """
+    obs_type = parsed_stix.get("main_observable_type")
+    if obs_type not in ES_INTEL_MAP:
+        logger.debug(f"ES intel: no mapping for observable type '{obs_type}', skipping delete.")
+        return
+
+    collection_name, field = ES_INTEL_MAP[obs_type]
+    value = parsed_stix.get("value")
+    if not value:
+        logger.warning("ES intel: delete called with no indicator value, skipping.")
+        return
+
+    source = "opencti:{}".format(
+        parsed_stix.get("input_name") or parsed_stix.get("stream_id") or "unknown"
+    )
+
+    try:
+        if collection_name not in es_kvstore_handles:
+            es_kvstore_handles[collection_name] = es_service.kvstore[collection_name].data
+            logger.info(f"ES intel: initialised KV handle for '{collection_name}'")
+
+        es_kvstore_handles[collection_name].delete(
+            query=json.dumps({
+                "$and": [
+                    {field:    {"$eq": value}},
+                    {"source": {"$eq": source}},
+                ]
+            })
+        )
+        logger.info(f"ES intel [{collection_name}]: deleted {field}={value} source={source}")
+    except Exception as e:
+        logger.error(f"ES intel: failed to delete from '{collection_name}': {e}")
+
+
+# ---------------------------------------------------------------------------
+# Modular input entry points
+# ---------------------------------------------------------------------------
+
 def stream_events(inputs: smi.InputDefinition, event_writer: smi.EventWriter):
-    # inputs.inputs is a Python dictionary object like:
-    # {
-    #   "opencti_stream://<input_name>": {
-    #     "account": "<account_name>",
-    #     "disabled": "0",
-    #     "host": "$decideOnStartup",
-    #     "index": "<index_name>",
-    #     "interval": "<interval_value>",
-    #     "python.version": "python3",
-    #   },
-    # }
     for input_name, input_item in inputs.inputs.items():
 
         normalized_input_name = input_name.split("/")[-1]
@@ -300,14 +417,21 @@ def stream_events(inputs: smi.InputDefinition, event_writer: smi.EventWriter):
             log.modular_input_start(logger, normalized_input_name)
             logger.info("OpenCTI data input module start")
 
-            input_type = input_item.get("input_type").strip().lower()
-            stream_id = input_item.get("stream_id")
+            # ------------------------------------------------------------------
+            # Read boolean flags from input config.
+            # UCC checkboxes arrive as the strings "0" or "1".
+            # ------------------------------------------------------------------
+            index_output    = str(input_item.get("index_output", "0")).strip() == "1"
+            es_intel_output = str(input_item.get("es_intel_output", "0")).strip() == "1"
+
+            stream_id    = input_item.get("stream_id")
             target_index = input_item.get("index")
-            import_from = input_item.get("import_from")
+            import_from  = input_item.get("import_from")
 
             logger.info(f"OpenCTI URL: {opencti_url}")
             logger.info(f"Fetching data from OpenCTI stream.id: {stream_id}")
-            logger.info(f"Selected input type: {input_type}")
+            logger.info(f"Index output enabled: {index_output}")
+            logger.info(f"ES intel output enabled: {es_intel_output}")
 
             # resolve proxy configurations
             proxy_settings = conf_manager.get_proxy_dict(
@@ -328,7 +452,7 @@ def stream_events(inputs: smi.InputDefinition, event_writer: smi.EventWriter):
             )
 
             kvstore_checkpointer = checkpointer.KVStoreCheckpointer(
-                ADDON_NAME+"_checkpoints",
+                ADDON_NAME + "_checkpoints",
                 session_key,
                 ADDON_NAME,
             )
@@ -352,21 +476,38 @@ def stream_events(inputs: smi.InputDefinition, event_writer: smi.EventWriter):
                 live_stream_url += f"?recover={state['recover_until']}"
             logger.debug(f"Live stream URL: {live_stream_url}")
 
+            # ------------------------------------------------------------------
+            # Primary Splunk service — scoped to this TA (always required)
+            # ------------------------------------------------------------------
             service = None
             kvstore_handles = {}
 
-            logger.debug(f"Input Type: {input_type}")
             try:
-                logger.debug("Initializing Splunk service for KV Store")
-
-                service = client.connect(
-                    token=session_key,
-                    app=ADDON_NAME
-                )
-                logger.info("Connected to Splunk service for KV Store access")
+                service = client.connect(token=session_key, app=ADDON_NAME)
+                logger.info("Connected to Splunk service (TA context)")
             except Exception as e:
                 logger.error(f"Failed to connect to Splunk service: {e}")
                 return
+
+            # ------------------------------------------------------------------
+            # Secondary Splunk service — scoped to ES (only when es_intel enabled)
+            # ------------------------------------------------------------------
+            es_service = None
+            es_kvstore_handles = {}
+
+            if es_intel_output:
+                try:
+                    es_service = client.connect(
+                        token=session_key,
+                        app=ES_APP_NAME,
+                    )
+                    logger.info(f"Connected to Splunk service (ES context: {ES_APP_NAME})")
+                except Exception as e:
+                    logger.error(
+                        f"Failed to connect to ES app context '{ES_APP_NAME}': {e}. "
+                        f"ES intel output will be disabled for this run."
+                    )
+                    es_intel_output = False
 
             proxies = utils.get_proxy_config(proxy_settings=proxy_settings)
             try:
@@ -382,131 +523,105 @@ def stream_events(inputs: smi.InputDefinition, event_writer: smi.EventWriter):
                     verify=VERIFY_SSL,
                     proxies=proxies,
                 )
+
                 for msg in messages:
                     if msg.event not in ["create", "update", "delete"]:
                         continue
+
                     logger.debug(f"Received message ID: {msg.id} | Event: {msg.event}")
                     message_payload = json.loads(msg.data)
                     logger.debug(f"Message payload: {message_payload}")
                     data = message_payload.get("data", {})
                     entity_type = data.get("type")
 
+                    # Keep in-memory caches warm for markings and identities
                     if entity_type == "identity":
                         IDENTITY_DEFs[data["id"]] = data.get("name", "Unknown")
                     elif entity_type == "marking-definition":
                         MARKING_DEFs[data["id"]] = data.get("name", "Unknown")
 
+                    # ----------------------------------------------------------
+                    # Enrich — one pipeline regardless of output destinations
+                    # ----------------------------------------------------------
                     parsed_stix = None
                     if entity_type == "indicator" and data.get("pattern_type") == "stix":
                         parsed_stix = enrich_payload(stream_id, input_name, data, msg.event)
-                        try:
-                            enrich_row = connector_helper.get_indicator_enrichment(data["id"])
-                            if enrich_row:
-                                parsed_stix["attack_patterns"] = enrich_row["attack_patterns"]
-                                parsed_stix["malware"] = enrich_row["malware"]
-                                parsed_stix["threat_actors"] = enrich_row["threat_actors"]
-                                parsed_stix["vulnerabilities"] = enrich_row["vulnerabilities"]
-                        except Exception as e:
-                            logger.warning(
-                                f"OpenCTI enrichment failed for {data['id']}: {e}"
-                            )
+                        if parsed_stix is not None:
+                            try:
+                                enrich_row = connector_helper.get_indicator_enrichment(data["id"])
+                                if enrich_row:
+                                    parsed_stix["attack_patterns"]  = enrich_row["attack_patterns"]
+                                    parsed_stix["malware"]           = enrich_row["malware"]
+                                    parsed_stix["threat_actors"]     = enrich_row["threat_actors"]
+                                    parsed_stix["vulnerabilities"]   = enrich_row["vulnerabilities"]
+                            except Exception as e:
+                                logger.warning(
+                                    f"OpenCTI enrichment failed for {data['id']}: {e}"
+                                )
                     else:
                         parsed_stix = enrich_generic_payload(stream_id, input_name, data, msg.event)
+
                     if parsed_stix is None:
                         logger.error(f"Could not enrich data for msg {msg.id}")
                         continue
 
-                    key = parsed_stix.get("_key") or data.get("id") or msg.id
+                    key_id = parsed_stix.get("_key")
                     indicator_value = parsed_stix.get("value") or data.get("value")
                     logger.info(
-                        f"[Indicator {parsed_stix.get('_key')}] Processing value={indicator_value} event={msg.event}"
+                        f"[{entity_type} {key_id}] Processing value={indicator_value} event={msg.event}"
                     )
-                    logger.debug(f"{data}")
-                    if input_type == "kvstore":
-                        # Decide which KV collection to use based on entity_type and x_opencti_type
-                        kvstore_name = get_kvstore_name_for_entity(entity_type, parsed_stix)
 
-                        if not kvstore_name:
-                            logger.debug(
-                                f"No KV store mapping for entity_type={entity_type}, "
-                                f"x_opencti_type={parsed_stix.get('x_opencti_type')}"
+                    # ==========================================================
+                    # 1. PRIMARY — Always write to TA KV Store
+                    # ==========================================================
+                    kvstore_name = get_kvstore_name_for_entity(entity_type, parsed_stix)
+
+                    if not kvstore_name:
+                        logger.debug(
+                            f"No KV store mapping for entity_type={entity_type}, "
+                            f"x_opencti_type={parsed_stix.get('x_opencti_type')}"
+                        )
+                    else:
+                        try:
+                            if kvstore_name not in kvstore_handles:
+                                kvstore_handles[kvstore_name] = service.kvstore[kvstore_name].data
+                                logger.info(f"Initialized KV handle for collection: {kvstore_name}")
+
+                            kv = kvstore_handles[kvstore_name]
+
+                            if msg.event == "delete":
+                                if key_id and exist_in_kvstore(kv, key_id):
+                                    kv.delete_by_id(key_id)
+                                    logger.info(f"KV Store [{kvstore_name}]: Deleted {key_id}")
+                            else:
+                                parsed_stix["added_at"] = datetime.now(timezone.utc).strftime(
+                                    "%Y-%m-%dT%H:%M:%SZ"
+                                )
+                                kv.batch_save(parsed_stix)
+                                logger.info(f"KV Store [{kvstore_name}]: Inserted/Updated {key_id}")
+
+                        except Exception as kv_ex:
+                            logger.error(
+                                f"KV Store operation failed for collection={kvstore_name}: {kv_ex}"
                             )
+                            continue
+
+                    # ==========================================================
+                    # 2. CONDITIONAL — Write/delete in Splunk ES intel KV stores
+                    # ==========================================================
+                    if es_intel_output and es_service and entity_type == "indicator":
+                        if msg.event == "delete":
+                            delete_from_es_intel(es_service, parsed_stix, es_kvstore_handles, logger)
                         else:
-                            try:
-                                # Lazily cache the kvstore.data handle per collection
-                                if kvstore_name not in kvstore_handles:
-                                    kvstore_handles[kvstore_name] = service.kvstore[
-                                        kvstore_name
-                                    ].data
-                                    logger.info(
-                                        f"Initialized KV handle for collection: {kvstore_name}"
-                                    )
+                            write_to_es_intel(es_service, parsed_stix, es_kvstore_handles, logger)
 
-                                kv = kvstore_handles[kvstore_name]
-                                key_id = parsed_stix.get("_key")
-
-                                if msg.event == "delete":
-                                    if key_id and exist_in_kvstore(kv, key_id):
-                                        kv.delete_by_id(key_id)
-                                        logger.info(
-                                            f"KV Store [{kvstore_name}]: Deleted {key_id}"
-                                        )
-                                else:
-                                    parsed_stix["added_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-                                    # Upsert into this KV collection
-                                    kv.batch_save(*[parsed_stix])
-                                    logger.info(
-                                        f"KV Store [{kvstore_name}]: Inserted/Updated {key_id}"
-                                    )
-                            except Exception as kv_ex:
-                                logger.error(
-                                    f"KV Store operation failed for collection={kvstore_name}: {kv_ex}"
-                                )
-                                continue
-
-                    elif input_type == "index":
-                        # If this is an indicator delete event, also purge it from the indicator KV
-                        if entity_type == "indicator" and msg.event == "delete":
-                            try:
-                                # Lazily init the indicators KV handle via kvstore_handles
-                                if INDICATORS_KVSTORE_NAME not in kvstore_handles:
-                                    kvstore_handles[INDICATORS_KVSTORE_NAME] = service.kvstore[
-                                        INDICATORS_KVSTORE_NAME
-                                    ].data
-                                    logger.info(
-                                        f"Initialized KV handle for collection: {INDICATORS_KVSTORE_NAME}"
-                                    )
-
-                                kv_indicators = kvstore_handles[INDICATORS_KVSTORE_NAME]
-                                key_id = parsed_stix.get("id")
-
-                                if key_id and exist_in_kvstore(kv_indicators, key_id):
-                                    kv_indicators.delete_by_id(key_id)
-                                    logger.info(
-                                        f"KV Store [{INDICATORS_KVSTORE_NAME}]: Deleted {key_id} on delete event"
-                                    )
-                                else:
-                                    logger.debug(
-                                        f"No existing KV entry for {key_id} in [{INDICATORS_KVSTORE_NAME}]"
-                                    )
-                            except Exception as e:
-                                logger.warning(
-                                    f"Failed to delete indicator from KV store [{INDICATORS_KVSTORE_NAME}]: {e}"
-                                )
-
-                        # Always write the event to the index (create/update/delete)
-                        event_time = parsed_stix.get("updated_at")
-                        if event_time:
-                            try:
-                                event_time = datetime.strptime(
-                                    event_time, "%Y-%m-%dT%H:%M:%S.%fZ"
-                                ).timestamp()
-                            except ValueError:
-                                logger.warning(
-                                    f"Unable to parse updated_at timestamp: {event_time}"
-                                )
-                                event_time = None
-
+                    # ==========================================================
+                    # 3. CONDITIONAL — Write to Splunk index (audit / replay)
+                    # ==========================================================
+                    if index_output:
+                        event_time = parse_event_timestamp(
+                            parsed_stix.get("updated_at"), logger
+                        )
                         event_writer.write_event(
                             smi.Event(
                                 data=json.dumps(parsed_stix),
@@ -519,10 +634,9 @@ def stream_events(inputs: smi.InputDefinition, event_writer: smi.EventWriter):
                                 unbroken=True,
                             )
                         )
-
-                    else:
-                        logger.warning(f"Unknown input_type: {input_type}")
-                        continue
+                        # Write a tombstone event for deletes so the index has a full audit trail
+                        if msg.event == "delete":
+                            logger.debug(f"Index tombstone written for deleted {entity_type} {key_id}")
 
                     state["start_from"] = msg.id
                     kvstore_checkpointer.update(input_name, json.dumps(state))
@@ -532,5 +646,7 @@ def stream_events(inputs: smi.InputDefinition, event_writer: smi.EventWriter):
                 sys.excepthook(*sys.exc_info())
 
         except Exception as e:
-            log.log_exception(logger, e, "my custom error type", msg_before="Exception raised while ingesting data")
-
+            log.log_exception(
+                logger, e, "opencti_stream_helper",
+                msg_before="Exception raised while ingesting data"
+            )

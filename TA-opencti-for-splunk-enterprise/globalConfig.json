@@ -221,25 +221,20 @@
                             ]
                         },
                         {
-                            "field": "input_type",
-                            "label": "Input Type",
-                            "help": "Choose where to store the data.\n\t•\tKV Store keeps structured data for lookups.\n\t•\tIndex saves events for searching and alerting.",
+                            "field": "index_output",
+                            "label": "Enable Index Output",
+                            "help": "Also write events to a Splunk index for audit and replay purposes. KV Store is always the primary store and is always written.",
                             "required": false,
-                            "type": "singleSelect",
-                            "defaultValue": "kvstore",
-                            "options": {
-                                "disableSearch": true,
-                                "autoCompleteFields": [
-                                    {
-                                        "value": "kvstore",
-                                        "label": "KV Store"
-                                    },
-                                    {
-                                        "value": "index",
-                                        "label": "Index"
-                                    }
-                                ]
-                            }
+                            "type": "checkbox",
+                            "defaultValue": false
+                        },
+                        {
+                            "field": "es_intel_output",
+                            "label": "Enable Splunk ES Threat Intel Integration",
+                            "help": "Write indicators into Splunk Enterprise Security threat intelligence KV stores (ip_intel, domain_intel, url_intel, file_intel, email_intel). Requires Splunk Enterprise Security to be installed.",
+                            "required": false,
+                            "type": "checkbox",
+                            "defaultValue": false
                         }
                     ],
                     "inputHelperModule": "opencti_stream_helper",
@@ -302,8 +297,12 @@
                         "label": "Import From (Days)"
                     },
                     {
-                        "field": "input_type",
-                        "label": "Input Type"
+                        "field": "index_output",
+                        "label": "Index Output"
+                    },
+                    {
+                        "field": "es_intel_output",
+                        "label": "ES Intel Integration"
                     }
                 ]
             }
