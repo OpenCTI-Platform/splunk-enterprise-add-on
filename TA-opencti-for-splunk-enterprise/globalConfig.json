@@ -231,7 +231,7 @@
                         {
                             "field": "es_intel_output",
                             "label": "Enable Splunk ES Threat Intel Integration",
-                            "help": "Write indicators into Splunk Enterprise Security threat intelligence KV stores (ip_intel, domain_intel, url_intel, file_intel, email_intel). Requires Splunk Enterprise Security to be installed.",
+                            "help": "Write indicators into Splunk Enterprise Security threat intelligence KV stores (ip_intel, domain_intel, http_intel, file_intel, email_intel). Requires Splunk Enterprise Security to be installed.",
                             "required": false,
                             "type": "checkbox",
                             "defaultValue": false
