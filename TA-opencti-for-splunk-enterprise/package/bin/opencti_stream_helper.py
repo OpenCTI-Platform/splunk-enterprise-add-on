@@ -64,7 +64,7 @@ ES_INTEL_MAP = {
     "IPv4-Addr":   ("ip_intel",     "ip"),
     "IPv6-Addr":   ("ip_intel",     "ip"),
     "Domain-Name": ("domain_intel", "domain"),
-    "Url":         ("url_intel",    "url"),
+    "Url":         ("http_intel",   "url"),
     "StixFile":    ("file_intel",   "file_hash"),
     "Email-Addr":  ("email_intel",  "src_user"),
 }
@@ -342,7 +342,7 @@ def write_to_es_intel(es_service, parsed_stix, es_kvstore_handles, logger):
             es_kvstore_handles[collection_name] = es_service.kvstore[collection_name].data
             logger.info(f"ES intel: initialised KV handle for '{collection_name}'")
 
-        es_kvstore_handles[collection_name].batch_save(record)
+        es_kvstore_handles[collection_name].batch_save(*[record])
         logger.info(f"ES intel [{collection_name}]: upserted {field}={value} source={source}")
     except Exception as e:
         logger.error(f"ES intel: failed to write to '{collection_name}': {e}")
