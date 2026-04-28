@@ -10,7 +10,7 @@ import utils
 
 from app_connector_helper import SplunkAppConnectorHelper
 from constants import (
-    VERIFY_SSL,
+    resolve_ssl_verify,
     INDICATORS_KVSTORE_NAME,
     REPORTS_KVSTORE_NAME,
     MARKINGS_KVSTORE_NAME,
@@ -296,6 +296,14 @@ def stream_events(inputs: smi.InputDefinition, event_writer: smi.EventWriter):
             conf = cfm.get_conf("ta-opencti-for-splunk-enterprise_settings")
             opencti_url = conf.get("account").get("opencti_url")
             opencti_api_key = conf.get("account").get("opencti_api_key")
+            verify_ssl_raw = conf.get("account").get("verify_ssl", "1")
+            ca_bundle_path = conf.get("account").get("ca_bundle_path", "")
+            ssl_verify = resolve_ssl_verify(verify_ssl_raw, ca_bundle_path)
+            if ca_bundle_path and ca_bundle_path.strip() and ssl_verify is True:
+                logger.warning(
+                    f"CA bundle path '{ca_bundle_path.strip()}' does not exist or is not a file; "
+                    "falling back to default SSL verification."
+                )
 
             log.modular_input_start(logger, normalized_input_name)
             logger.info("OpenCTI data input module start")
@@ -325,6 +333,7 @@ def stream_events(inputs: smi.InputDefinition, event_writer: smi.EventWriter):
                 opencti_url=opencti_url,
                 opencti_api_key=opencti_api_key,
                 proxy_settings=proxy_settings,
+                verify=ssl_verify,
             )
 
             kvstore_checkpointer = checkpointer.KVStoreCheckpointer(
@@ -379,7 +388,7 @@ def stream_events(inputs: smi.InputDefinition, event_writer: smi.EventWriter):
                         "no-dependencies": "true",
                         "with-inferences": "true",
                     },
-                    verify=VERIFY_SSL,
+                    verify=ssl_verify,
                     proxies=proxies,
                 )
                 for msg in messages:

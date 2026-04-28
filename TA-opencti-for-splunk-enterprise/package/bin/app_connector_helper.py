@@ -1,10 +1,9 @@
 import requests
-import constants
 import utils
 
 class SplunkAppConnectorHelper:
     def __init__(
-        self, connector_id, connector_name, opencti_url, opencti_api_key, proxy_settings
+        self, connector_id, connector_name, opencti_url, opencti_api_key, proxy_settings, verify=True
     ):
         """
         :param connector_id:
@@ -12,6 +11,7 @@ class SplunkAppConnectorHelper:
         :param opencti_url:
         :param opencti_api_key:
         :param proxy_settings:
+        :param verify: Value to pass as ``verify=`` to requests (True, False, or CA bundle path).
         """
         self.connector_id = connector_id
         self.connector_name = connector_name
@@ -21,6 +21,7 @@ class SplunkAppConnectorHelper:
         }
         self.api_url = self.opencti_url + "/graphql"
         self.proxies = utils.get_proxy_config(proxy_settings=proxy_settings)
+        self.verify = verify
 
     def graphql_query(self, query, variables=None):
         """
@@ -37,7 +38,7 @@ class SplunkAppConnectorHelper:
             url=self.api_url,
             json=body,
             headers=self.headers,
-            verify=constants.VERIFY_SSL,
+            verify=self.verify,
             proxies=self.proxies,
         )
 
@@ -176,7 +177,7 @@ class SplunkAppConnectorHelper:
             url=self.api_url,
             json={"query": query, "variables": input},
             headers=self.headers,
-            verify=constants.VERIFY_SSL,
+            verify=self.verify,
             proxies=self.proxies,
         )
 
@@ -203,7 +204,7 @@ class SplunkAppConnectorHelper:
             url=self.api_url,
             json={"query": query, "variables": variables},
             headers=self.headers,
-            verify=constants.VERIFY_SSL,
+            verify=self.verify,
             proxies=self.proxies,
         )
         if r.status_code != 200:
