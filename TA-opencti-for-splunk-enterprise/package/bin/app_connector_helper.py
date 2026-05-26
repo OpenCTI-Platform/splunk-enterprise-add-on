@@ -1,9 +1,17 @@
 import requests
 import utils
+from typing import Union
+
 
 class SplunkAppConnectorHelper:
     def __init__(
-        self, connector_id, connector_name, opencti_url, opencti_api_key, proxy_settings, verify=True
+        self,
+        connector_id,
+        connector_name,
+        opencti_url,
+        opencti_api_key,
+        proxy_settings,
+        verify: Union[bool, str] = True,
     ):
         """
         :param connector_id:
@@ -11,7 +19,9 @@ class SplunkAppConnectorHelper:
         :param opencti_url:
         :param opencti_api_key:
         :param proxy_settings:
-        :param verify: Value to pass as ``verify=`` to requests (True, False, or CA bundle path).
+        :param verify:
+            Value to pass as ``verify=`` to requests
+            (True, False, or CA bundle path).
         """
         self.connector_id = connector_id
         self.connector_name = connector_name
@@ -43,7 +53,9 @@ class SplunkAppConnectorHelper:
         )
 
         if r.status_code != 200:
-            raise Exception(f"OpenCTI GraphQL HTTP {r.status_code}: {r.content}")
+            raise Exception(
+                f"OpenCTI GraphQL HTTP {r.status_code}: {r.content}"
+            )
 
         data = r.json()
         if "errors" in data:
@@ -99,7 +111,10 @@ class SplunkAppConnectorHelper:
           }
         }
         """
-        data = self.graphql_query(query, {"id": indicator_id, "first": max_edges})
+        data = self.graphql_query(
+            query,
+            {"id": indicator_id, "first": max_edges}
+        )
         indicator = data.get("indicator") or {}
         rels = indicator.get("stixCoreRelationships") or {}
         return rels.get("edges") or []
@@ -184,7 +199,8 @@ class SplunkAppConnectorHelper:
         if r.status_code != 200:
             raise Exception(
                 f"An exception occurred while registering Splunk App, "
-                f"received status code: {r.status_code}, exception: {r.content}"
+                f"received status code: {r.status_code}, "
+                f"exception: {r.content}"
             )
 
     def send_stix_bundle(self, bundle):
@@ -210,5 +226,6 @@ class SplunkAppConnectorHelper:
         if r.status_code != 200:
             raise Exception(
                 f"An exception occurred while sending STIX bundle, "
-                f"received status code: {r.status_code}, exception: {r.content}"
+                f"received status code: {r.status_code}, "
+                f"exception: {r.content}"
             )

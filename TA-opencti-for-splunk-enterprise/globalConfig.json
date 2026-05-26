@@ -38,17 +38,10 @@
                             ]
                         },
                         {
-                            "type": "checkbox",
-                            "label": "Verify SSL Certificate",
-                            "field": "verify_ssl",
-                            "defaultValue": true,
-                            "help": "Uncheck to disable SSL certificate verification (not recommended for production). Use the Custom CA Bundle Path field instead if you need to verify against custom certificates."
-                        },
-                        {
                             "type": "text",
                             "label": "Custom CA Bundle Path",
                             "field": "ca_bundle_path",
-                            "help": "Absolute path to a PEM-formatted CA certificate bundle file to use as the trust store when verifying the OpenCTI server certificate. Leave blank to use the default certificate store. Has no effect when 'Verify SSL Certificate' is unchecked.",
+                            "help": "Absolute path to a custom CA bundle PEM file. If set, this bundle is used for SSL verification instead of the default system bundle. Leave empty to use the default certificate store. SSL verification is always enabled.",
                             "required": false,
                             "validators": [
                                 {
