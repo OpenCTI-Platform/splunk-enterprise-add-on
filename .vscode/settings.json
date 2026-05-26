@@ -1,6 +1,0 @@
-{
-  "python.analysis.extraPaths": [
-    "TA-opencti-for-splunk-enterprise/package/bin",
-    "TA-opencti-for-splunk-enterprise/bin/ta_opencti_for_splunk_enterprise/aob_py3"
-  ]
-}
