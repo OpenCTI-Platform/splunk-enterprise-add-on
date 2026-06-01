@@ -1,5 +1,5 @@
 splunktaucclib==8.1.0
-splunk-sdk==2.1.1
+splunk-sdk==3.0.0
 solnlib==8.1.0
 filigran-sseclient==1.0.2
 stix2==3.0.2
