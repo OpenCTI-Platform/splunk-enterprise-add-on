@@ -1,25 +1,26 @@
 import json
 import logging
 
-import import_declare_test
-import splunklib.client as client
-from solnlib import conf_manager, log
-from solnlib.modular_input import checkpointer
-from splunklib import modularinput as smi
+import import_declare_test  # noqa: F401  # type: ignore
+import splunklib.client as client  # type: ignore
+import solnlib.conf_manager as conf_manager  # type: ignore
+import solnlib.log as log  # type: ignore
+import solnlib.modular_input.checkpointer as checkpointer  # type: ignore
+import splunklib.modularinput as smi  # type: ignore
 import utils
 
 from app_connector_helper import SplunkAppConnectorHelper
 from constants import (
-    VERIFY_SSL,
+    resolve_ssl_verify,
     INDICATORS_KVSTORE_NAME,
     REPORTS_KVSTORE_NAME,
     MARKINGS_KVSTORE_NAME,
     IDENTITIES_KVSTORE_NAME,
     ADDON_NAME,
 )
-from filigran_sseclient import SSEClient
-from stix2patterns.v21.pattern import Pattern
-import six
+from filigran_sseclient import SSEClient  # type: ignore
+from stix2patterns.v21.pattern import Pattern  # type: ignore
+import six  # type: ignore
 from datetime import datetime, timedelta, timezone
 import sys
 
@@ -64,25 +65,33 @@ def logger_for_input(input_name: str) -> logging.Logger:
 
 
 def get_account_api_key(session_key: str, account_name: str):
+    account_realm = (
+        f"__REST_CREDENTIAL__#{ADDON_NAME}#configs/"
+        "conf-ta-opencti-for-splunk-enterprise_account"
+    )
     cfm = conf_manager.ConfManager(
         session_key,
         ADDON_NAME,
-        realm=f"__REST_CREDENTIAL__#{ADDON_NAME}#configs/conf-ta-opencti-for-splunk-enterprise_account",
+        realm=account_realm,
     )
 
-
-    account_conf_file = cfm.get_conf("ta-opencti-for-splunk-enterprise_account")
+    account_conf_file = cfm.get_conf(
+        "ta-opencti-for-splunk-enterprise_account"
+    )
     return account_conf_file.get(account_name).get("api_key")
 
-def validate_input(definition: smi.ValidationDefinition):
+
+def validate_input(definition):
     return
+
 
 def exist_in_kvstore(kv_store, key_id):
     try:
         kv_store.query_by_id(key_id)
         return True
-    except:
+    except Exception:
         return False
+
 
 def parse_stix_pattern(stix_pattern):
     try:
@@ -262,7 +271,7 @@ def get_kvstore_name_for_entity(entity_type, data):
 
     return ENTITY_KVSTORE_MAP.get(entity_type)
 
-def stream_events(inputs: smi.InputDefinition, event_writer: smi.EventWriter):
+def stream_events(inputs, event_writer):
     # inputs.inputs is a Python dictionary object like:
     # {
     #   "opencti_stream://<input_name>": {
@@ -296,6 +305,8 @@ def stream_events(inputs: smi.InputDefinition, event_writer: smi.EventWriter):
             conf = cfm.get_conf("ta-opencti-for-splunk-enterprise_settings")
             opencti_url = conf.get("account").get("opencti_url")
             opencti_api_key = conf.get("account").get("opencti_api_key")
+            ca_bundle_path = conf.get("account").get("ca_bundle_path", "")
+            ssl_verify = resolve_ssl_verify(ca_bundle_path)
 
             log.modular_input_start(logger, normalized_input_name)
             logger.info("OpenCTI data input module start")
@@ -325,6 +336,7 @@ def stream_events(inputs: smi.InputDefinition, event_writer: smi.EventWriter):
                 opencti_url=opencti_url,
                 opencti_api_key=opencti_api_key,
                 proxy_settings=proxy_settings,
+                verify=ssl_verify,
             )
 
             kvstore_checkpointer = checkpointer.KVStoreCheckpointer(
@@ -379,7 +391,7 @@ def stream_events(inputs: smi.InputDefinition, event_writer: smi.EventWriter):
                         "no-dependencies": "true",
                         "with-inferences": "true",
                     },
-                    verify=VERIFY_SSL,
+                    verify=ssl_verify,
                     proxies=proxies,
                 )
                 for msg in messages:
@@ -399,24 +411,34 @@ def stream_events(inputs: smi.InputDefinition, event_writer: smi.EventWriter):
                     parsed_stix = None
                     if entity_type == "indicator" and data.get("pattern_type") == "stix":
                         parsed_stix = enrich_payload(stream_id, input_name, data, msg.event)
-                        try:
-                            enrich_row = connector_helper.get_indicator_enrichment(data["id"])
-                            if enrich_row:
-                                parsed_stix["attack_patterns"] = enrich_row["attack_patterns"]
-                                parsed_stix["malware"] = enrich_row["malware"]
-                                parsed_stix["threat_actors"] = enrich_row["threat_actors"]
-                                parsed_stix["vulnerabilities"] = enrich_row["vulnerabilities"]
-                        except Exception as e:
-                            logger.warning(
-                                f"OpenCTI enrichment failed for {data['id']}: {e}"
-                            )
+                        if parsed_stix is not None:
+                            try:
+                                enrich_row = connector_helper.get_indicator_enrichment(
+                                    data["id"]
+                                )
+                                if enrich_row:
+                                    parsed_stix["attack_patterns"] = enrich_row.get(
+                                        "attack_patterns", []
+                                    )
+                                    parsed_stix["malware"] = enrich_row.get(
+                                        "malware", []
+                                    )
+                                    parsed_stix["threat_actors"] = enrich_row.get(
+                                        "threat_actors", []
+                                    )
+                                    parsed_stix["vulnerabilities"] = enrich_row.get(
+                                        "vulnerabilities", []
+                                    )
+                            except Exception as e:
+                                logger.warning(
+                                    f"OpenCTI enrichment failed for {data['id']}: {e}"
+                                )
                     else:
                         parsed_stix = enrich_generic_payload(stream_id, input_name, data, msg.event)
                     if parsed_stix is None:
                         logger.error(f"Could not enrich data for msg {msg.id}")
                         continue
 
-                    key = parsed_stix.get("_key") or data.get("id") or msg.id
                     indicator_value = parsed_stix.get("value") or data.get("value")
                     logger.info(
                         f"[Indicator {parsed_stix.get('_key')}] Processing value={indicator_value} event={msg.event}"
@@ -507,18 +529,17 @@ def stream_events(inputs: smi.InputDefinition, event_writer: smi.EventWriter):
                                 )
                                 event_time = None
 
-                        event_writer.write_event(
-                            smi.Event(
-                                data=json.dumps(parsed_stix),
-                                time=event_time,
-                                host=None,
-                                index=target_index,
-                                source="opencti",
-                                sourcetype=f"opencti:{entity_type}",
-                                done=True,
-                                unbroken=True,
-                            )
+                        event_obj = smi.Event(  # type: ignore[attr-defined]
+                            data=json.dumps(parsed_stix),
+                            time=event_time,
+                            host=None,
+                            index=target_index,
+                            source="opencti",
+                            sourcetype=f"opencti:{entity_type}",
+                            done=True,
+                            unbroken=True,
                         )
+                        event_writer.write_event(event_obj)
 
                     else:
                         logger.warning(f"Unknown input_type: {input_type}")
@@ -529,7 +550,9 @@ def stream_events(inputs: smi.InputDefinition, event_writer: smi.EventWriter):
 
             except Exception as ex:
                 logger.error(f"Error in stream processing loop: {ex}")
-                sys.excepthook(*sys.exc_info())
+                exc_type, exc_value, exc_tb = sys.exc_info()
+                if exc_type and exc_value and exc_tb:
+                    sys.excepthook(exc_type, exc_value, exc_tb)
 
         except Exception as e:
             log.log_exception(logger, e, "my custom error type", msg_before="Exception raised while ingesting data")

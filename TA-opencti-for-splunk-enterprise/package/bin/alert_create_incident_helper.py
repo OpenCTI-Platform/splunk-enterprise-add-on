@@ -1,11 +1,10 @@
 # encoding = utf-8
 import json
-from datetime import datetime, timezone
 
 from app_connector_helper import SplunkAppConnectorHelper
-from constants import CONNECTOR_ID, CONNECTOR_NAME
+from constants import CONNECTOR_ID, CONNECTOR_NAME, resolve_ssl_verify
 from stix_converter import convert_to_incident
-from splunktaucclib.alert_actions_base import ModularAlertBase
+from splunktaucclib.alert_actions_base import ModularAlertBase  # type: ignore
 
 
 def create_incident(helper, event):
@@ -36,6 +35,8 @@ def create_incident(helper, event):
 
     opencti_url = helper.get_global_setting("opencti_url")
     opencti_api_key = helper.get_global_setting("opencti_api_key")
+    ca_bundle_path = helper.get_global_setting("ca_bundle_path") or ""
+    ssl_verify = resolve_ssl_verify(ca_bundle_path)
     proxy_settings = helper.get_proxy()
     helper.log_debug(f"Proxy settings: {proxy_settings}")
 
@@ -44,7 +45,8 @@ def create_incident(helper, event):
         connector_name=CONNECTOR_NAME,
         opencti_url=opencti_url,
         opencti_api_key=opencti_api_key,
-        proxy_settings=proxy_settings
+        proxy_settings=proxy_settings,
+        verify=ssl_verify,
     )
 
     # convert to_stix
@@ -58,9 +60,12 @@ def create_incident(helper, event):
     try:
         splunk_app_connector.register()
     except Exception as ex:
-        helper.log_error(f"Unable to create incident response case, "
-                         f"an exception occurred while registering App as OpenCTI connector, "
-                         f"exception: {str(ex)}")
+        helper.log_error(
+            "Unable to create incident response case, "
+            "an exception occurred while registering App as OpenCTI "
+            "connector, "
+            f"exception: {str(ex)}"
+        )
         return
 
     try:

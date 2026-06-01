@@ -36,6 +36,21 @@
                                     "maxLength": 8192
                                 }
                             ]
+                        },
+                        {
+                            "type": "text",
+                            "label": "Custom CA Bundle Path",
+                            "field": "ca_bundle_path",
+                            "help": "Absolute path to a custom CA bundle PEM file. If set, this bundle is used for SSL verification instead of the default system bundle. Leave empty to use the default certificate store. SSL verification is always enabled.",
+                            "required": false,
+                            "validators": [
+                                {
+                                    "type": "string",
+                                    "errorMsg": "Max length of text input is 8192",
+                                    "minLength": 0,
+                                    "maxLength": 8192
+                                }
+                            ]
                         }
                     ]
                 },
@@ -692,7 +707,7 @@
     "meta": {
         "name": "TA-opencti-for-splunk-enterprise",
         "restRoot": "TA-opencti-for-splunk-enterprise",
-        "version": "1.0.1",
+        "version": "1.1.0",
         "displayName": "OpenCTI for Splunk Enterprise",
         "schemaVersion": "0.0.10",
         "hideUCCVersion": true,

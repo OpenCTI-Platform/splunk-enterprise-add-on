@@ -2,8 +2,8 @@
 import json
 from app_connector_helper import SplunkAppConnectorHelper
 from stix_converter import convert_to_sighting
-from constants import CONNECTOR_NAME, CONNECTOR_ID
-from splunktaucclib.alert_actions_base import ModularAlertBase
+from constants import CONNECTOR_NAME, CONNECTOR_ID, resolve_ssl_verify
+from splunktaucclib.alert_actions_base import ModularAlertBase  # type: ignore
 
 
 def create_sighting(helper, event):
@@ -32,6 +32,8 @@ def create_sighting(helper, event):
 
     opencti_url = helper.get_global_setting("opencti_url")
     opencti_api_key = helper.get_global_setting("opencti_api_key")
+    ca_bundle_path = helper.get_global_setting("ca_bundle_path") or ""
+    ssl_verify = resolve_ssl_verify(ca_bundle_path)
     proxy_settings = helper.get_proxy()
     helper.log_debug(f"Proxy settings: {proxy_settings}")
 
@@ -40,7 +42,8 @@ def create_sighting(helper, event):
         connector_name=CONNECTOR_NAME,
         opencti_url=opencti_url,
         opencti_api_key=opencti_api_key,
-        proxy_settings=proxy_settings
+        proxy_settings=proxy_settings,
+        verify=ssl_verify,
     )
 
     # convert to_stix
@@ -54,9 +57,12 @@ def create_sighting(helper, event):
     try:
         splunk_app_connector.register()
     except Exception as ex:
-        helper.log_error(f"Unable to create sighting, "
-                         f"an exception occurred while registering App as OpenCTI connector, "
-                         f"exception: {str(ex)}")
+        helper.log_error(
+            "Unable to create sighting, "
+            "an exception occurred while registering App as OpenCTI "
+            "connector, "
+            f"exception: {str(ex)}"
+        )
         return
 
     try:
