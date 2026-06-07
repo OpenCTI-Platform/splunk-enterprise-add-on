@@ -1,7 +1,7 @@
 ---
 name: Feature request
 about: Suggest a new feature or capability for the OpenCTI Splunk Enterprise add-on
-title: 'feat: '
+title: 'feat(scope): '
 labels: needs triage, feature
 assignees: ''
 type: feature
