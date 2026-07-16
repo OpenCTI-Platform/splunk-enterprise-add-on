@@ -51,7 +51,13 @@ def get_proxy_config(proxy_settings):
             "https": proxy_uri
         }
     else:
-        return None
+        # Return explicit None values rather than None itself.
+        # requests treats proxies=None as "use defaults" and will still read
+        # HTTP_PROXY / HTTPS_PROXY from the process environment via
+        # merge_environment_settings(). Explicit {"http": None, "https": None}
+        # pre-populates the dict so dict.setdefault() cannot overwrite with
+        # environment-sourced proxies even when trust_env=True (the default).
+        return {"http": None, "https": None}
 
 def is_ipv6(value: str):
     """
