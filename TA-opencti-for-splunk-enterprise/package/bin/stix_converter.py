@@ -266,6 +266,7 @@ def convert_to_incident_response(alert_params, event):
     :return:
     """
     bundle_objects = []
+    rid = event.get("rid") or ""
 
     # event date
     if "_time" in event and event.get("_time"):
@@ -308,7 +309,7 @@ def convert_to_incident_response(alert_params, event):
 
     # create incident response case
     stix_case_incident = CustomObjectCaseIncident(
-        id=generate_case_incident_id(alert_params.get("name"), event_date),
+        id=generate_case_incident_id(alert_params.get("name"), event_date, rid),
         name=alert_params.get("name"),
         description=alert_params.get("description"),
         severity=alert_params.get("severity"),
@@ -333,6 +334,7 @@ def convert_to_incident(alert_params, event):
     :return:
     """
     bundle_objects = []
+    rid = event.get("rid") or ""
 
     # event date
     if "_time" in event and event.get("_time"):
@@ -375,7 +377,7 @@ def convert_to_incident(alert_params, event):
 
     # create incident
     stix_incident = stix2.Incident(
-        id=generate_incident_id(alert_params.get("name"), event_date),
+        id=generate_incident_id(alert_params.get("name"), event_date, rid),
         name=alert_params.get("name"),
         created=event_date,
         description=alert_params.get("description"),

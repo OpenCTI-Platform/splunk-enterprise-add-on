@@ -110,30 +110,32 @@ def generate_identity_id(name: str, identity_class: str):
     entity_id = str(uuid.uuid5(uuid.UUID("00abedb4-aa42-466c-9c01-fed23315a9b7"), data))
     return "identity--" + entity_id
 
-def generate_incident_id(name: str, created: str):
+def generate_incident_id(name: str, created: str, rid: str):
     """
     :param name:
     :param created:
+    :param rid:
     :return:
     """
     name = name.lower().strip()
     if isinstance(created, datetime.datetime):
         created = created.isoformat()
-    data = {"name": name, "created": created}
+    data = {"name": name, "created": created, "rid": rid}
     data = canonicalize(data, utf8=False)
     entity_id = str(uuid.uuid5(uuid.UUID("00abedb4-aa42-466c-9c01-fed23315a9b7"), data))
     return "incident--" + entity_id
 
-def generate_case_incident_id(name, created):
+def generate_case_incident_id(name, created, rid: str):
     """
     :param name:
     :param created:
+    :param rid:
     :return:
     """
     name = name.lower().strip()
     if isinstance(created, datetime.datetime):
         created = created.isoformat()
-    data = {"name": name, "created": created}
+    data = {"name": name, "created": created, "rid": rid}
     data = canonicalize(data, utf8=False)
     entity_id = str(uuid.uuid5(uuid.UUID("00abedb4-aa42-466c-9c01-fed23315a9b7"), data))
     return "case-incident--" + entity_id
