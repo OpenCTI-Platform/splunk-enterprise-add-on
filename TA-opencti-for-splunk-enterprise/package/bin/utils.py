@@ -24,10 +24,33 @@ def get_bool_val(value):
 
 def get_proxy_config(proxy_settings):
     """
-    :param proxy_settings:
+    :param proxy_settings: dict of proxy settings. Two shapes are supported,
+        because this function has two callers that source proxy settings
+        differently:
+          1. opencti_stream_helper.py -> solnlib conf_manager.get_proxy_dict()
+             returns the raw conf-file stanza (minus internal eai/disabled
+             keys), so 'proxy_enabled' is present and reflects the actual
+             checkbox state.
+          2. alert_create_*_helper.py -> splunktaucclib Setup_Util.get_proxy_settings()
+             already resolves enablement itself: it returns {} when the
+             proxy is disabled, and otherwise returns a filtered dict that
+             does NOT include 'proxy_enabled' at all. Relying on
+             proxy_settings.get('proxy_enabled', False) for this shape always
+             evaluates to False, silently discarding a correctly configured
+             proxy for every alert action (see GitHub issue #53).
     :return:
     """
-    if get_bool_val(proxy_settings.get('proxy_enabled', False)):
+    if 'proxy_enabled' in proxy_settings:
+        # Shape 1: raw conf-file dict, trust the explicit flag.
+        proxy_enabled = get_bool_val(proxy_settings.get('proxy_enabled', False))
+    else:
+        # Shape 2: already pre-filtered/enablement-resolved dict. A non-empty
+        # proxy_url means the caller already determined the proxy is enabled;
+        # an empty/missing proxy_url (including the {} disabled case) means
+        # it is not.
+        proxy_enabled = bool(proxy_settings.get('proxy_url'))
+
+    if proxy_enabled:
 
         proxy_credentials = ""
         if proxy_settings.get('proxy_username', False) and proxy_settings.get('proxy_password', False):
