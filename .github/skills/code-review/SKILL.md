@@ -1,5 +1,5 @@
 ---
-name: splunk-app-code-review
+name: code-review
 description: Code review checklist and conventions for Splunk Technology Add-ons (TAs) and Splunk Enterprise apps in this repo — Splunk UCC framework patterns, modular alert actions, proxy/SSL handling, AppInspect/Cloud vetting constraints, and dependency-shape mismatches.
 compatibility: github-copilot-coding-agent
 ---
@@ -66,15 +66,8 @@ library versions, not from the app logic itself.
 
 ## Modular alert actions / `cim_actions.py` patterns
 
-- Alert action helpers (`alert_*_helper.py`) typically inherit from
-  `ModularAlertBase` / use `cim_actions.py` logging. Verify structured
-  log fields (`action_name`, `search_name`, `sid`, `action_status`)
-  are preserved — customers and support rely on these for triage, and
-  removing/renaming them breaks existing runbooks and log-based
-  troubleshooting.
-- Never log credentials, tokens, or full API keys — check helper
-  functions that dump "settings" or "params" dicts for accidental
-  secret exposure in DEBUG-level logs.
+ - Alert action helpers (`alert_*_helper.py`) should be checked against the logging mechanism used by the target repo (for this repo, `ModularAlertBase` and `helper.log_*`; where `cim_actions.py` is present, preserve its structured fields).
+ - Never log credentials, tokens, or full API keys—check helper functions that dump "settings" or "params" dicts for accidental secret exposure in DEBUG-level logs.
 
 ## Configuration / setup pages
 
