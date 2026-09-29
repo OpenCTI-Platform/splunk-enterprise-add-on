@@ -91,7 +91,7 @@ def _extract_observables_from_key_model(event, marking, creator):
                         hash_type = get_hash_type(event[field])
                         if hash_type:
                             observables.append({"type": hash_type, "value": event[field]})
-                    if key == "ip":
+                    elif key == "ip":
                         ipv4 = is_ipv4(event[field])
                         if ipv4:
                             observables.append({"type": "ipv4", "value": event[field]})
