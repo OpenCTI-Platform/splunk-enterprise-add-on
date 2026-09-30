@@ -1,0 +1,113 @@
+"""
+Tests for file hash support in the Create Sighting alert action (#56).
+
+Requires the app's pinned runtime libraries (stix2 at minimum). From the
+repository root:
+    python3 -m venv .venv && .venv/bin/pip install -r TA-opencti-for-splunk-enterprise/package/lib/requirements.txt
+    .venv/bin/python -m unittest discover -s tests -v
+"""
+import json
+import os
+import sys
+import unittest
+from unittest import mock
+
+APP_BIN = os.path.join(os.path.dirname(__file__), "..", "TA-opencti-for-splunk-enterprise", "package", "bin")
+sys.path.insert(0, os.path.abspath(APP_BIN))
+
+import stix_converter  # noqa: E402
+from stix_converter import convert_to_sighting  # noqa: E402
+from utils import get_hash_type  # noqa: E402
+
+HASHES = {
+    "md5": ("MD5", "d41d8cd98f00b204e9800998ecf8427e"),
+    "sha1": ("SHA-1", "da39a3ee5e6b4b0d3255bfef95601890afd80709"),
+    "sha256": ("SHA-256", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
+    "sha512": ("SHA-512", "cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce"
+                          "47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e"),
+}
+EVENT = {"_time": "1727000000", "host": "splunk01"}
+
+
+def _params(value, sighting_of_type="file_hash_observable"):
+    return {
+        "sighting_of_value": value,
+        "sighting_of_type": sighting_of_type,
+        "where_sighted_value": "edr01",
+        "where_sighted_type": "system",
+        "labels": [],
+        "tlp": "tlp_clear",
+    }
+
+
+def _objects(bundle_json, stix_type):
+    return [o for o in json.loads(bundle_json)["objects"] if o["type"] == stix_type]
+
+
+class GetHashTypeTest(unittest.TestCase):
+
+    def test_detects_each_algorithm(self):
+        for hash_type, (_, value) in HASHES.items():
+            with self.subTest(hash_type=hash_type):
+                self.assertEqual(get_hash_type(value), hash_type)
+                self.assertEqual(get_hash_type(value.upper()), hash_type)
+
+    def test_rejects_non_hash_values(self):
+        for value in [
+            "a" * 50,                      # between SHA-1 and SHA-256 lengths
+            "a" * 31,                      # too short for MD5
+            "a" * 129,                     # too long for SHA-512
+            HASHES["md5"][1] + "suffix",   # trailing garbage
+            "z" * 32,                      # not hex
+            " " + HASHES["md5"][1],        # whitespace is stripped by callers
+            "",
+            None,
+        ]:
+            with self.subTest(value=value):
+                self.assertIsNone(get_hash_type(value))
+
+
+class SightingFileHashTest(unittest.TestCase):
+
+    def test_sighting_created_for_each_hash_type(self):
+        for hash_type, (algorithm, value) in HASHES.items():
+            with self.subTest(hash_type=hash_type):
+                bundle = convert_to_sighting(_params(value), EVENT)
+                files = _objects(bundle, "file")
+                sightings = _objects(bundle, "sighting")
+                self.assertEqual(len(files), 1)
+                self.assertEqual(files[0]["hashes"], {algorithm: value})
+                self.assertEqual(len(sightings), 1)
+                self.assertEqual(sightings[0]["x_opencti_sighting_of_ref"], files[0]["id"])
+
+    def test_value_is_stripped(self):
+        algorithm, value = HASHES["sha256"]
+        bundle = convert_to_sighting(_params(f"  {value}\n"), EVENT)
+        self.assertEqual(_objects(bundle, "file")[0]["hashes"], {algorithm: value})
+
+    def test_unrecognized_hash_raises_clear_error(self):
+        with self.assertRaisesRegex(ValueError, "Unrecognized hash value"):
+            convert_to_sighting(_params("a" * 50), EVENT)
+
+    def test_unsupported_type_raises_clear_error(self):
+        with self.assertRaisesRegex(ValueError, "Unsupported sighting_of_type"):
+            convert_to_sighting(_params("foo", "unknown_observable"), EVENT)
+
+
+class KeyModelHashTest(unittest.TestCase):
+
+    def _extracted(self, event):
+        with mock.patch.object(stix_converter, "_convert_observables_to_stix",
+                               side_effect=lambda observables, marking, creator: observables):
+            return stix_converter._extract_observables_from_key_model(event, None, None)
+
+    def test_hash_field_yields_single_typed_observable(self):
+        value = HASHES["sha256"][1]
+        self.assertEqual(self._extracted({"octi_hash": value}), [{"type": "sha256", "value": value}])
+
+    def test_over_length_hash_is_dropped(self):
+        self.assertEqual(self._extracted({"octi_hash": "a" * 50}), [])
+
+
+if __name__ == "__main__":
+    unittest.main()
