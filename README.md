@@ -387,7 +387,7 @@ You can use the Splunk ```eval``` command to create a new field based on the val
 
 Example:
 
-```sourcetype=* | lookup opencti_lookup value as url_domain OUTPUT id as match_ioc_id | search match_ioc_id=* | eval octi_domain=url_domain | eval octi_url=url ```
+```sourcetype=* | lookup opencti_indicators value as url_domain OUTPUT id as match_ioc_id | search match_ioc_id=* | eval octi_domain=url_domain | eval octi_url=url ```
 
 
 Logs related to OpenCTI customer alerts are available in the following two log file:
