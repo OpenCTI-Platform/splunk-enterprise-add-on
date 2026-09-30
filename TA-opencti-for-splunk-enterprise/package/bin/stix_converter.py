@@ -7,6 +7,18 @@ from utils import generate_incident_id, generate_identity_id, generate_relation_
 
 FAKE_INDICATOR_ID = "indicator--51b92778-cef0-4a90-b7ec-ebd620d01ac8"
 
+# TLP:AMBER+STRICT is not a stix2 built-in; the ID is OpenCTI's static one
+# (pycti MarkingDefinition.generate_id("TLP", "TLP:AMBER+STRICT"))
+TLP_AMBER_STRICT = stix2.MarkingDefinition(
+    id="marking-definition--826578e1-40ad-459f-bc73-ede076f81f37",
+    definition_type="statement",
+    definition={"statement": "custom"},
+    allow_custom=True,
+    x_opencti_definition_type="TLP",
+    x_opencti_definition="TLP:AMBER+STRICT",
+)
+
+
 def _get_stix_marking_id(value):
     if value == "tlp_clear":
         return stix2.TLP_WHITE
@@ -14,8 +26,14 @@ def _get_stix_marking_id(value):
         return stix2.TLP_GREEN
     if value == "tlp_amber":
         return stix2.TLP_AMBER
+    if value == "tlp_amber_strict":
+        return TLP_AMBER_STRICT
     if value == "tlp_red":
         return stix2.TLP_RED
+    raise ValueError(
+        f"Invalid TLP value: {value!r} "
+        "(expected tlp_clear, tlp_green, tlp_amber, tlp_amber_strict or tlp_red)"
+    )
 
 
 def _extract_observables_from_cim_model(event, marking, creator):
@@ -279,6 +297,7 @@ def convert_to_incident_response(alert_params, event):
     # manage marking
     marking = alert_params.get("tlp")
     marking_id = _get_stix_marking_id(marking)
+    bundle_objects.append(marking_id)
 
     # manage author
     stix_author = stix2.Identity(
@@ -349,6 +368,7 @@ def convert_to_incident(alert_params, event):
     # manage marking
     marking = alert_params.get("tlp")
     marking_id = _get_stix_marking_id(marking)
+    bundle_objects.append(marking_id)
 
     # manage author
     stix_author = stix2.Identity(
@@ -430,6 +450,7 @@ def convert_to_sighting(alert_params, event):
     # manage marking
     marking = alert_params.get("tlp")
     marking_id = _get_stix_marking_id(marking)
+    bundle_objects.append(marking_id)
 
     # manage author
     stix_author = stix2.Identity(

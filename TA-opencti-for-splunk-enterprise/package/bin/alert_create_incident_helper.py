@@ -50,10 +50,18 @@ def create_incident(helper, event):
     )
 
     # convert to_stix
-    bundle = convert_to_incident(
-        alert_params=params,
-        event=event
-    )
+    try:
+        bundle = convert_to_incident(
+            alert_params=params,
+            event=event
+        )
+    except Exception as ex:
+        helper.log_error(
+            "Unable to create incident, "
+            "an exception occurred while converting event to STIX, "
+            f"exception: {str(ex)}"
+        )
+        return
 
     # going to register App as an OpenCTI connector
     # TODO: Do this only on time (at first run)
