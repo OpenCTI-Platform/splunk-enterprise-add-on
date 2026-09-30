@@ -146,7 +146,6 @@ def _convert_observables_to_stix(observables, marking, creator):
             stix_observables.append(stix_observable)
         if observable.get("type") == "md5":
             stix_observable = stix2.File(
-                name=observable.get("value"),
                 hashes={"MD5": observable.get("value")},
                 object_marking_refs=[marking],
                 custom_properties=customer_properties
@@ -154,7 +153,6 @@ def _convert_observables_to_stix(observables, marking, creator):
             stix_observables.append(stix_observable)
         if observable.get("type") == "sha1":
             stix_observable = stix2.File(
-                name=observable.get("value"),
                 hashes={"SHA-1": observable.get("value")},
                 object_marking_refs=[marking],
                 custom_properties=customer_properties
@@ -162,7 +160,6 @@ def _convert_observables_to_stix(observables, marking, creator):
             stix_observables.append(stix_observable)
         if observable.get("type") == "sha256":
             stix_observable = stix2.File(
-                name=observable.get("value"),
                 hashes={"SHA-256": observable.get("value")},
                 object_marking_refs=[marking],
                 custom_properties=customer_properties
@@ -170,7 +167,6 @@ def _convert_observables_to_stix(observables, marking, creator):
             stix_observables.append(stix_observable)
         if observable.get("type") == "sha512":
             stix_observable = stix2.File(
-                name=observable.get("value"),
                 hashes={"SHA-512": observable.get("value")},
                 object_marking_refs=[marking],
                 custom_properties=customer_properties

@@ -1,5 +1,6 @@
 """
-Tests for file hash support in the Create Sighting alert action (#56).
+Tests for file hash support in the Create Sighting alert action and for
+hash-only File observables shared with Incident / Incident Response (#56).
 
 Requires the app's pinned runtime libraries (stix2 at minimum). From the
 repository root:
@@ -15,8 +16,9 @@ from unittest import mock
 APP_BIN = os.path.join(os.path.dirname(__file__), "..", "TA-opencti-for-splunk-enterprise", "package", "bin")
 sys.path.insert(0, os.path.abspath(APP_BIN))
 
+import stix2  # noqa: E402
 import stix_converter  # noqa: E402
-from stix_converter import convert_to_sighting  # noqa: E402
+from stix_converter import convert_to_incident, convert_to_sighting  # noqa: E402
 from utils import get_hash_type  # noqa: E402
 
 HASHES = {
@@ -77,6 +79,7 @@ class SightingFileHashTest(unittest.TestCase):
                 sightings = _objects(bundle, "sighting")
                 self.assertEqual(len(files), 1)
                 self.assertEqual(files[0]["hashes"], {algorithm: value})
+                self.assertNotIn("name", files[0])
                 self.assertEqual(len(sightings), 1)
                 self.assertEqual(sightings[0]["x_opencti_sighting_of_ref"], files[0]["id"])
 
@@ -92,6 +95,35 @@ class SightingFileHashTest(unittest.TestCase):
     def test_unsupported_type_raises_clear_error(self):
         with self.assertRaisesRegex(ValueError, "Unsupported sighting_of_type"):
             convert_to_sighting(_params("foo", "unknown_observable"), EVENT)
+
+
+class HashOnlyFileTest(unittest.TestCase):
+    """Hash Files carry no name: shared by Sighting and Incident / Incident Response."""
+
+    def _files(self, observables):
+        author = stix2.Identity(name="splunk01", identity_class="system")
+        return stix_converter._convert_observables_to_stix(observables, stix2.TLP_WHITE, author)
+
+    def test_hash_file_has_no_name_and_hash_only_id(self):
+        for hash_type, (algorithm, value) in HASHES.items():
+            with self.subTest(hash_type=hash_type):
+                stix_file = self._files([{"type": hash_type, "value": value}])[0]
+                self.assertNotIn("name", stix_file)
+                self.assertEqual(stix_file.id, stix2.File(hashes={algorithm: value}).id)
+
+    def test_file_name_keeps_name(self):
+        stix_file = self._files([{"type": "file_name", "value": "evil.exe"}])[0]
+        self.assertEqual(stix_file.name, "evil.exe")
+
+    def test_incident_field_mapping_hash_file_has_no_name(self):
+        value = HASHES["sha256"][1]
+        params = {"name": "EDR hit", "description": "", "type": "alert", "severity": "high",
+                  "priority": "P2", "labels": [], "tlp": "tlp_clear",
+                  "observables_extraction": "field_mapping"}
+        files = _objects(convert_to_incident(params, dict(EVENT, octi_hash=value)), "file")
+        self.assertEqual(len(files), 1)
+        self.assertEqual(files[0]["hashes"], {"SHA-256": value})
+        self.assertNotIn("name", files[0])
 
 
 class KeyModelHashTest(unittest.TestCase):
