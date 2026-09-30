@@ -1,6 +1,7 @@
 """
-Tests for file hash support in the Create Sighting alert action and for
-hash-only File observables shared with Incident / Incident Response (#56).
+Tests for file hash support in the Create Sighting alert action, for
+hash-only File observables shared with Incident / Incident Response, and for
+CIM `file_hash` extraction (#56).
 
 Requires the app's pinned runtime libraries (stix2 at minimum). From the
 repository root:
@@ -39,6 +40,19 @@ def _params(value, sighting_of_type="file_hash_observable"):
         "where_sighted_type": "system",
         "labels": [],
         "tlp": "tlp_clear",
+    }
+
+
+def _incident_params(observables_extraction):
+    return {
+        "name": "EDR hit",
+        "description": "",
+        "type": "alert",
+        "severity": "high",
+        "priority": "P2",
+        "labels": [],
+        "tlp": "tlp_clear",
+        "observables_extraction": observables_extraction,
     }
 
 
@@ -117,10 +131,8 @@ class HashOnlyFileTest(unittest.TestCase):
 
     def test_incident_field_mapping_hash_file_has_no_name(self):
         value = HASHES["sha256"][1]
-        params = {"name": "EDR hit", "description": "", "type": "alert", "severity": "high",
-                  "priority": "P2", "labels": [], "tlp": "tlp_clear",
-                  "observables_extraction": "field_mapping"}
-        files = _objects(convert_to_incident(params, dict(EVENT, octi_hash=value)), "file")
+        bundle = convert_to_incident(_incident_params("field_mapping"), dict(EVENT, octi_hash=value))
+        files = _objects(bundle, "file")
         self.assertEqual(len(files), 1)
         self.assertEqual(files[0]["hashes"], {"SHA-256": value})
         self.assertNotIn("name", files[0])
@@ -139,6 +151,32 @@ class KeyModelHashTest(unittest.TestCase):
 
     def test_over_length_hash_is_dropped(self):
         self.assertEqual(self._extracted({"octi_hash": "a" * 50}), [])
+
+
+class CimModelHashTest(unittest.TestCase):
+    """CIM `file_hash` used to be emitted as type "hash" and silently dropped."""
+
+    def _incident(self, **fields):
+        event = dict(EVENT, file_name="evil.exe", **fields)
+        return convert_to_incident(_incident_params("cim_model"), event)
+
+    def test_file_hash_is_extracted_and_linked_to_incident(self):
+        for hash_type, (algorithm, value) in HASHES.items():
+            with self.subTest(hash_type=hash_type):
+                bundle = self._incident(file_hash=f" {value} ")
+                hash_files = [f for f in _objects(bundle, "file") if "hashes" in f]
+                self.assertEqual(len(hash_files), 1)
+                self.assertEqual(hash_files[0]["hashes"], {algorithm: value})
+                self.assertNotIn("name", hash_files[0])
+
+                incident_id = _objects(bundle, "incident")[0]["id"]
+                links = {(r["source_ref"], r["target_ref"]) for r in _objects(bundle, "relationship")}
+                self.assertIn((hash_files[0]["id"], incident_id), links)
+
+    def test_unrecognized_file_hash_is_dropped(self):
+        files = _objects(self._incident(file_hash="a" * 50), "file")
+        self.assertEqual([f.get("name") for f in files], ["evil.exe"])
+        self.assertFalse(any("hashes" in f for f in files))
 
 
 if __name__ == "__main__":

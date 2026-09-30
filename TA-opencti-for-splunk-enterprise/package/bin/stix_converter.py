@@ -63,7 +63,10 @@ def _extract_observables_from_cim_model(event, marking, creator):
         if is_ipv6(event.get("src_ip")):
             observables.append({"type": "ipv6", "value": event.get("src_ip")})
     if "file_hash" in event and event.get("file_hash") != "":
-        observables.append({"type": "hash", "value": event.get("file_hash")})
+        file_hash = event.get("file_hash").strip()
+        hash_type = get_hash_type(file_hash)
+        if hash_type:
+            observables.append({"type": hash_type, "value": file_hash})
     if "file_name" in event and event.get("file_name") != "":
         observables.append({"type": "file_name", "value": event.get("file_name")})
 
