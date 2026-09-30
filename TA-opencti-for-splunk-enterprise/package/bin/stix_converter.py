@@ -463,8 +463,20 @@ def convert_to_sighting(alert_params, event):
 
     # sighting_of conversion
     if "_observable" in sighting_of_type:
+        observable_type = sighting_of_type.split("_observable")[0]
+
+        # file hash: algorithm is auto-detected from the digest length
+        if observable_type == "file_hash":
+            sighting_of_value = (sighting_of_value or "").strip()
+            observable_type = get_hash_type(sighting_of_value)
+            if observable_type is None:
+                raise ValueError(
+                    f"Unrecognized hash value: {sighting_of_value!r} "
+                    "(expected an MD5, SHA-1, SHA-256 or SHA-512 hex digest)"
+                )
+
         obs = {
-            "type": sighting_of_type.split("_observable")[0],
+            "type": observable_type,
             "value": sighting_of_value
         }
 
@@ -473,6 +485,8 @@ def convert_to_sighting(alert_params, event):
             marking=marking_id,
             creator=stix_author
         )
+        if not stix_observables:
+            raise ValueError(f"Unsupported sighting_of_type: {sighting_of_type}")
         stix_observable = stix_observables[0]
         bundle_objects.append(stix_observable)
 

@@ -115,16 +115,18 @@ def is_ipv4(value: str):
 
 def get_hash_type(value: str):
     """
-    :param value:
-    :return:
+    :param value: hex digest; must be the whole value (callers strip whitespace)
+    :return: "sha512", "sha256", "sha1", "md5" or None if not a recognized hash
     """
-    if re.match(regex_sha512, value):
+    if not isinstance(value, str):
+        return None
+    if re.fullmatch(regex_sha512, value):
         return "sha512"
-    elif re.match(regex_sha256, value):
+    elif re.fullmatch(regex_sha256, value):
         return "sha256"
-    elif re.match(regex_sha1, value):
+    elif re.fullmatch(regex_sha1, value):
         return "sha1"
-    elif re.match(regex_md5, value):
+    elif re.fullmatch(regex_md5, value):
         return "md5"
     else:
         return None
