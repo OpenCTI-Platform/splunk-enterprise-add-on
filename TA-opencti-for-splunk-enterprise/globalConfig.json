@@ -445,6 +445,10 @@
                                 "label": "TLP:AMBER"
                             },
                             {
+                                "value": "tlp_amber_strict",
+                                "label": "TLP:AMBER+STRICT"
+                            },
+                            {
                                 "value": "tlp_red",
                                 "label": "TLP:RED"
                             }
@@ -560,6 +564,10 @@
                             {
                                 "value": "tlp_amber",
                                 "label": "TLP:AMBER"
+                            },
+                            {
+                                "value": "tlp_amber_strict",
+                                "label": "TLP:AMBER+STRICT"
                             },
                             {
                                 "value": "tlp_red",
@@ -694,6 +702,10 @@
                             {
                                 "value": "tlp_amber",
                                 "label": "TLP:AMBER"
+                            },
+                            {
+                                "value": "tlp_amber_strict",
+                                "label": "TLP:AMBER+STRICT"
                             },
                             {
                                 "value": "tlp_red",
