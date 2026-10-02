@@ -323,7 +323,7 @@ You can create an incident or an incident response case in OpenCTI from a custom
 | Parameter                | Description                                                   | Scope      |
 |--------------------------|---------------------------------------------------------------|------------|
 | `Sighting Of (value)`    | Value of what was sighted                                     | Sighting   |
-| `Sighting Of (type)`     | Type of what was sighted (URL, Domain, IPV4, IPV6)            | Sighting   |                              
+| `Sighting Of (type)`     | Type of what was sighted (URL, Domain, IPV4, IPV6, File Hash) | Sighting   |                              
 | `Where Sighted (value)`  | Value of the 'System' or 'Organization' that saw the sighting | Sighting   |                              
 | `Where Sighted (type)`   | 'System' or 'Organization' that saw the sighting              | Sighting   | 
 | `Labels`                 | Labels (separated by a comma) to be applied                   | Sighting   | 
@@ -387,7 +387,7 @@ You can use the Splunk ```eval``` command to create a new field based on the val
 
 Example:
 
-```sourcetype=* | lookup opencti_lookup value as url_domain OUTPUT id as match_ioc_id | search match_ioc_id=* | eval octi_domain=url_domain | eval octi_url=url ```
+```sourcetype=* | lookup opencti_indicators value as url_domain OUTPUT id as match_ioc_id | search match_ioc_id=* | eval octi_domain=url_domain | eval octi_url=url ```
 
 
 Logs related to OpenCTI customer alerts are available in the following two log file:

@@ -632,10 +632,14 @@
                             {
                                 "value": "ipv6_observable",
                                 "label": "IPV6 Observable"
+                            },
+                            {
+                                "value": "file_hash_observable",
+                                "label": "File Hash Observable (MD5, SHA-1, SHA-256, SHA-512)"
                             }
                         ]
                     },
-                    "help": "Select any one option from the list",
+                    "help": "Select any one option from the list. For File Hash, the algorithm is detected from the value",
                     "required": false,
                     "defaultValue": "domain_observable"
                 },

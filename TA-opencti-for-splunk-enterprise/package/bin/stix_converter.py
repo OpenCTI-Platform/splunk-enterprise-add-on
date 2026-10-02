@@ -63,7 +63,10 @@ def _extract_observables_from_cim_model(event, marking, creator):
         if is_ipv6(event.get("src_ip")):
             observables.append({"type": "ipv6", "value": event.get("src_ip")})
     if "file_hash" in event and event.get("file_hash") != "":
-        observables.append({"type": "hash", "value": event.get("file_hash")})
+        file_hash = event.get("file_hash").strip()
+        hash_type = get_hash_type(file_hash)
+        if hash_type:
+            observables.append({"type": hash_type, "value": file_hash})
     if "file_name" in event and event.get("file_name") != "":
         observables.append({"type": "file_name", "value": event.get("file_name")})
 
@@ -91,7 +94,7 @@ def _extract_observables_from_key_model(event, marking, creator):
                         hash_type = get_hash_type(event[field])
                         if hash_type:
                             observables.append({"type": hash_type, "value": event[field]})
-                    if key == "ip":
+                    elif key == "ip":
                         ipv4 = is_ipv4(event[field])
                         if ipv4:
                             observables.append({"type": "ipv4", "value": event[field]})
@@ -146,7 +149,6 @@ def _convert_observables_to_stix(observables, marking, creator):
             stix_observables.append(stix_observable)
         if observable.get("type") == "md5":
             stix_observable = stix2.File(
-                name=observable.get("value"),
                 hashes={"MD5": observable.get("value")},
                 object_marking_refs=[marking],
                 custom_properties=customer_properties
@@ -154,7 +156,6 @@ def _convert_observables_to_stix(observables, marking, creator):
             stix_observables.append(stix_observable)
         if observable.get("type") == "sha1":
             stix_observable = stix2.File(
-                name=observable.get("value"),
                 hashes={"SHA-1": observable.get("value")},
                 object_marking_refs=[marking],
                 custom_properties=customer_properties
@@ -162,7 +163,6 @@ def _convert_observables_to_stix(observables, marking, creator):
             stix_observables.append(stix_observable)
         if observable.get("type") == "sha256":
             stix_observable = stix2.File(
-                name=observable.get("value"),
                 hashes={"SHA-256": observable.get("value")},
                 object_marking_refs=[marking],
                 custom_properties=customer_properties
@@ -170,7 +170,6 @@ def _convert_observables_to_stix(observables, marking, creator):
             stix_observables.append(stix_observable)
         if observable.get("type") == "sha512":
             stix_observable = stix2.File(
-                name=observable.get("value"),
                 hashes={"SHA-512": observable.get("value")},
                 object_marking_refs=[marking],
                 custom_properties=customer_properties
@@ -463,8 +462,20 @@ def convert_to_sighting(alert_params, event):
 
     # sighting_of conversion
     if "_observable" in sighting_of_type:
+        observable_type = sighting_of_type.split("_observable")[0]
+
+        # file hash: algorithm is auto-detected from the digest length
+        if observable_type == "file_hash":
+            sighting_of_value = (sighting_of_value or "").strip()
+            observable_type = get_hash_type(sighting_of_value)
+            if observable_type is None:
+                raise ValueError(
+                    f"Unrecognized hash value: {sighting_of_value!r} "
+                    "(expected an MD5, SHA-1, SHA-256 or SHA-512 hex digest)"
+                )
+
         obs = {
-            "type": sighting_of_type.split("_observable")[0],
+            "type": observable_type,
             "value": sighting_of_value
         }
 
@@ -473,6 +484,8 @@ def convert_to_sighting(alert_params, event):
             marking=marking_id,
             creator=stix_author
         )
+        if not stix_observables:
+            raise ValueError(f"Unsupported sighting_of_type: {sighting_of_type}")
         stix_observable = stix_observables[0]
         bundle_objects.append(stix_observable)
 
