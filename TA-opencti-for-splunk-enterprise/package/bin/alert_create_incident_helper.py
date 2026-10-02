@@ -4,6 +4,7 @@ import json
 from app_connector_helper import SplunkAppConnectorHelper
 from constants import CONNECTOR_ID, CONNECTOR_NAME, resolve_ssl_verify
 from stix_converter import convert_to_incident
+from utils import get_user_agent
 from splunktaucclib.alert_actions_base import ModularAlertBase  # type: ignore
 
 
@@ -47,6 +48,7 @@ def create_incident(helper, event):
         opencti_api_key=opencti_api_key,
         proxy_settings=proxy_settings,
         verify=ssl_verify,
+        user_agent=get_user_agent(helper.session_key),
     )
 
     # convert to_stix

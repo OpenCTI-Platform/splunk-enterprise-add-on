@@ -12,6 +12,7 @@ class SplunkAppConnectorHelper:
         opencti_api_key,
         proxy_settings,
         verify: Union[bool, str] = True,
+        user_agent=None,
     ):
         """
         :param connector_id:
@@ -22,6 +23,9 @@ class SplunkAppConnectorHelper:
         :param verify:
             Value to pass as ``verify=`` to requests
             (True, False, or CA bundle path).
+        :param user_agent:
+            Value of the ``User-Agent`` header (see utils.get_user_agent);
+            requests' default is kept when None.
         """
         self.connector_id = connector_id
         self.connector_name = connector_name
@@ -29,6 +33,8 @@ class SplunkAppConnectorHelper:
         self.headers = {
             "Authorization": "Bearer " + opencti_api_key,
         }
+        if user_agent:
+            self.headers["User-Agent"] = user_agent
         self.api_url = self.opencti_url + "/graphql"
         self.proxies = utils.get_proxy_config(proxy_settings=proxy_settings)
         self.verify = verify

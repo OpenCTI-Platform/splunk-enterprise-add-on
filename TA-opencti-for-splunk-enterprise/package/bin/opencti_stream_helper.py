@@ -329,6 +329,9 @@ def stream_events(inputs, event_writer):
             )
             logger.info(f"Proxy settings: {proxy_settings}")
 
+            user_agent = utils.get_user_agent(session_key)
+            logger.debug(f"User-Agent: {user_agent}")
+
             # Create Splunk App Connector Helper
             connector_helper = SplunkAppConnectorHelper(
                 connector_id="splunk-stream-input",
@@ -337,6 +340,7 @@ def stream_events(inputs, event_writer):
                 opencti_api_key=opencti_api_key,
                 proxy_settings=proxy_settings,
                 verify=ssl_verify,
+                user_agent=user_agent,
             )
 
             kvstore_checkpointer = checkpointer.KVStoreCheckpointer(
@@ -387,6 +391,7 @@ def stream_events(inputs, event_writer):
                     state.get("start_from"),
                     headers={
                         "authorization": f"Bearer {opencti_api_key}",
+                        "user-agent": user_agent,
                         "listen-delete": "true",
                         "no-dependencies": "true",
                         "with-inferences": "true",
