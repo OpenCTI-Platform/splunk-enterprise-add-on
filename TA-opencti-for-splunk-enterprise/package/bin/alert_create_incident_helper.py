@@ -69,7 +69,7 @@ def create_incident(helper, event):
         splunk_app_connector.register()
     except Exception as ex:
         helper.log_error(
-            "Unable to create incident response case, "
+            "Unable to create incident, "
             "an exception occurred while registering App as OpenCTI "
             "connector, "
             f"exception: {str(ex)}"
@@ -80,7 +80,7 @@ def create_incident(helper, event):
         splunk_app_connector.send_stix_bundle(bundle=bundle)
         helper.log_info("STIX bundle has been sent successfully")
     except Exception as ex:
-        helper.log_error(f"Unable to create incident response case, "
+        helper.log_error(f"Unable to create incident, "
                          f"an exception occurred while sending STIX bundle,"
                          f"exception: {str(ex)}")
         return
