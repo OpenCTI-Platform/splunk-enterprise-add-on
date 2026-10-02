@@ -3,6 +3,7 @@ import json
 from app_connector_helper import SplunkAppConnectorHelper
 from stix_converter import convert_to_sighting
 from constants import CONNECTOR_NAME, CONNECTOR_ID, resolve_ssl_verify
+from utils import get_user_agent
 from splunktaucclib.alert_actions_base import ModularAlertBase  # type: ignore
 
 
@@ -44,6 +45,7 @@ def create_sighting(helper, event):
         opencti_api_key=opencti_api_key,
         proxy_settings=proxy_settings,
         verify=ssl_verify,
+        user_agent=get_user_agent(helper.session_key),
     )
 
     # convert to_stix

@@ -1,10 +1,14 @@
 import datetime
+import functools
 import hashlib
 import ipaddress
 import re
 import uuid
 
+from solnlib import splunkenv  # type: ignore
 from stix2.canonicalization.Canonicalize import canonicalize
+
+from constants import ADDON_NAME
 
 regex_sha512 = r"[0-9a-fA-F]{128}"
 regex_sha256 = r"[0-9a-fA-F]{64}"
@@ -22,6 +26,29 @@ def get_bool_val(value):
         return bool(value)
     if isinstance(value, str):
         return value != "0" and value != "false"
+
+@functools.lru_cache(maxsize=None)
+def get_app_version(session_key):
+    """
+    :param session_key: Splunk session key
+    :return: installed app version ([launcher] version in app.conf, as
+        resolved by splunkd), or "unknown" if it cannot be read
+    """
+    try:
+        return splunkenv.get_conf_key_value(
+            "app", "launcher", "version",
+            app_name=ADDON_NAME,
+            session_key=session_key,
+        )
+    except Exception:
+        return "unknown"
+
+def get_user_agent(session_key):
+    """
+    :param session_key: Splunk session key
+    :return: User-Agent sent with every request to OpenCTI (#51)
+    """
+    return f"{ADDON_NAME}/{get_app_version(session_key)}"
 
 def get_proxy_config(proxy_settings):
     """
