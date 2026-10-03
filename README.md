@@ -806,7 +806,8 @@ share a value), so the knowledge fields are read per indicator.
 
 The commands run on the search head with the OpenCTI account of the add-on, so the user running them
 needs the `list_storage_passwords` capability (the shipped scheduled searches run as the app owner).
-Their logs are in `$SPLUNK_HOME/var/log/splunk/ta-opencti-for-splunk-enterprise_<command>.log`.
+They all write to OpenCTI, so none of them runs on search preview results (`run_in_preview = false`): an
+interactive search reports once, on its final results. Their logs are in `$SPLUNK_HOME/var/log/splunk/ta-opencti-for-splunk-enterprise_<command>.log`.
 
 ### Monitoring
 

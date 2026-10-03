@@ -159,6 +159,7 @@ class CommandsTest(unittest.TestCase):
         self.assertEqual(set(commands.sections()), {"openctireporthits", "openctivalidation", "openctireconcile", "openctiprovides"})
         for name in commands.sections():
             self.assertEqual(commands.get(name, "chunked"), "true")
+            self.assertEqual(commands.get(name, "run_in_preview"), "false", f"{name} writes to OpenCTI")
             self.assertEqual(commands.get(name, "python.version"), "python3")
             self.assertEqual(commands.get(name, "python.required"), "3.13")
             self.assertTrue(os.path.isfile(os.path.join(BIN, commands.get(name, "filename"))))

@@ -164,6 +164,9 @@ Compatibility with the OpenCTI autonomous threat management program
   because `opencti_indicators` lacks it (index mode: the lookup follows the index every 5 minutes); it is
   counted as `count_wait` and withdrawn by a later run if still absent, so newly indexed indicators no
   longer flap between removed and deployed.
+- The custom search commands no longer run on search preview results (`run_in_preview = false`): an
+  interactive `| openctireporthits` reported the partial counts of every preview again with the final
+  ones, overcounting hits in OpenCTI.
 - An indexed event whose search dropped `_cd` is identified by its raw text together with its `index`,
   `host`, `source` and `sourcetype`, so identical text logged by two hosts in the same second creates two
   incidents instead of one.
