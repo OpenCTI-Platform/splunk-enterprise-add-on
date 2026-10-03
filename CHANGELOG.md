@@ -2,7 +2,9 @@
 
 All notable changes to the OpenCTI for Splunk Enterprise add-on are documented here.
 Every program feature is detected from the OpenCTI GraphQL schema: on an OpenCTI
-release without it, the add-on behaves exactly as 1.1.x and logs why a feature is skipped.
+release without it, that feature is skipped and the add-on logs why. The fixes of a release
+(for example indicator-based sightings, alert-action exit codes and incident identity in 1.2.0)
+apply whatever the OpenCTI release.
 
 ## 1.2.0
 
