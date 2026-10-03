@@ -95,9 +95,9 @@ class ResolverTest(unittest.TestCase):
     def test_cached_auto_resolution_of_another_type_is_not_reused(self):
         cache = FakeCache()
         edr = dict(PLATFORM, id="internal-edr", security_platform_type="EDR")
-        _resolver(FakeClient({"SplunkSecurityPlatformByName": _by_name([PLATFORM])}), PlatformSettings(), cache=cache).resolve()
-        entry = next(iter(cache.values.values()))
-        entry["platform"] = edr
+        first = _resolver(FakeClient({"SplunkSecurityPlatformByName": _by_name([PLATFORM])}), PlatformSettings(), cache=cache)
+        first.resolve()
+        cache.values[first.cache_key]["platform"] = edr
         client = FakeClient({"SplunkSecurityPlatformByName": _by_name([PLATFORM])})
         self.assertEqual(_resolver(client, PlatformSettings(), cache=cache).resolve(), PLATFORM)
         self.assertEqual(len(client.calls_of("SplunkSecurityPlatformByName")), 1)
@@ -133,6 +133,30 @@ class ResolverTest(unittest.TestCase):
         second = FakeClient()
         self.assertEqual(_resolver(second, PlatformSettings(), server_name="sh02", cache=cache).resolve(), PLATFORM)
         self.assertEqual(second.calls, [])
+
+    def test_search_heads_resolving_concurrently_create_one_platform_name(self):
+        cache = FakeCache()
+        # sh02 resolves before sh01 cached anything: both use the name sh01 recorded first
+        first = FakeClient({"SplunkSecurityPlatformByName": _by_name([]),
+                            "SplunkSecurityPlatformAdd": {"securityPlatformAdd": PLATFORM}})
+        sh01 = _resolver(first, PlatformSettings(), server_name="sh01", cache=cache)
+        self.assertEqual(sh01._shared_name(), "Splunk sh01")
+        second = FakeClient({"SplunkSecurityPlatformByName": _by_name([]),
+                             "SplunkSecurityPlatformAdd": {"securityPlatformAdd": PLATFORM}})
+        self.assertEqual(_resolver(second, PlatformSettings(), server_name="sh02", cache=cache).resolve(), PLATFORM)
+        self.assertEqual(second.calls_of("SplunkSecurityPlatformByName")[0]["filters"]["filters"][0]["values"],
+                         ["Splunk sh01"])
+        self.assertEqual(second.calls_of("SplunkSecurityPlatformAdd")[0]["input"]["name"], "Splunk sh01")
+
+    def test_configured_name_and_memory_cache_skip_the_election(self):
+        from addon_state import MemoryCache
+
+        client = FakeClient({"SplunkSecurityPlatformByName": _by_name([dict(PLATFORM, name="SOC")])})
+        cache = FakeCache()
+        self.assertEqual(_resolver(client, PlatformSettings(name="SOC"), cache=cache).resolve()["name"], "SOC")
+        self.assertFalse(any(key.startswith("platform-name|") for key in cache.values))
+        self.assertEqual(_resolver(client, PlatformSettings(), server_name="sh09", cache=MemoryCache())._shared_name(),
+                         "Splunk sh09")
 
     def test_changing_the_configured_name_invalidates_the_cache(self):
         cache = FakeCache()

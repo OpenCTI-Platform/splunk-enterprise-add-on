@@ -111,6 +111,15 @@ Compatibility with the OpenCTI autonomous threat management program
 - Timeline milestones and Case Autopilot runs whose incident is not ingested within the 60 second wait,
   or whose call failed, are parked in the KV Store and retried by the next OpenCTI alert action runs
   (24 hours, 5 failed calls at most) instead of being dropped.
+- `| openctireconcile` (deployments mode) honours a disabled "Deployment write-back" setting: it reports
+  nothing and returns a skipped row.
+- A deployment created by the reconciliation takes the identity the stream input gives it: the external id
+  OpenCTI holds, else the one the stream input reported (`opencti_deployments`), else
+  `index:<index>/<indicator id>` for lookup entries built from index events (new `source_index` field),
+  else the KV Store entry.
+- Search heads of a cluster resolving the Security Platform for the first time at the same moment share
+  one default name (the first one recorded in the replicated KV Store), so they upsert one platform
+  instead of creating one per member.
 - `opencti_multi_sourced_indicator` and `opencti_fresh_indicator` keep nothing when the provenance fields
   are absent, like the other knowledge filters (they used to keep every indicator).
 - An Incident or Case-Incident built from a result without `_time` takes the time the alert was

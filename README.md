@@ -98,7 +98,9 @@ Configure it on the "Security Platform" tab of the Configuration page:
 | `Feature detection cache (minutes)`      | How long the capabilities read from the OpenCTI GraphQL schema are cached                                                                     | 60                 |
 
 The resolved Security Platform is cached in the KV Store (`opencti_addon_state`) and shared by every
-search head of a cluster, so members with different server names keep one Security Platform.
+search head of a cluster, so members with different server names keep one Security Platform. Without a
+configured name, the first default name recorded in that collection is used by every member, so members
+resolving it for the first time at the same moment create one platform, not one each.
 
 **OpenCTI account permissions.** The account of the add-on needs the capabilities of a connector service
 account (bundle push and connector registration) plus "Knowledge: create / update" for the write-back
@@ -541,7 +543,7 @@ indicator it writes, on the Splunk Security Platform:
 | Delete event, or update of a revoked indicator                 | `removed` (index mode also deletes the `opencti_indicators` entry, keyed by the STIX id by the lookup searches) | same |
 | Same, with `valid_until` in the past                            | `expired` (reported as `removed` with `removed_at = valid_until` when the platform reserves `expired`) | same |
 | KV Store or index write failure                                | `failed` with the error message | same                         |
-| Drift repaired by `openctireconcile`                           | `deployed`, `removed` or `expired` | the external id OpenCTI holds, else `kvstore:opencti_indicators/<_key>` (the reconciliation reads the KV Store) |
+| Drift repaired by `openctireconcile`                           | `deployed`, `removed` or `expired` | the external id OpenCTI holds, else the one the stream input reported (`opencti_deployments`), else `index:<index>/<indicator STIX id>` for index-mode lookup entries, else `kvstore:opencti_indicators/<_key>` |
 
 Reports are queued, deduplicated per indicator (the last state wins), sent in batches of
 `Write-back batch size` under the `Write-back rate limit`, and retried with a backoff (15 s, 60 s) before
@@ -555,8 +557,9 @@ The `OpenCTI - Reconcile indicator deployments` saved search (`| openctireconcil
 and repairs the drift (indicators deployed in Splunk but unknown or not live in OpenCTI, live in OpenCTI
 but absent, revoked or expired in Splunk). `| openctireconcile refresh=true` also re-reports indicators
 already in sync, which refreshes `last_sync_at` in OpenCTI. In index mode, enable the KV Store sync
-searches first: the reconciliation reads the KV Store. A repaired deployment keeps the external id OpenCTI
-already holds for it (KV Store or index), so the stream input and the reconciliation never overwrite each other.
+searches first: the reconciliation reads the KV Store. A repaired deployment takes the identity the stream
+input gives it (table above), so the stream input and the reconciliation never overwrite each other. With
+`Deployment write-back` disabled, the search reports nothing and returns a `skipped` row.
 The search returns a `skipped` row on a platform without the `deployed-on` relationship or without a
 deployment write-back mutation.
 

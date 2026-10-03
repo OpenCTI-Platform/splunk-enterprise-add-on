@@ -106,6 +106,25 @@ class SecurityPlatformResolver:
     def wanted_name(self):
         return self.settings.name or default_platform_name(self.server_name)
 
+    def _shared_name(self):
+        """
+        :return: the name to find or create the platform under. The default
+            name differs per search head (server name): the first one recorded
+            in the KV Store, replicated across a cluster, is used by all, so
+            members creating it concurrently upsert one entity (OpenCTI keys a
+            Security Platform on its name).
+        """
+        if self.settings.name or not getattr(self.cache, "persistent", False):
+            return self.wanted_name
+        key = f"platform-name|{self.client.opencti_url}"
+        try:
+            if self.cache.reserve(key, {"name": self.wanted_name}):
+                return self.wanted_name
+            return (self.cache.get(key) or {}).get("name") or self.wanted_name
+        except Exception as ex:
+            self.logger.warning(f"Security Platform name not shared through the KV Store, using {self.wanted_name}: {ex}")
+            return self.wanted_name
+
     @property
     def cache_key(self):
         # Auto mode is keyed on the URL only: the first resolution is shared
@@ -235,7 +254,7 @@ class SecurityPlatformResolver:
                     platform = None
             elif self.settings.auto_create:
                 # Re-verify a stale auto resolution under its own name.
-                name = (entry["platform"].get("name") if entry else None) or self.wanted_name
+                name = (entry["platform"].get("name") if entry else None) or self._shared_name()
                 platform, other_type = self._find_by_name(name)
                 if other_type:
                     self.logger.error(
