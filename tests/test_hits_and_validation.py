@@ -3,11 +3,11 @@ import json
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from program_fakes import FakeClient, FakeDetector, FakeKV, FakeLogger, graphql_error
+from program_fakes import FakeClient, FakeDetector, FakeKV, FakeLogger, graphql_error, transport_error
 
-from addon_state import state_key
 from hits import (
     HitReporter,
+    hit_history_key,
     STATUS_DUPLICATE,
     STATUS_ERROR,
     STATUS_INVALID,
@@ -77,7 +77,25 @@ class HitRowTest(unittest.TestCase):
 
 class HitReporterTest(unittest.TestCase):
     def _reporter(self, client, features, platform=PLATFORM, history=None):
-        return HitReporter(client, FakeDetector(features), platform, history or FakeKV(), logger=FakeLogger())
+        self.slept = []
+        return HitReporter(client, FakeDetector(features), platform, history or FakeKV(), logger=FakeLogger(),
+                           sleep=self.slept.append)
+
+    def test_transient_failure_is_retried_within_the_run(self):
+        responses = iter([transport_error(), {"indicatorReportHits": {"id": "s"}}])
+        client = FakeClient({"SplunkIndicatorHits": lambda variables: next(responses)})
+        reporter = self._reporter(client, (FEATURE_HITS,))
+        self.assertEqual(reporter.report(dict(ROW))["opencti_hit_status"], STATUS_REPORTED)
+        self.assertEqual(len(client.calls_of("SplunkIndicatorHits")), 2)
+        self.assertEqual(self.slept, [2])
+
+    def test_history_is_scoped_to_the_platform(self):
+        client = FakeClient({"SplunkIndicatorHits": {"indicatorReportHits": {"id": "s"}}})
+        history = FakeKV()
+        self._reporter(client, (FEATURE_HITS,), history=history).report(dict(ROW))
+        other = dict(PLATFORM, id="platform-recreated")
+        status = self._reporter(client, (FEATURE_HITS,), platform=other, history=history).report(dict(ROW))
+        self.assertEqual(status["opencti_hit_status"], STATUS_REPORTED, "a new platform has not received the window")
 
     def test_reports_through_indicator_report_hits(self):
         client = FakeClient({"SplunkIndicatorHits": {"indicatorReportHits": {"id": "s"}}})
@@ -87,7 +105,7 @@ class HitReporterTest(unittest.TestCase):
         call = client.calls_of("SplunkIndicatorHits")[0]
         self.assertEqual((call["indicatorId"], call["platformId"], call["count"]), (IND, "platform-internal", 5))
         self.assertEqual(call["lastHit"], "2024-09-22T10:23:20.000Z")
-        self.assertEqual(history.get(state_key(IND))["hit_count"], 5)
+        self.assertEqual(history.get(hit_history_key(PLATFORM["id"], IND))["hit_count"], 5)
 
     def test_replayed_window_is_not_reported_twice(self):
         client = FakeClient({"SplunkIndicatorHits": {"indicatorReportHits": {"id": "s"}}})
@@ -253,7 +271,7 @@ class ValidationProverTest(unittest.TestCase):
                                 grace_minutes=30, writeback=writeback, logger=FakeLogger(), now=NOW)
 
     def _hits(self, *windows):
-        return FakeKV([{"_key": state_key(IND), "indicator_id": IND, "recent_windows": json.dumps(list(windows))}])
+        return FakeKV([{"_key": hit_history_key(PLATFORM["id"], IND), "indicator_id": IND, "recent_windows": json.dumps(list(windows))}])
 
     def test_detected_through_the_bundle_fallback(self):
         hit = (NOW - timedelta(minutes=90)).timestamp()

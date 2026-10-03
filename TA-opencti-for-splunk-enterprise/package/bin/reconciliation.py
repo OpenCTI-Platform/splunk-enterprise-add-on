@@ -96,9 +96,12 @@ def plan_reconciliation(splunk_indicators, opencti_deployments, refresh=False, n
             plan.append((indicator_id, action, state, record))
         else:
             plan.append((indicator_id, ACTION_NONE, None, record))
-    for indicator_id, current in opencti_deployments.items():
-        if indicator_id not in splunk_indicators and current in LIVE_STATUSES:
-            plan.append((indicator_id, ACTION_REMOVE, STATUS_REMOVED, None))
+    # An empty collection is more likely unreadable or not synced yet than
+    # emptied on purpose: never withdraw every deployment on that ground.
+    if splunk_indicators:
+        for indicator_id, current in opencti_deployments.items():
+            if indicator_id not in splunk_indicators and current in LIVE_STATUSES:
+                plan.append((indicator_id, ACTION_REMOVE, STATUS_REMOVED, None))
     return plan
 
 
@@ -155,6 +158,10 @@ class Reconciler:
             return [{"action": "skipped", "message": "The OpenCTI platform has no deployed-on relationship"}]
         splunk = self.splunk_indicators()
         opencti = self.opencti_deployments()
+        if not splunk and opencti:
+            self.logger.warning(
+                f"{self.collection_name} is empty: the {len(opencti)} deployments OpenCTI knows are left unchanged"
+            )
         plan = plan_reconciliation(splunk, opencti, refresh=refresh, now=datetime.now(timezone.utc))
         rows = []
         counts = {}

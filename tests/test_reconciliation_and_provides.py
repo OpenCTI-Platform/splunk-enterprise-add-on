@@ -60,6 +60,9 @@ class PlanTest(unittest.TestCase):
         self.assertIn(("indicator--orphan", ACTION_REMOVE, STATUS_REMOVED), plan)
         self.assertNotIn("indicator--old", {i for i, _, _ in plan})
 
+    def test_empty_splunk_collection_never_withdraws_every_deployment(self):
+        self.assertEqual(plan_reconciliation({}, {"indicator--a": "deployed", "indicator--b": "active"}, now=NOW), [])
+
     def test_refresh(self):
         plan = plan_reconciliation({"indicator--sync": {}}, {"indicator--sync": "active"}, refresh=True, now=NOW)
         self.assertEqual(plan[0][1:3], (ACTION_REFRESH, STATUS_DEPLOYED))

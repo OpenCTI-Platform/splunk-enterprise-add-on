@@ -14,17 +14,19 @@ recent windows), which the IOC validation proof reads.
 
 import json
 import logging
+import time
 
 import stix2
 
 from addon_state import state_key, utc_now_iso
 from app_connector_helper import OpenCTIGraphQLError
-from deployment_reporter import RateLimiter
+from deployment_reporter import RateLimiter, is_retryable
 from opencti_features import FEATURE_HITS, FEATURE_SECURITY_PLATFORM
 from utils import generate_identity_id, generate_sighting_id, to_epoch, to_iso
 
 MAX_RECENT_WINDOWS = 50
 SIGHTINGS_PER_BUNDLE = 200
+RETRY_DELAYS_SECONDS = (2, 10)
 
 HITS_MUTATION = """
 mutation SplunkIndicatorHits($indicatorId: StixRef!, $platformId: StixRef!, $count: Int!, $lastHit: DateTime, $firstHit: DateTime) {
@@ -84,6 +86,11 @@ def parse_hit_row(record, id_field="indicator_id", count_field="hit_count", firs
     )
 
 
+def hit_history_key(platform_id, indicator_id):
+    """Hit histories are per Security Platform: a re-resolved platform starts afresh."""
+    return state_key(platform_id, indicator_id)
+
+
 def load_windows(record):
     try:
         windows = json.loads((record or {}).get("recent_windows") or "[]")
@@ -111,11 +118,11 @@ def merge_hit_history(existing, row, status, platform_id):
     first = to_epoch(existing.get("first_hit"))
     last = to_epoch(existing.get("last_hit"))
     return {
-        "_key": state_key(row.indicator_id),
+        "_key": hit_history_key(platform_id, row.indicator_id),
         "indicator_id": row.indicator_id,
         "value": row.value or existing.get("value", ""),
         "type": row.indicator_type or existing.get("type", ""),
-        "platform_id": platform_id or existing.get("platform_id", ""),
+        "platform_id": platform_id,
         "hit_count": int(existing.get("hit_count") or 0) + row.count,
         "first_hit": to_iso(min(first, row.first_hit) if first is not None else row.first_hit),
         "last_hit": to_iso(max(last, row.last_hit) if last is not None else row.last_hit),
@@ -144,7 +151,8 @@ def hits_sighting(row, platform_ref, author):
 
 
 class HitReporter:
-    def __init__(self, client, detector, platform, history, logger=None, rate_per_minute=120, author_name="Splunk"):
+    def __init__(self, client, detector, platform, history, logger=None, rate_per_minute=120, author_name="Splunk",
+                 sleep=time.sleep):
         """
         :param client: SplunkAppConnectorHelper
         :param detector: OpenCTIFeatureDetector
@@ -157,6 +165,7 @@ class HitReporter:
         self.history = history
         self.logger = logger or logging.getLogger(__name__)
         self.limiter = RateLimiter(rate_per_minute)
+        self.sleep = sleep
         self.author = stix2.Identity(
             id=generate_identity_id(author_name, "system"), name=author_name, identity_class="system"
         )
@@ -166,20 +175,36 @@ class HitReporter:
         # Fallback sightings waiting for flush(), with the history they record
         self._pending_sightings = []
 
-    def _report_mutation(self, row):
+    def _with_retry(self, call):
+        """
+        Run ``call`` again on transport and rate-limit failures: the next search
+        reports the next window, so a window not sent now is lost.
+        """
+        for delay in RETRY_DELAYS_SECONDS:
+            try:
+                self.limiter.acquire()
+                return call()
+            except OpenCTIGraphQLError as ex:
+                if not is_retryable(ex):
+                    raise
+                self.logger.warning(f"Hit report failed, retrying in {delay} s: {ex}")
+                self.sleep(delay)
         self.limiter.acquire()
-        self.client.graphql_query(HITS_MUTATION, {
+        return call()
+
+    def _report_mutation(self, row):
+        self._with_retry(lambda: self.client.graphql_query(HITS_MUTATION, {
             "indicatorId": row.indicator_id,
             "platformId": self.platform["id"],
             "count": row.count,
             "firstHit": to_iso(row.first_hit),
             "lastHit": to_iso(row.last_hit),
-        })
+        }))
 
     def _history(self, indicator_id):
         if indicator_id in self._latest:
             return self._latest[indicator_id]
-        return self.history.get(state_key(indicator_id))
+        return self.history.get(hit_history_key(self.platform.get("id"), indicator_id))
 
     def report(self, record, **fields):
         """
@@ -253,8 +278,8 @@ class HitReporter:
             bundle = stix2.Bundle(objects=[self.author] + [sighting for _, sighting, _ in chunk], allow_custom=True)
             try:
                 self.client.register()
-                self.limiter.acquire()
-                self.client.send_stix_bundle(bundle.serialize())
+                serialized = bundle.serialize()
+                self._with_retry(lambda: self.client.send_stix_bundle(serialized))
             except Exception as ex:
                 self.logger.error(f"{len(chunk)} hit sightings not sent to OpenCTI: {ex}")
                 for indicator_id, _, _ in chunk:

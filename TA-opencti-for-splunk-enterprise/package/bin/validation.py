@@ -25,7 +25,7 @@ from datetime import datetime, timedelta, timezone
 import stix2
 
 from addon_state import state_key, utc_now_iso
-from hits import load_windows
+from hits import hit_history_key, load_windows
 from opencti_features import FEATURE_HITS, FEATURE_IOC_VALIDATION, FEATURE_IOC_VALIDATION_RESULTS
 from utils import generate_identity_id, generate_relation_id, generate_validation_sighting_id, to_epoch, to_iso
 
@@ -288,7 +288,7 @@ class ValidationProver:
                     row.update({"outcome": previous.get("outcome"), "reported": "already"})
                     rows.append(row)
                     continue
-                history = self.hits_history.get(state_key(standard_id)) or {}
+                history = self.hits_history.get(hit_history_key(self.platform["id"], standard_id)) or {}
                 outcome, observed = decide_outcome(
                     start, end, decide_after, load_windows(history), self.grace_minutes, self.now,
                     platform_last_hit=to_epoch(deployment.get("last_hit_at")),
