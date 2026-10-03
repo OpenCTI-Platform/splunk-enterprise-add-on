@@ -262,6 +262,16 @@ class IndicatorResolutionTest(unittest.TestCase):
         self.assertEqual(result, {"id": INDICATOR_ID})
         self.assertEqual(client.calls, [])
 
+    def test_kv_store_case_folding_only_for_case_insensitive_kinds(self):
+        kv = FakeKV([
+            {"_key": "k1", "id": INDICATOR_ID, "value": "evil.example", "revoked": False},
+            {"_key": "k2", "id": "indicator--lower-url", "value": "https://evil.example/payload", "revoked": False},
+        ])
+        self.assertEqual(program_actions.find_indicator_in_kvstore(kv, "EVIL.example", "domain"), INDICATOR_ID)
+        self.assertIsNone(program_actions.find_indicator_in_kvstore(kv, "https://evil.example/PAYLOAD", "url"))
+        self.assertEqual(program_actions.find_indicator_in_kvstore(kv, "https://evil.example/payload", "url"),
+                         "indicator--lower-url")
+
     def test_revoked_kv_entries_are_ignored_then_opencti_pattern(self):
         kv = FakeKV([{"_key": "k1", "id": "indicator--old", "value": "evil.example", "revoked": True}])
         client = FakeClient({"SplunkIndicatorsByPattern": {"indicators": {"edges": [

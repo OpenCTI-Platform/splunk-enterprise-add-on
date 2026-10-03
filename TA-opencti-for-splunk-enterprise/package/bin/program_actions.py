@@ -23,6 +23,8 @@ from opencti_features import (
 from stix_converter import indicator_patterns, pattern_indicator
 from utils import to_iso
 
+CASE_INSENSITIVE_KINDS = frozenset({"domain", "ipv4", "ipv6", "email_addr", "file_hash"})
+
 TIMELINE_TITLE_MAX = 512
 TIMELINE_DESCRIPTION_MAX = 10000
 TIMELINE_EXTERNAL_ID_MAX = 256
@@ -200,17 +202,20 @@ def find_indicator_by_id(client, indicator_id):
     return node.get("standard_id") if isinstance(node, dict) and node.get("standard_id") else None
 
 
-def find_indicator_in_kvstore(kv_collection, value):
+def find_indicator_in_kvstore(kv_collection, value, kind=None):
     """
     :param kv_collection: addon_state.KVCollection over opencti_indicators
     :param value: observable value
+    :param kind: observable kind; only case-insensitive kinds also match the
+        lower and upper case forms of the value
     :return: STIX id of a non-revoked indicator holding this value, or None
     """
-    # KV Store queries are case sensitive; lookups (and hashes) are not
-    candidates = []
-    for candidate in (value, value.lower(), value.upper()):
-        if candidate not in candidates:
-            candidates.append(candidate)
+    # KV Store queries are case sensitive; a URL path is too, unlike hosts and hashes
+    candidates = [value]
+    if kind in CASE_INSENSITIVE_KINDS:
+        for candidate in (value.lower(), value.upper()):
+            if candidate not in candidates:
+                candidates.append(candidate)
     for candidate in candidates:
         records = kv_collection.query(query={"value": candidate}, limit=10, fields=["id", "revoked"])
         for record in records or []:
@@ -258,7 +263,7 @@ def resolve_sighted_indicator(context, sighting_of_type, value, kind):
     try:
         from addon_state import KVCollection
 
-        found = find_indicator_in_kvstore(KVCollection(context.service, INDICATORS_KVSTORE_NAME), value)
+        found = find_indicator_in_kvstore(KVCollection(context.service, INDICATORS_KVSTORE_NAME), value, kind)
         if found:
             return {"id": found}
     except Exception as ex:
