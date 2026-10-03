@@ -150,6 +150,10 @@ class SecurityPlatformResolver:
                 self.logger.warning(f"Security Platform cache reset failed: {ex}")
 
     def _find_by_name(self, name):
+        """
+        :return: (SIEM Security Platform with this name or None, True when only
+            platforms of another type carry the name)
+        """
         filters = {
             "mode": "and",
             "filters": [{"key": ["name"], "values": [name], "operator": "eq"}],
@@ -157,11 +161,15 @@ class SecurityPlatformResolver:
         }
         data = self.client.graphql_query(PLATFORM_BY_NAME_QUERY, {"filters": filters})
         edges = ((data.get("securityPlatforms") or {}).get("edges")) or []
+        other_type = False
         for edge in edges:
             node = (edge or {}).get("node") or {}
-            if (node.get("name") or "").strip().lower() == name.lower():
-                return node
-        return None
+            if (node.get("name") or "").strip().lower() != name.lower():
+                continue
+            if (node.get("security_platform_type") or "").upper() == SECURITY_PLATFORM_TYPE:
+                return node, False
+            other_type = True
+        return None, other_type
 
     def _create(self, name):
         description = (
@@ -209,11 +217,22 @@ class SecurityPlatformResolver:
                         f"Security Platform {self.settings.platform_id} not found or not readable by the "
                         "OpenCTI account: platform-aware features are disabled until it is fixed"
                     )
+                elif (platform.get("security_platform_type") or "").upper() != SECURITY_PLATFORM_TYPE:
+                    self.logger.warning(
+                        f"The configured Security Platform {self.settings.platform_id} is of type "
+                        f"{platform.get('security_platform_type')}, not {SECURITY_PLATFORM_TYPE}"
+                    )
             elif self.settings.auto_create:
                 # Re-verify a stale auto resolution under its own name.
                 name = (entry["platform"].get("name") if entry else None) or self.wanted_name
-                platform = self._find_by_name(name)
-                if platform is None:
+                platform, other_type = self._find_by_name(name)
+                if other_type:
+                    self.logger.error(
+                        f"The Security Platform '{name}' in OpenCTI is not of type {SECURITY_PLATFORM_TYPE}: "
+                        "it is not used for Splunk. Set another Security Platform name or id "
+                        "(Configuration > Security Platform)"
+                    )
+                elif platform is None:
                     platform = self._create(name)
                     if platform:
                         self.logger.info(

@@ -528,6 +528,7 @@ indicator it writes, on the Splunk Security Platform:
 | Delete event, or update of a revoked indicator                 | `removed` (index mode also deletes the `opencti_indicators` entry, keyed by the STIX id by the lookup searches) | same |
 | Same, with `valid_until` in the past                            | `expired` (reported as `removed` with `removed_at = valid_until` when the platform reserves `expired`) | same |
 | KV Store or index write failure                                | `failed` with the error message | same                         |
+| Drift repaired by `openctireconcile`                           | `deployed`, `removed` or `expired` | the external id OpenCTI holds, else `kvstore:opencti_indicators/<_key>` (the reconciliation reads the KV Store) |
 
 Reports are queued, deduplicated per indicator (the last state wins), sent in batches of
 `Write-back batch size` under the `Write-back rate limit`, and retried with a backoff (15 s, 60 s) before

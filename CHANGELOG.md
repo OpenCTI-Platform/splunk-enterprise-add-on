@@ -68,7 +68,10 @@ Compatibility with the OpenCTI autonomous threat management program
 - `register()` and `send_stix_bundle()` check GraphQL errors returned with HTTP 200 (#19); the
   connector registers once per alert run; every OpenCTI call has a timeout.
 - Index mode: delete events purge the KV Store entry by its `_key` (#20), and by the STIX id the
-  lookup searches key it with.
+  lookup searches key it with. The incremental and nightly lookup searches read delete events too,
+  so a deleted indicator is never written back to `opencti_indicators`.
+- The Security Platform found by name must be of type SIEM; a same-name platform of another type is
+  neither adopted nor shadowed by a new one.
 - The modular input no longer logs the proxy password.
 - Hash detections and hit reporting reduce `Filesystem.file_hash` to its digest (CIM values such as
   `sha256=<digest>`), as already done for `Processes.process_hash`.

@@ -69,6 +69,26 @@ class ResolverTest(unittest.TestCase):
         self.assertEqual(created["name"], "SOC Splunk")
         self.assertEqual(created["security_platform_type"], "SIEM")
 
+    def test_auto_prefers_the_siem_platform_of_that_name(self):
+        edr = dict(PLATFORM, id="internal-edr", security_platform_type="EDR")
+        client = FakeClient({"SplunkSecurityPlatformByName": _by_name([edr, PLATFORM])})
+        self.assertEqual(_resolver(client, PlatformSettings()).resolve(), PLATFORM)
+
+    def test_auto_never_adopts_nor_shadows_a_platform_of_another_type(self):
+        edr = dict(PLATFORM, id="internal-edr", security_platform_type="EDR")
+        client = FakeClient({"SplunkSecurityPlatformByName": _by_name([edr])})
+        resolver = _resolver(client, PlatformSettings())
+        self.assertIsNone(resolver.resolve())
+        self.assertEqual(client.calls_of("SplunkSecurityPlatformAdd"), [])
+        self.assertTrue(resolver.logger.has("error", "not of type SIEM"))
+
+    def test_configured_id_of_another_type_is_kept_with_a_warning(self):
+        edr = dict(PLATFORM, security_platform_type="EDR")
+        client = FakeClient({"SplunkSecurityPlatform": {"securityPlatform": edr}})
+        resolver = _resolver(client, PlatformSettings(platform_id="internal-1"))
+        self.assertEqual(resolver.resolve(), edr)
+        self.assertTrue(resolver.logger.has("warning", "not SIEM"))
+
     def test_auto_creation_disabled(self):
         client = FakeClient()
         self.assertIsNone(_resolver(client, PlatformSettings(auto_create=False)).resolve())

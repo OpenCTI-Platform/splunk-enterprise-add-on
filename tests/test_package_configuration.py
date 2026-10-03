@@ -86,6 +86,15 @@ class SavedSearchesTest(unittest.TestCase):
                     self.assertIn(f"rex field={field} max_match=0", search)
                     self.assertNotIn(f'rename "{field}" AS value', search)
 
+    def test_kv_sync_searches_never_restore_deleted_indicators(self):
+        for stanza in ("Update OpenCTI Indicators Lookup", "Nightly Rebuild OpenCTI Indicators Lookup"):
+            search = self.searches.get(stanza, "search")
+            with self.subTest(stanza=stanza):
+                self.assertIn('OR event="delete"', search)
+                self.assertIn("sort 0 id -_time -is_delete", search)
+                self.assertLess(search.index("dedup id"), search.index("where is_delete == 0"))
+                self.assertLess(search.index("where is_delete == 0"), search.index("outputlookup"))
+
     def test_kv_sync_searches_keep_the_knowledge_fields(self):
         for stanza in ("Update OpenCTI Indicators Lookup", "Nightly Rebuild OpenCTI Indicators Lookup"):
             search = self.searches.get(stanza, "search")

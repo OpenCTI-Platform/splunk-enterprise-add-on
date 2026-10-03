@@ -317,7 +317,7 @@ def report_indicator_state(reporter, event, indicator, external_id, error=None):
     :param reporter: DeploymentReporter or None (write-back disabled)
     :param event: stream event (create, update, delete)
     :param indicator: enriched indicator payload
-    :param external_id: KV key or index event id
+    :param external_id: kv_external_id() or index_external_id()
     :param error: write failure message, if any
     :return: the reported status, or None
     """
