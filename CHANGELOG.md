@@ -49,6 +49,10 @@ Compatibility with the OpenCTI autonomous threat management program
 - Create Sighting: new "Indicator ID" and "<type> Indicator" types sight OpenCTI indicators
   (STIX 2.1 compliant, #57, #67); sightings are made on the Splunk Security Platform, the
   "Where Sighted" System / Organization becoming optional; new Count parameter.
+- Create Sighting: the default type is now "Domain Indicator". The legacy "<type> Observable" types
+  sight the matching indicator instead of a placeholder indicator, which OpenCTI rejects (#57). The
+  observable is still sent, linked by `based-on`. Their sightings get indicator-based ids, so the
+  first run after the upgrade creates new sightings instead of updating the 1.1.x ones.
 - Create Incident / Create Incident Response: optional Incident key parameter (result field names read
   on every result, for example `user,src`); indexed events fold
   their identity into the object id so distinct same-second results never merge (#47). Rows of

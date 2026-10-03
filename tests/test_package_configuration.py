@@ -160,11 +160,14 @@ class GlobalConfigTest(unittest.TestCase):
                 self.assertIn(field, self._fields(alert), f"{helper} reads {field}")
 
     def test_sighting_types_match_the_converter(self):
-        from stix_converter import INDICATOR_SIGHTING_TYPES, SIGHTING_OF_INDICATOR_ID
+        from stix_converter import INDICATOR_SIGHTING_TYPES, LEGACY_OBSERVABLE_SIGHTING_TYPES, SIGHTING_OF_INDICATOR_ID
 
         entity = next(e for e in self.alerts["opencti_create_sighting"]["entity"] if e["field"] == "sighting_of_type")
         values = {item["value"] for item in entity["options"]["items"]}
-        self.assertTrue({SIGHTING_OF_INDICATOR_ID, *INDICATOR_SIGHTING_TYPES} <= values)
+        indicator_modes = {SIGHTING_OF_INDICATOR_ID, *INDICATOR_SIGHTING_TYPES}
+        self.assertEqual(values, indicator_modes | set(LEGACY_OBSERVABLE_SIGHTING_TYPES))
+        self.assertTrue(set(LEGACY_OBSERVABLE_SIGHTING_TYPES.values()) <= set(INDICATOR_SIGHTING_TYPES))
+        self.assertIn(entity["defaultValue"], indicator_modes, "#57: the default sights an indicator")
 
     def test_platform_tab_matches_the_settings_loader(self):
         from addon_config import DEFAULTS, PLATFORM_STANZA

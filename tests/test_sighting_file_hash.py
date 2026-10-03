@@ -95,7 +95,14 @@ class SightingFileHashTest(unittest.TestCase):
                 self.assertEqual(files[0]["hashes"], {algorithm: value})
                 self.assertNotIn("name", files[0])
                 self.assertEqual(len(sightings), 1)
-                self.assertEqual(sightings[0]["x_opencti_sighting_of_ref"], files[0]["id"])
+                indicators = _objects(bundle, "indicator")
+                self.assertEqual(len(indicators), 1)
+                self.assertIn(value, indicators[0]["pattern"])
+                self.assertEqual(sightings[0]["sighting_of_ref"], indicators[0]["id"])
+                self.assertNotIn("x_opencti_sighting_of_ref", sightings[0])
+                based_on = _objects(bundle, "relationship")
+                self.assertEqual([(r["relationship_type"], r["source_ref"], r["target_ref"]) for r in based_on],
+                                 [("based-on", indicators[0]["id"], files[0]["id"])])
 
     def test_value_is_stripped(self):
         algorithm, value = HASHES["sha256"]

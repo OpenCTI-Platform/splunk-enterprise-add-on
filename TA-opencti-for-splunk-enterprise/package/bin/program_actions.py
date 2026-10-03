@@ -20,8 +20,8 @@ from opencti_features import (
     FEATURE_HUNTS,
     FEATURE_TIMELINE,
 )
-from stix_converter import indicator_patterns
-from utils import generate_indicator_id, to_iso
+from stix_converter import indicator_patterns, pattern_indicator
+from utils import to_iso
 
 TIMELINE_TITLE_MAX = 512
 TIMELINE_DESCRIPTION_MAX = 10000
@@ -254,7 +254,7 @@ def resolve_sighted_indicator(context, sighting_of_type, value, kind):
         if found is None:
             raise ValueError(f"Indicator {value} not found in OpenCTI or not readable by the add-on account")
         return {"id": found}
-    patterns, main_type = indicator_patterns(kind, value)
+    patterns, _ = indicator_patterns(kind, value)
     try:
         from addon_state import KVCollection
 
@@ -267,13 +267,7 @@ def resolve_sighted_indicator(context, sighting_of_type, value, kind):
     if found:
         return {"id": found}
     # Unknown to OpenCTI: create it from this single value (#57)
-    return {
-        "id": generate_indicator_id(patterns[0]),
-        "create": True,
-        "pattern": patterns[0],
-        "name": value,
-        "main_observable_type": main_type,
-    }
+    return pattern_indicator(kind, value)
 # endregion
 
 

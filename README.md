@@ -375,7 +375,7 @@ are idempotent, so a skipped milestone is added by the next run of the alert.
 | Parameter                | Description                                                   | Scope      |
 |--------------------------|---------------------------------------------------------------|------------|
 | `Sighting Of (value)`    | Value of what was sighted                                     | Sighting   |
-| `Sighting Of (type)`     | Type of what was sighted: an Indicator (`Indicator ID`, or `URL`, `Domain`, `IPV4`, `IPV6`, `File Hash`, `Email Address` Indicator) or an Observable (`URL`, `Domain`, `IPV4`, `IPV6`, `File Hash` Observable) | Sighting   |                              
+| `Sighting Of (type)`     | Type of what was sighted: an Indicator (`Indicator ID`, or `URL`, `Domain`, `IPV4`, `IPV6`, `File Hash`, `Email Address` Indicator, default `Domain Indicator`); the legacy `<type> Observable` types sight the matching Indicator | Sighting   |
 | `Count`                  | Number of times the value was seen (for example `$result.count$`), default 1 | Sighting   |
 | `Where Sighted (value)`  | Optional 'System' or 'Organization' that saw the sighting, in addition to the Splunk Security Platform | Sighting   |                              
 | `Where Sighted (type)`   | 'System' or 'Organization' that saw the sighting              | Sighting   | 
@@ -391,7 +391,10 @@ are idempotent, so a skipped milestone is added by the next run of the alert.
 - `<type> Indicator`: pass a raw value. The add-on looks for the indicator in `opencti_indicators`, then in
   OpenCTI by its exact STIX pattern, and otherwise creates the indicator from this single value (for
   example `[domain-name:value = 'example.com']`), with the id OpenCTI gives this pattern.
-- `<type> Observable` types keep the historical behaviour (observable sighted).
+- `<type> Observable` types are kept for existing alerts only (the default is now `Domain Indicator`).
+  Current OpenCTI rejects a sighting of an observable, so such an alert sights the matching
+  `<type> Indicator`, resolved the same way. The observable is still sent, linked to that
+  indicator by a `based-on` relationship.
 
 The sighting `first_seen` / `last_seen` come from the `first_seen` / `last_seen` fields of the result when
 present (epoch or ISO 8601, for example from `stats min(_time) AS first_seen max(_time) AS last_seen`),

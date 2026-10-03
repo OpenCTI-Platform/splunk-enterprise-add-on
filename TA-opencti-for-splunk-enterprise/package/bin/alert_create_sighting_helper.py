@@ -1,7 +1,7 @@
 # encoding = utf-8
 from alert_common import parse_labels, run_alert
 from program_actions import resolve_sighted_indicator
-from stix_converter import INDICATOR_SIGHTING_TYPES, SIGHTING_OF_INDICATOR_ID, convert_to_sighting
+from stix_converter import INDICATOR_SIGHTING_TYPES, SIGHTING_OF_INDICATOR_ID, convert_to_sighting, sighting_indicator_type
 from splunktaucclib.alert_actions_base import ModularAlertBase  # type: ignore
 
 
@@ -23,7 +23,9 @@ def create_sighting(context, event):
     }
     helper.log_debug(f"Alert params={params}")
 
-    sighting_of_type = params["sighting_of_type"] or ""
+    sighting_of_type = sighting_indicator_type(params["sighting_of_type"])
+    if sighting_of_type != (params["sighting_of_type"] or ""):
+        helper.log_info(f"Sighting of Type {params['sighting_of_type']} sights the indicator ({sighting_of_type})")
     try:
         indicator = None
         if sighting_of_type == SIGHTING_OF_INDICATOR_ID or sighting_of_type in INDICATOR_SIGHTING_TYPES:

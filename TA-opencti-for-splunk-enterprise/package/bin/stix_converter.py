@@ -2,11 +2,9 @@ import stix2
 from datetime import datetime, timezone
 
 from stix_constants import CustomObservableUserAgent, CustomObservableText, CustomObjectCaseIncident
-from utils import get_hash_type, is_ipv6, is_ipv4, disambiguate_created, incident_event_key, parse_iso, to_epoch
+from utils import get_hash_type, is_ipv6, is_ipv4, disambiguate_created, incident_event_key, to_epoch
 from utils import generate_incident_id, generate_identity_id, generate_relation_id, generate_case_incident_id, generate_sighting_id
 from utils import generate_indicator_id, generate_observed_data_id
-
-FAKE_INDICATOR_ID = "indicator--51b92778-cef0-4a90-b7ec-ebd620d01ac8"
 
 # Sighting of Type values targeting an Indicator (#57, #67)
 SIGHTING_OF_INDICATOR_ID = "indicator_id"
@@ -17,6 +15,15 @@ INDICATOR_SIGHTING_TYPES = {
     "ipv6_indicator": "ipv6",
     "file_hash_indicator": "file_hash",
     "email_indicator": "email_addr",
+}
+# Historical "<type> Observable" values sight the matching Indicator: OpenCTI
+# rejects a Sighting whose sighting_of_ref is not an SDO (#57)
+LEGACY_OBSERVABLE_SIGHTING_TYPES = {
+    "url_observable": "url_indicator",
+    "domain_observable": "domain_indicator",
+    "ipv4_observable": "ipv4_indicator",
+    "ipv6_observable": "ipv6_indicator",
+    "file_hash_observable": "file_hash_indicator",
 }
 # observable kind -> (STIX pattern object path, OpenCTI main observable type)
 PATTERN_PATHS = {
@@ -591,13 +598,63 @@ def indicator_patterns(kind, value):
     return [f"[{path} = '{escaped}']", f"[{path}='{escaped}']"], main_type
 
 
+def sighting_indicator_type(sighting_of_type):
+    """
+    :return: the Indicator Sighting of Type a legacy "<type>_observable"
+        value maps to, other values unchanged
+    """
+    sighting_of_type = sighting_of_type or ""
+    return LEGACY_OBSERVABLE_SIGHTING_TYPES.get(sighting_of_type, sighting_of_type)
+
+
+def pattern_indicator(kind, value):
+    """
+    :return: indicator dict for convert_to_sighting creating the Indicator of
+        this single value, under the id OpenCTI gives its pattern
+    :raise ValueError: on an unsupported kind or unrecognized hash
+    """
+    patterns, main_type = indicator_patterns(kind, value)
+    return {
+        "id": generate_indicator_id(patterns[0]),
+        "create": True,
+        "pattern": patterns[0],
+        "name": (value or "").strip(),
+        "main_observable_type": main_type,
+    }
+
+
+def _legacy_sighted_observable(sighting_of_type, value, marking_id, author):
+    """
+    :return: the STIX observable a legacy "<type>_observable" mode names
+    :raise ValueError: on an unrecognized hash or unsupported type
+    """
+    observable_type = sighting_of_type.split("_observable")[0]
+    value = (value or "").strip()
+    if observable_type == "file_hash":
+        observable_type = get_hash_type(value)
+        if observable_type is None:
+            raise ValueError(
+                f"Unrecognized hash value: {value!r} "
+                "(expected an MD5, SHA-1, SHA-256 or SHA-512 hex digest)"
+            )
+    stix_observables = _convert_observables_to_stix(
+        observables=[{"type": observable_type, "value": value}],
+        marking=marking_id,
+        creator=author,
+    )
+    if not stix_observables:
+        raise ValueError(f"Unsupported sighting_of_type: {sighting_of_type}")
+    return stix_observables[0]
+
+
 def convert_to_sighting(alert_params, event, platform_ref=None, indicator=None):
     """
     Build a sighting bundle.
 
-    The sighting targets an Indicator when the action resolved one
-    (``indicator``: Sighting of Type "Indicator ID" or "<type> Indicator",
-    #57 / #67), or an observable (historical "<type> Observable" types).
+    The sighting always targets an Indicator (#57 / #67): the one the action
+    resolved (``indicator``), else the Indicator of the value's pattern. A
+    legacy "<type> Observable" type sights the Indicator of that value and
+    also carries the observable, linked to the Indicator by ``based-on``.
     It is sighted on the Splunk Security Platform (``platform_ref``) and/or on
     the System / Organization selected in the action.
 
@@ -635,9 +692,16 @@ def convert_to_sighting(alert_params, event, platform_ref=None, indicator=None):
             "(Configuration > Security Platform) on an OpenCTI platform that supports it"
         )
 
-    sighting_of_type = alert_params.get("sighting_of_type") or ""
+    requested_type = alert_params.get("sighting_of_type") or ""
+    sighting_of_type = sighting_indicator_type(requested_type)
     sighting_of_value = alert_params.get("sighting_of_value")
     labels = alert_params.get("labels")
+
+    legacy_observable = None
+    if requested_type in LEGACY_OBSERVABLE_SIGHTING_TYPES:
+        legacy_observable = _legacy_sighted_observable(requested_type, sighting_of_value, marking_id, stix_author)
+    if indicator is None and sighting_of_type in INDICATOR_SIGHTING_TYPES:
+        indicator = pattern_indicator(INDICATOR_SIGHTING_TYPES[sighting_of_type], sighting_of_value)
 
     if indicator is not None:
         indicator_id = indicator["id"]
@@ -668,55 +732,16 @@ def convert_to_sighting(alert_params, event, platform_ref=None, indicator=None):
             labels=labels or None,
         )
         bundle_objects.append(sighting)
-    elif "_observable" in sighting_of_type:
-        observable_type = sighting_of_type.split("_observable")[0]
-
-        # file hash: algorithm is auto-detected from the digest length
-        if observable_type == "file_hash":
-            sighting_of_value = (sighting_of_value or "").strip()
-            observable_type = get_hash_type(sighting_of_value)
-            if observable_type is None:
-                raise ValueError(
-                    f"Unrecognized hash value: {sighting_of_value!r} "
-                    "(expected an MD5, SHA-1, SHA-256 or SHA-512 hex digest)"
-                )
-
-        obs = {
-            "type": observable_type,
-            "value": sighting_of_value
-        }
-
-        stix_observables = _convert_observables_to_stix(
-            observables=[obs],
-            marking=marking_id,
-            creator=stix_author
-        )
-        if not stix_observables:
-            raise ValueError(f"Unsupported sighting_of_type: {sighting_of_type}")
-        stix_observable = stix_observables[0]
-        bundle_objects.append(stix_observable)
-
-        # Historical id seed (observable + one where-sighted) kept for upserts.
-        sighting = stix2.Sighting(
-            id=generate_sighting_id(
-                stix_observable["id"],
-                where_sighted.id if where_sighted is not None and len(where_sighted_refs) == 1 else sorted(where_sighted_refs),
-            ),
-            created_by_ref=stix_author.id,
-            description=None,
-            sighting_of_ref=FAKE_INDICATOR_ID,
-            first_seen=first_seen,
-            last_seen=last_seen,
-            count=count,
-            where_sighted_refs=where_sighted_refs,
-            object_marking_refs=[marking_id],
-            labels=labels or None,
-            custom_properties={
-                "x_opencti_sighting_of_ref": stix_observable["id"],
-            },
-        )
-
-        bundle_objects.append(sighting)
+        if legacy_observable is not None:
+            bundle_objects.append(legacy_observable)
+            bundle_objects.append(stix2.Relationship(
+                id=generate_relation_id("based-on", indicator_id, legacy_observable.id),
+                relationship_type="based-on",
+                source_ref=indicator_id,
+                target_ref=legacy_observable.id,
+                created_by_ref=stix_author.id,
+                object_marking_refs=[marking_id],
+            ))
     else:
         raise ValueError(f"Unsupported sighting_of_type: {sighting_of_type}")
 

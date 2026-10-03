@@ -819,26 +819,6 @@
                     "options": {
                         "items": [
                             {
-                                "value": "url_observable",
-                                "label": "URL Observable"
-                            },
-                            {
-                                "value": "domain_observable",
-                                "label": "Domain Observable"
-                            },
-                            {
-                                "value": "ipv4_observable",
-                                "label": "IPV4 Observable"
-                            },
-                            {
-                                "value": "ipv6_observable",
-                                "label": "IPV6 Observable"
-                            },
-                            {
-                                "value": "file_hash_observable",
-                                "label": "File Hash Observable (MD5, SHA-1, SHA-256, SHA-512)"
-                            },
-                            {
                                 "value": "indicator_id",
                                 "label": "Indicator ID (STIX id of an existing indicator)"
                             },
@@ -865,12 +845,32 @@
                             {
                                 "value": "email_indicator",
                                 "label": "Email Address Indicator"
+                            },
+                            {
+                                "value": "url_observable",
+                                "label": "URL Observable (legacy, sights the URL Indicator)"
+                            },
+                            {
+                                "value": "domain_observable",
+                                "label": "Domain Observable (legacy, sights the Domain Indicator)"
+                            },
+                            {
+                                "value": "ipv4_observable",
+                                "label": "IPV4 Observable (legacy, sights the IPV4 Indicator)"
+                            },
+                            {
+                                "value": "ipv6_observable",
+                                "label": "IPV6 Observable (legacy, sights the IPV6 Indicator)"
+                            },
+                            {
+                                "value": "file_hash_observable",
+                                "label": "File Hash Observable (legacy, sights the File Hash Indicator)"
                             }
                         ]
                     },
-                    "help": "Indicator types sight an OpenCTI indicator (by STIX id, or found or created from the value); Observable types sight an observable. For File Hash, the algorithm is detected from the value",
+                    "help": "The sighting targets an OpenCTI indicator: by STIX id, or found or created from the value. Legacy Observable types sight the matching indicator and also send the observable. For File Hash, the algorithm is detected from the value",
                     "required": false,
-                    "defaultValue": "domain_observable"
+                    "defaultValue": "domain_indicator"
                 },
                 {
                     "type": "text",

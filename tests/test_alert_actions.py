@@ -134,7 +134,9 @@ class ExitCodeTest(unittest.TestCase):
         client = FakeClient()
         client.send_stix_bundle = mock.Mock(side_effect=graphql_error("invalid bundle"))
         context = FakeAlertContext(helper, client=client, platform=PLATFORM)
-        self.assertEqual(_run(alert_create_sighting_helper.create_sighting, helper, context), 2)
+        with mock.patch.object(alert_create_sighting_helper, "resolve_sighted_indicator",
+                               return_value={"id": INDICATOR_ID}):
+            self.assertEqual(_run(alert_create_sighting_helper.create_sighting, helper, context), 2)
         self.assertTrue(any("sending STIX bundle" in m for m in helper.errors()))
 
 
@@ -179,18 +181,43 @@ class SightingTest(unittest.TestCase):
         self.assertEqual(created["x_opencti_main_observable_type"], "Domain-Name")
         self.assertEqual(created["id"], _objects(bundle, "sighting")[0]["sighting_of_ref"])
 
-    def test_observable_sighting_kept_and_platform_aware(self):
+    def test_legacy_observable_type_sights_the_indicator(self):
         bundle = convert_to_sighting(dict(self.PARAMS, sighting_of_type="ipv4_observable", sighting_of_value="1.2.3.4",
                                           where_sighted_value="fw01"), EVENT, platform_ref=PLATFORM["standard_id"])
         sighting = _objects(bundle, "sighting")[0]
-        self.assertIn("x_opencti_sighting_of_ref", sighting)
+        indicator = _objects(bundle, "indicator")[0]
+        observable = _objects(bundle, "ipv4-addr")[0]
+        self.assertEqual(indicator["id"], generate_indicator_id("[ipv4-addr:value = '1.2.3.4']"))
+        self.assertEqual(sighting["sighting_of_ref"], indicator["id"])
+        self.assertNotIn("x_opencti_sighting_of_ref", sighting)
         self.assertIn(PLATFORM["standard_id"], sighting["where_sighted_refs"])
+        relationship = _objects(bundle, "relationship")[0]
+        self.assertEqual((relationship["relationship_type"], relationship["source_ref"], relationship["target_ref"]),
+                         ("based-on", indicator["id"], observable["id"]))
 
-    def test_legacy_observable_sighting_id_unchanged_without_platform(self):
-        params = dict(self.PARAMS, sighting_of_type="ipv4_observable", sighting_of_value="1.2.3.4", where_sighted_value="fw01")
-        first = _objects(convert_to_sighting(params, EVENT), "sighting")[0]["id"]
-        second = _objects(convert_to_sighting(params, dict(EVENT, _time="1727009999")), "sighting")[0]["id"]
-        self.assertEqual(first, second, "historical id seed: observable + where sighted")
+    def test_indicator_type_without_resolved_indicator_uses_the_pattern_indicator(self):
+        bundle = convert_to_sighting(dict(self.PARAMS, sighting_of_type="domain_indicator", sighting_of_value="evil.example",
+                                          where_sighted_value="fw01"), EVENT)
+        sighting = _objects(bundle, "sighting")[0]
+        self.assertEqual(sighting["sighting_of_ref"], generate_indicator_id("[domain-name:value = 'evil.example']"))
+        self.assertEqual(_objects(bundle, "relationship"), [])
+
+    def test_action_translates_legacy_observable_type(self):
+        helper = FakeAlertHelper(
+            params={"sighting_of_type": "domain_observable", "sighting_of_value": "evil.example",
+                    "where_sighted_type": "system", "where_sighted_value": "", "tlp": "tlp_green",
+                    "sighted_on_platform": "1"},
+            events=[EVENT],
+        )
+        context = FakeAlertContext(helper, client=FakeClient(), platform=PLATFORM)
+        resolved = {"id": INDICATOR_ID}
+        with mock.patch.object(alert_create_sighting_helper, "resolve_sighted_indicator",
+                               return_value=resolved) as resolve:
+            self.assertTrue(alert_create_sighting_helper.create_sighting(context, EVENT))
+        resolve.assert_called_once_with(context, "domain_indicator", "evil.example", "domain")
+        sighting = _objects(context.client.bundles[0], "sighting")[0]
+        self.assertEqual(sighting["sighting_of_ref"], INDICATOR_ID)
+        self.assertEqual(_objects(context.client.bundles[0], "domain-name")[0]["value"], "evil.example")
 
     def test_nothing_to_sight_on(self):
         with self.assertRaises(ValueError):
