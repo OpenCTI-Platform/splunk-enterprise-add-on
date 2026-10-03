@@ -188,6 +188,43 @@ class ActionTest(unittest.TestCase):
                          [["sighting--2"]])
         self.assertEqual(context.cache.get("hunt_evidence_pending|run-1|a"), parked)
 
+    def test_stale_claim_is_taken_over_once(self):
+        context = self._evidence_context({"observed-data--1", "sighting--2"})
+        context.cache.set("hunt_evidence_pending|run-1|a", {
+            "result_ids": ["observed-data--1"], "hits_count": 1, "source": "splunk-alert-action",
+            "parked_at": program_actions.utc_now_iso(),
+        })
+        stale = {"claimed_at": "2020-01-01T00:00:00Z"}
+        context.cache.set("hunt_evidence_pending|run-1|a|claim", stale)
+        context.cache.set("hunt_evidence_pending|run-1|a|claim|reclaim|2020-01-01T00:00:00Z", {"claimed_at": "x"})
+        with mock.patch.object(program_actions.time, "sleep"):
+            program_actions.report_hunt_evidence(context, "run-1", ["sighting--2"], 1)
+        self.assertEqual(len(context.client.calls_of("SplunkHuntRunEvidence")), 1, "another report took it over")
+        del context.cache.values["hunt_evidence_pending|run-1|a|claim|reclaim|2020-01-01T00:00:00Z"]
+        with mock.patch.object(program_actions.time, "sleep"):
+            program_actions.report_hunt_evidence(context, "run-1", ["sighting--2"], 1)
+        attached = [call["input"]["result_ids"] for call in context.client.calls_of("SplunkHuntRunEvidence")]
+        self.assertEqual(attached, [["sighting--2"], ["observed-data--1"], ["sighting--2"]])
+        self.assertEqual(context.cache.items("hunt_evidence_pending|run-1|"), [])
+
+    def test_entry_attached_after_the_listing_is_not_attached_again(self):
+        context = self._evidence_context({"observed-data--1", "sighting--2"})
+        key = "hunt_evidence_pending|run-1|a"
+        listed = {"result_ids": ["observed-data--1"], "hits_count": 1, "parked_at": program_actions.utc_now_iso()}
+        context.cache.items = lambda prefix, limit=100: [(key, listed)]
+        with mock.patch.object(program_actions.time, "sleep"):
+            program_actions.report_hunt_evidence(context, "run-1", ["sighting--2"], 1)
+        self.assertEqual([call["input"]["result_ids"] for call in context.client.calls_of("SplunkHuntRunEvidence")],
+                         [["sighting--2"]])
+
+    def test_evidence_is_not_parked_without_a_persistent_cache(self):
+        context = self._evidence_context(set())
+        context.cache.persistent = False
+        with mock.patch.object(program_actions.time, "sleep"):
+            with self.assertRaisesRegex(ValueError, "KV Store is unavailable"):
+                program_actions.report_hunt_evidence(context, "run-1", ["observed-data--1"], 1)
+        self.assertEqual(context.cache.values, {})
+
     def test_hits_of_a_partly_ingested_report_are_counted_once(self):
         ingested = {"observed-data--1"}
         context = self._evidence_context(ingested)

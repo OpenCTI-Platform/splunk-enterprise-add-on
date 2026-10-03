@@ -95,4 +95,6 @@ Compatibility with the OpenCTI autonomous threat management program
   reclaim key per stale reservation), so two processes never both take it over.
 - Report hunt evidence parks each report's not-yet-ingested evidence under its own KV Store entry and
   claims an entry atomically before attaching it, so concurrent reports of one hunt run never lose
-  or double-attach deferred evidence.
+  or double-attach deferred evidence. A claim left by a dead process is taken over after ten minutes
+  (atomically, once), and without a persistent KV Store the evidence that is not ingested yet is
+  reported as not attached instead of being parked in process memory.

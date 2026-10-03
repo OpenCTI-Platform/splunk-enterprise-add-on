@@ -89,6 +89,8 @@ EVIDENCE_INGESTION_DELAYS_SECONDS = (1, 2, 4, 8)
 # Evidence still not ingested is attached by a later report of the same run,
 # within this delay.
 EVIDENCE_PENDING_SECONDS = 86400
+# Far above one attachment (ingestion wait included): an older claim is stale.
+EVIDENCE_CLAIM_SECONDS = 600
 
 # Types a hunt evidence sighting can target (sighting_of_ref must be an SDO)
 HUNT_SIGHTABLE_TYPES = {
@@ -406,24 +408,53 @@ def _park(context, hunt_run_id, item):
     context.cache.set(f"{_pending_prefix(hunt_run_id)}{uuid.uuid4().hex}", item)
 
 
+def _claim(cache, claim):
+    """
+    Atomic: of concurrent reports of the run, one only holds the claim. A claim
+    older than EVIDENCE_CLAIM_SECONDS (its holder died) is taken over through a
+    reclaim key unique to it, so two reports never both take it over.
+
+    :return: reclaim key to release once done ("" when none), None when not claimed
+    """
+    now = utc_now_iso()
+    if cache.reserve(claim, {"claimed_at": now}):
+        return ""
+    existing = cache.get(claim)
+    if not existing:
+        return None
+    claimed_at = parse_iso(existing.get("claimed_at"))
+    if claimed_at is not None and time.time() - claimed_at.timestamp() <= EVIDENCE_CLAIM_SECONDS:
+        return None
+    reclaim = f"{claim}|reclaim|{existing.get('claimed_at') or ''}"
+    if not cache.reserve(reclaim, {"claimed_at": now}):
+        return None
+    cache.set(claim, {"claimed_at": now})
+    return reclaim
+
+
 def _attach_pending(context, hunt_run_id):
     """Attach the evidence of earlier reports of this run that is now ingested."""
-    for key, item in context.cache.items(_pending_prefix(hunt_run_id)):
-        if key.endswith("|claim"):
+    prefix = _pending_prefix(hunt_run_id)
+    for key, item in context.cache.items(prefix):
+        if "|" in key[len(prefix):]:
             continue
+        claim = f"{key}|claim"
         parked_at = parse_iso(item.get("parked_at"))
         if parked_at is None or time.time() - parked_at.timestamp() > EVIDENCE_PENDING_SECONDS:
             context.logger.warning(
                 f"Hunt evidence {item.get('result_ids')} never ingested by OpenCTI: not attached to run {hunt_run_id}"
             )
             context.cache.release(key)
-            context.cache.release(f"{key}|claim")
+            context.cache.release(claim)
             continue
-        # Atomic: of concurrent reports of the run, one only attaches this entry.
-        claim = f"{key}|claim"
-        if not context.cache.reserve(claim, {"claimed_at": utc_now_iso()}):
+        reclaim = _claim(context.cache, claim)
+        if reclaim is None:
             continue
         try:
+            # The listing may predate another report that attached this entry.
+            item = context.cache.get(key)
+            if not item:
+                continue
             present = _ingested(context, item.get("result_ids") or [])
             if present:
                 payload = {k: v for k, v in item.items() if k != "parked_at"}
@@ -436,6 +467,8 @@ def _attach_pending(context, hunt_run_id):
                 context.cache.set(key, dict(item, result_ids=remaining, hits_count=0))
         finally:
             context.cache.release(claim)
+            if reclaim:
+                context.cache.release(reclaim)
 
 
 def report_hunt_evidence(context, hunt_run_id, result_ids, hits_count, platform_id=None, observed_at=None):
@@ -462,22 +495,19 @@ def report_hunt_evidence(context, hunt_run_id, result_ids, hits_count, platform_
     if observed_at is not None:
         payload["observed_at"] = to_iso(observed_at)
     ingested, pending = wait_for_ingestion(context, list(result_ids))
-    if pending:
+    deferred = "they are attached by the next evidence report of the run"
+    if pending and getattr(context.cache, "persistent", False):
         # The hits of this report are counted once, by its first attachment.
         parked = dict(payload, result_ids=pending, parked_at=utc_now_iso())
         if ingested:
             parked["hits_count"] = 0
         _park(context, hunt_run_id, parked)
+    elif pending:
+        deferred = "the KV Store is unavailable to defer them, so they are not attached"
     if not ingested:
-        raise ValueError(
-            f"{len(pending)} evidence objects not ingested by OpenCTI yet: "
-            "they are attached by the next evidence report of the run"
-        )
+        raise ValueError(f"{len(pending)} evidence objects not ingested by OpenCTI yet: {deferred}")
     context.client.graphql_query(HUNT_EVIDENCE_MUTATION, {"id": hunt_run_id, "input": dict(payload, result_ids=ingested)})
     if pending:
-        context.logger.warning(
-            f"{len(pending)} hunt evidence objects not ingested by OpenCTI yet: "
-            "they are attached by the next evidence report of the run"
-        )
+        context.logger.warning(f"{len(pending)} hunt evidence objects not ingested by OpenCTI yet: {deferred}")
     return True
 # endregion
