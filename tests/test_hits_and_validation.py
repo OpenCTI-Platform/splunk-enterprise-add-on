@@ -2,6 +2,7 @@
 import json
 import unittest
 from datetime import datetime, timedelta, timezone
+from unittest import mock
 
 from program_fakes import FakeCache, FakeClient, FakeDetector, FakeKV, FakeLogger, graphql_error, transport_error
 
@@ -417,6 +418,16 @@ class ValidationProverTest(unittest.TestCase):
         self.assertEqual(call["results"][0]["status"], OUTCOME_MISSED)
         self.assertEqual(client.bundles, [])
         self.assertEqual(rows[0]["reported"], "iocValidationReportResults")
+
+    def test_dedicated_mutation_is_called_in_chunks_of_its_limit(self):
+        import validation
+
+        client = FakeClient({"SplunkIocValidationResults": {"iocValidationReportResults": {"id": "request-1"}}})
+        prover = self._prover(client, features=(FEATURE_IOC_VALIDATION, FEATURE_IOC_VALIDATION_RESULTS))
+        decided = [(f"indicator--{n}", OUTCOME_MISSED, None, {}) for n in range(5)]
+        with mock.patch.object(validation, "RESULTS_PER_CALL", 2):
+            prover._report({"id": "request-1"}, decided)
+        self.assertEqual([len(call["results"]) for call in client.calls_of("SplunkIocValidationResults")], [2, 2, 1])
 
     def test_outcomes_are_reported_once(self):
         client = _client([_request()])

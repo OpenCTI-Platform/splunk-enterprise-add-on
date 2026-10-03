@@ -40,6 +40,8 @@ ACTIVE_STATUSES = ("sent", "awaiting_approval", "running", "completed", "partial
 TERMINAL_STATUSES = ("completed", "partial")
 MAX_PAGES = 5
 PAGE_SIZE = 100
+# iocValidationReportResults accepts at most 500 results per call
+RESULTS_PER_CALL = 500
 # Requests older than this are not examined again
 LOOKBACK_DAYS = 30
 # Clock skew tolerated before the dispatch time
@@ -288,9 +290,11 @@ class ValidationProver:
                 if outcome == OUTCOME_MISSED:
                     entry["evidence"] = "No matching event in Splunk during the test window"
                 results.append(entry)
-            self.client.graphql_query(REPORT_RESULTS_MUTATION, {
-                "id": request["id"], "platformId": self.platform["id"], "results": results,
-            })
+            for start in range(0, len(results), RESULTS_PER_CALL):
+                self.client.graphql_query(REPORT_RESULTS_MUTATION, {
+                    "id": request["id"], "platformId": self.platform["id"],
+                    "results": results[start:start + RESULTS_PER_CALL],
+                })
             return "iocValidationReportResults"
         objects = [self.author]
         platform_ref = self.platform["standard_id"]
