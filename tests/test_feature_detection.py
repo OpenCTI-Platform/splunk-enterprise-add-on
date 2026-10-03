@@ -1,7 +1,7 @@
 """Tests for OpenCTIFeatureDetector (schema feature detection, #68)."""
 import unittest
 
-from program_fakes import FakeCache, FakeClient, FakeLogger, transport_error
+from program_fakes import FakeCache, FakeClient, FakeLogger, graphql_error, transport_error
 
 import opencti_features as features
 from opencti_features import OpenCTIFeatureDetector, compute_features
@@ -135,6 +135,25 @@ class DetectorTest(unittest.TestCase):
         self.assertTrue(detector.has(features.FEATURE_TIMELINE))
         self.assertEqual(detector.version, "unknown")
         self.assertFalse(detector.has(features.FEATURE_ENTERPRISE_EDITION))
+
+    def test_transient_secondary_failure_is_retried_soon(self):
+        schema = _schema(PROGRAM_MUTATIONS, PROGRAM_QUERIES)
+        for handler in ("OpenCTIRelationsMapping", "OpenCTIEnterpriseEdition"):
+            with self.subTest(handler=handler):
+                OpenCTIFeatureDetector.clear_memory()
+                client = _client(schema)
+                client.handlers[handler] = transport_error()
+                detector = self._detector(client)
+                self.assertEqual(detector.snapshot()["ttl"], features.FAILURE_TTL_SECONDS)
+                self.now[0] += features.FAILURE_TTL_SECONDS + 1
+                client.handlers.update(_client(schema).handlers)
+                self.assertTrue(detector.has(features.FEATURE_CASE_AUTOPILOT))
+                self.assertEqual(detector.snapshot()["ttl"], 3600)
+
+    def test_permission_error_on_the_license_keeps_the_ttl(self):
+        client = _client(_schema(("timelineEventAdd",)))
+        client.handlers["OpenCTIEnterpriseEdition"] = graphql_error("ForbiddenAccess")
+        self.assertEqual(self._detector(client).snapshot()["ttl"], 3600)
 
 
 if __name__ == "__main__":

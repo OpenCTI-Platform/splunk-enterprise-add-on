@@ -117,6 +117,10 @@ class FakeKV:
 
 
 class FakeCache:
+    """KVStoreCache double."""
+
+    persistent = True
+
     def __init__(self):
         self.values = {}
 

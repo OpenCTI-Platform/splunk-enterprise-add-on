@@ -141,6 +141,8 @@ class KVCollection:
 class KVStoreCache:
     """Persistent cache for OpenCTIFeatureDetector and the Security Platform resolver."""
 
+    persistent = True
+
     def __init__(self, service, collection=STATE_COLLECTION):
         self._collection = KVCollection(service, collection)
 
@@ -165,6 +167,8 @@ class KVStoreCache:
 
 class MemoryCache:
     """Process-local cache with the KVStoreCache interface (tests, fallbacks)."""
+
+    persistent = False
 
     def __init__(self):
         self.values = {}

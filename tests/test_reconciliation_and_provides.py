@@ -92,6 +92,21 @@ class ReconcilerTest(unittest.TestCase):
         summary = rows[-1]
         self.assertEqual((summary["splunk_indicators"], summary["opencti_deployments"]), (2, 2))
 
+    def test_reconcile_keeps_the_external_id_opencti_holds(self):
+        """An index-mode deployment keeps its index external id instead of flapping to the KV key."""
+        index_id = "index:opencti/indicator--revoked"
+        page = {"stixCoreRelationships": {"pageInfo": {"hasNextPage": False}, "edges": [
+            {"node": {"deployment_status": "deployed", "external_id": index_id,
+                      "from": {"standard_id": "indicator--revoked"}}},
+            {"node": {"deployment_status": "deployed", "external_id": "index:opencti/indicator--gone",
+                      "from": {"standard_id": "indicator--gone"}}}]}}
+        client = FakeClient({"SplunkPlatformDeployments": page})
+        kv = FakeKV([{"_key": "indicator--revoked", "id": "indicator--revoked", "revoked": True}])
+        reporter = FakeReporter()
+        Reconciler(client, FakeDetector((FEATURE_DEPLOYED_ON,)), PLATFORM, kv, reporter, logger=FakeLogger()).reconcile()
+        self.assertIn(("indicator--revoked", STATUS_REMOVED, index_id, None), reporter.reports)
+        self.assertIn(("indicator--gone", STATUS_REMOVED, "index:opencti/indicator--gone", None), reporter.reports)
+
     def test_skipped_without_feature_or_platform(self):
         reporter = FakeReporter()
         self.assertEqual(Reconciler(FakeClient(), FakeDetector(), PLATFORM, FakeKV(), reporter).reconcile()[0]["action"], "skipped")

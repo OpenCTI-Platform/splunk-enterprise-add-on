@@ -173,6 +173,13 @@ def run_case_autopilot(context, container_id, policy_id=None):
     """
     if not context.detector.require(FEATURE_CASE_AUTOPILOT, "Run Case Autopilot"):
         return None
+    if not getattr(context.cache, "persistent", False):
+        # Without the add-on state collection every run of the alert would start a new run
+        context.logger.warning(
+            f"Run Case Autopilot skipped for {container_id}: the add-on state collection "
+            "is unavailable, so a run already started for it cannot be detected"
+        )
+        return None
     marker = f"autopilot|{context.client.opencti_url}|{container_id}"
     if context.cache.get(marker):
         context.logger.info(f"Case Autopilot already run for {container_id}")
@@ -182,7 +189,14 @@ def run_case_autopilot(context, container_id, policy_id=None):
         "policyId": (policy_id or "").strip() or None,
     })
     run = data.get("investigationRunAdd") or {}
-    context.cache.set(marker, {"run_id": run.get("id"), "launched_at": utc_now_iso()})
+    try:
+        context.cache.set(marker, {"run_id": run.get("id"), "launched_at": utc_now_iso()})
+    except Exception as ex:
+        context.logger.error(
+            f"Case Autopilot run {run.get('id')} started for {container_id} but not recorded in the "
+            f"add-on state collection, the next run of the alert may start another one: {ex}"
+        )
+        return run.get("id")
     context.logger.info(f"Case Autopilot run {run.get('id')} started for {container_id}")
     return run.get("id")
 # endregion

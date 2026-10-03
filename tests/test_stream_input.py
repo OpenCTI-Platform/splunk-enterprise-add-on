@@ -158,7 +158,16 @@ class StreamInputTest(unittest.TestCase):
         self.assertEqual(kv.deleted, [INTERNAL_ID])
         self.assertEqual(len(written), 1, "the delete event is still indexed")
         self.assertEqual(reporter.reports[0]["status"], STATUS_REMOVED)
-        self.assertTrue(reporter.reports[0]["external_id"].startswith("index:opencti/"))
+        self.assertEqual(reporter.reports[0]["external_id"], f"index:opencti/{STIX_ID}")
+
+    def test_index_mode_delete_purges_the_lookup_entry_keyed_by_stix_id(self):
+        """The "Update OpenCTI Indicators Lookup" searches key entries by the STIX id (_key = id)."""
+        kv = FakeKVData()
+        kv.docs[STIX_ID] = {"_key": STIX_ID}
+        _, reporter, _, _ = self._run([_message("delete", _indicator(), 1)], input_type="index", kv=kv)
+        self.assertEqual(kv.deleted, [STIX_ID])
+        self.assertEqual(kv.docs, {})
+        self.assertEqual(reporter.reports[0]["status"], STATUS_REMOVED)
 
     def test_index_mode_delete_with_a_failed_purge_reports_failed(self):
         kv = FakeKVData()
@@ -173,10 +182,11 @@ class StreamInputTest(unittest.TestCase):
         self.assertEqual(reporter.reports[0]["status"], STATUS_FAILED)
         self.assertIn("KV Store is not ready", reporter.reports[0]["error"])
 
-    def test_index_mode_create_reports_the_event_id(self):
-        _, reporter, written, _ = self._run([_message("create", _indicator(), 7)], input_type="index")
+    def test_index_mode_external_id_is_stable_across_updates(self):
+        _, reporter, written, _ = self._run(
+            [_message("create", _indicator(), 7), _message("update", _indicator(), 8)], input_type="index")
         self.assertEqual(json.loads(written[0]["data"])["corroboration_count"], 2)
-        self.assertEqual(reporter.reports[0]["external_id"], "index:opencti/1727000000007-0")
+        self.assertEqual({r["external_id"] for r in reporter.reports}, {f"index:opencti/{STIX_ID}"})
 
     def test_non_indicator_entities_are_not_reported(self):
         identity = {"type": "identity", "id": "identity--1", "name": "ACME", "identity_class": "organization",
@@ -191,7 +201,11 @@ class ReportIndicatorStateTest(unittest.TestCase):
 
     def test_external_ids(self):
         self.assertEqual(stream.kv_external_id("opencti_indicators", "k"), "kvstore:opencti_indicators/k")
-        self.assertEqual(stream.index_external_id("", "1-0"), "index:default/1-0")
+        self.assertEqual(stream.index_external_id("", STIX_ID), f"index:default/{STIX_ID}")
+
+    def test_indexed_indicator_kv_keys(self):
+        self.assertEqual(stream.indexed_indicator_kv_keys({"id": STIX_ID, "_key": INTERNAL_ID}), [STIX_ID, INTERNAL_ID])
+        self.assertEqual(stream.indexed_indicator_kv_keys({"id": STIX_ID, "_key": STIX_ID}), [STIX_ID])
 
 
 if __name__ == "__main__":

@@ -121,6 +121,16 @@ class Reconciler:
         self.reporter = reporter
         self.logger = logger or logging.getLogger(__name__)
         self.collection_name = collection_name
+        self.external_ids = {}
+
+    def external_id(self, indicator_id, record):
+        """
+        :return: the external id OpenCTI already holds for this deployment (set
+            by the stream input, KV Store or index mode), else the KV entry
+        """
+        if self.external_ids.get(indicator_id):
+            return self.external_ids[indicator_id]
+        return f"kvstore:{self.collection_name}/{record.get('_key')}" if record else None
 
     def splunk_indicators(self):
         indicators = {}
@@ -142,6 +152,8 @@ class Reconciler:
                 source = node.get("from") or {}
                 if source.get("standard_id"):
                     deployments[source["standard_id"]] = node.get("deployment_status")
+                    if node.get("external_id"):
+                        self.external_ids[source["standard_id"]] = node["external_id"]
             page = connection.get("pageInfo") or {}
             if not page.get("hasNextPage"):
                 break
@@ -169,7 +181,7 @@ class Reconciler:
             counts[action] = counts.get(action, 0) + 1
             if action == ACTION_NONE:
                 continue
-            external_id = f"kvstore:{self.collection_name}/{record.get('_key')}" if record else None
+            external_id = self.external_id(indicator_id, record)
             removed_at = record.get("valid_until") if record and status == STATUS_EXPIRED else None
             queued = self.reporter.report(indicator_id, status, external_id, removed_at=removed_at)
             rows.append({

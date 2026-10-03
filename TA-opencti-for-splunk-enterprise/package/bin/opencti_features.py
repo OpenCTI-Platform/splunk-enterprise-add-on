@@ -204,6 +204,9 @@ class OpenCTIFeatureDetector:
         queries = _field_names(data.get("queryType"))
         indicator_fields = _field_names(data.get("indicatorType"))
         relations = {}
+        # A transport failure of a secondary query leaves features out: retry
+        # it soon rather than caching the reduced set for the whole TTL
+        transient = False
         if "schemaRelationsTypesMapping" in queries:
             try:
                 mapping = self.client.graphql_query(RELATIONS_MAPPING_QUERY)
@@ -211,6 +214,7 @@ class OpenCTIFeatureDetector:
                     relations[entry.get("key")] = entry.get("values") or []
             except OpenCTIGraphQLError as ex:
                 self.logger.warning(f"OpenCTI relationship mapping unavailable: {ex}")
+                transient = transient or not ex.errors
         version = "unknown"
         enterprise = False
         try:
@@ -224,12 +228,13 @@ class OpenCTIFeatureDetector:
             enterprise = bool(ee.get("license_validated"))
         except OpenCTIGraphQLError as ex:
             self.logger.info(f"OpenCTI Enterprise Edition status not readable with this account: {ex}")
+            transient = transient or not ex.errors
         features = compute_features(mutations, queries, indicator_fields, relations, enterprise)
         return {
             "features": features,
             "version": version,
             "detected_at": self.clock(),
-            "ttl": self.ttl,
+            "ttl": FAILURE_TTL_SECONDS if transient else self.ttl,
         }
 
     def snapshot(self, refresh=False):

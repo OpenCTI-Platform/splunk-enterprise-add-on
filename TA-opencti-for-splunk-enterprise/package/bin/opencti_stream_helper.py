@@ -292,9 +292,22 @@ def kv_external_id(collection, key):
     return f"kvstore:{collection}/{key}"
 
 
-def index_external_id(index, event_id):
-    """External id of an indicator written as an event (deployed-on)."""
-    return f"index:{index or 'default'}/{event_id}"
+def index_external_id(index, indicator_id):
+    """External id of an indicator written as events (deployed-on), stable across its updates."""
+    return f"index:{index or 'default'}/{indicator_id}"
+
+
+def indexed_indicator_kv_keys(indicator):
+    """
+    :return: the opencti_indicators keys an indicator streamed in index mode
+        can have: its STIX id (the "Update OpenCTI Indicators Lookup" searches
+        set _key = id) and its OpenCTI internal id (KV Store mode)
+    """
+    keys = []
+    for key in (indicator.get("id"), indicator.get("_key")):
+        if key and key not in keys:
+            keys.append(key)
+    return keys
 
 
 def report_indicator_state(reporter, event, indicator, external_id, error=None):
@@ -594,19 +607,16 @@ def stream_events(inputs, event_writer):
                                     )
 
                                 kv_indicators = kvstore_handles[INDICATORS_KVSTORE_NAME]
-                                # Entries are keyed by _key, the OpenCTI internal id, as in
-                                # KV Store mode - never by the STIX id (#20).
-                                key_id = parsed_stix.get("_key")
-
-                                if key_id and exist_in_kvstore(kv_indicators, key_id):
-                                    kv_indicators.delete_by_id(key_id)
-                                    logger.info(
-                                        f"KV Store [{INDICATORS_KVSTORE_NAME}]: Deleted {key_id} on delete event"
-                                    )
-                                else:
-                                    logger.debug(
-                                        f"No existing KV entry for {key_id} in [{INDICATORS_KVSTORE_NAME}]"
-                                    )
+                                for key_id in indexed_indicator_kv_keys(parsed_stix):
+                                    if exist_in_kvstore(kv_indicators, key_id):
+                                        kv_indicators.delete_by_id(key_id)
+                                        logger.info(
+                                            f"KV Store [{INDICATORS_KVSTORE_NAME}]: Deleted {key_id} on delete event"
+                                        )
+                                    else:
+                                        logger.debug(
+                                            f"No existing KV entry for {key_id} in [{INDICATORS_KVSTORE_NAME}]"
+                                        )
                             except Exception as e:
                                 logger.warning(
                                     f"Failed to delete indicator from KV store [{INDICATORS_KVSTORE_NAME}]: {e}"
@@ -627,7 +637,7 @@ def stream_events(inputs, event_writer):
                                 )
                                 event_time = None
 
-                        external_id = index_external_id(target_index, msg.id)
+                        external_id = index_external_id(target_index, parsed_stix.get("id"))
                         try:
                             event_obj = smi.Event(  # type: ignore[attr-defined]
                                 data=json.dumps(parsed_stix),

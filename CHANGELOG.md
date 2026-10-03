@@ -18,7 +18,7 @@ Compatibility with the OpenCTI autonomous threat management program
 - Schema feature detection (`OpenCTIFeatureDetector`): one cached introspection per platform gates
   every new call; absent features are logged once and skipped.
 - Indicator deployment write-back: the modular input reports `deployed`, `removed`, `expired` and
-  `failed` per indicator (`indicatorReportDeployment(s)`, external id = KV key or index event id),
+  `failed` per indicator (`indicatorReportDeployment(s)`, external id = KV key, or index and indicator STIX id),
   batched, deduplicated, rate limited and retried with backoff; local state in `opencti_deployments`.
 - `OpenCTI - Reconcile indicator deployments` (`| openctireconcile`): repairs the drift between the
   `opencti_indicators` KV Store and the `deployed-on` relationships of the Splunk Security Platform.

@@ -352,7 +352,7 @@ You can create an incident or an incident response case in OpenCTI from a custom
 | `Observables extraction` | Method for extracting observables                     | Incident & Incident response case | 
 | `Incident key`           | Optional result field names, comma-separated, read on every result (for example `event_id` for an ES notable, or `user,src` for a `stats ... by user src` search). Distinct values always create distinct objects, the same values upsert. Use field names, not `$result.<field>$` tokens: Splunk resolves those against the first result only | Incident & Incident response case |
 | `Add a timeline milestone` | Adds the alert (name, trigger time, link to the Splunk results) as a milestone of the timeline of the created object (OpenCTI with incident and case timelines) | Incident & Incident response case |
-| `Run Case Autopilot`     | Runs Case Autopilot once per created object (OpenCTI Enterprise Edition with Case Autopilot) | Incident & Incident response case |
+| `Run Case Autopilot`     | Runs Case Autopilot once per created object (OpenCTI Enterprise Edition with Case Autopilot). The run is recorded in the add-on state KV Store collection; when that collection is unavailable the run is skipped rather than repeated | Incident & Incident response case |
 | `Case Autopilot policy ID` | Optional investigation policy, the platform default applies when empty | Incident & Incident response case |
 
 Incidents and cases created from indexed events (results carrying `_cd` / `_raw`) get an id derived from
@@ -524,8 +524,8 @@ indicator it writes, on the Splunk Security Platform:
 | Splunk event                                                   | Reported status | External id                                |
 |----------------------------------------------------------------|-----------------|--------------------------------------------|
 | Indicator written to `opencti_indicators` (KV Store mode)       | `deployed`      | `kvstore:opencti_indicators/<_key>`         |
-| Indicator event written to the index (index mode)              | `deployed`      | `index:<index>/<stream event id>`           |
-| Delete event, or update of a revoked indicator                 | `removed`       | same                                       |
+| Indicator event written to the index (index mode)              | `deployed`      | `index:<index>/<indicator STIX id>`         |
+| Delete event, or update of a revoked indicator                 | `removed` (index mode also deletes the `opencti_indicators` entry, keyed by the STIX id by the lookup searches) | same |
 | Same, with `valid_until` in the past                            | `expired` (reported as `removed` with `removed_at = valid_until` when the platform reserves `expired`) | same |
 | KV Store or index write failure                                | `failed` with the error message | same                         |
 
@@ -541,7 +541,8 @@ The `OpenCTI - Reconcile indicator deployments` saved search (`| openctireconcil
 and repairs the drift (indicators deployed in Splunk but unknown or not live in OpenCTI, live in OpenCTI
 but absent, revoked or expired in Splunk). `| openctireconcile refresh=true` also re-reports indicators
 already in sync, which refreshes `last_sync_at` in OpenCTI. In index mode, enable the KV Store sync
-searches first: the reconciliation reads the KV Store.
+searches first: the reconciliation reads the KV Store. A repaired deployment keeps the external id OpenCTI
+already holds for it (KV Store or index), so the stream input and the reconciliation never overwrite each other.
 
 #### Indicator hits
 

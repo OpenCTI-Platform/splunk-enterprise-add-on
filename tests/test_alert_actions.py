@@ -378,6 +378,23 @@ class FollowupTest(unittest.TestCase):
         _run(alert_create_incident_response_helper.create_incident_response, helper, context)
         self.assertEqual(len(client.calls_of("SplunkCaseAutopilot")), 1)
 
+    def test_case_autopilot_skipped_without_persistent_state(self):
+        from addon_state import MemoryCache
+
+        client = FakeClient({"SplunkCaseAutopilot": {"investigationRunAdd": {"id": "run-1"}}})
+        context = FakeAlertContext(FakeAlertHelper(), client=client, detector=FakeDetector((FEATURE_CASE_AUTOPILOT,)))
+        context.cache = MemoryCache()
+        self.assertIsNone(program_actions.run_case_autopilot(context, "incident--x"))
+        self.assertEqual(client.calls_of("SplunkCaseAutopilot"), [])
+        self.assertTrue(any("state collection" in line for _, line in context.logger.lines))
+
+    def test_case_autopilot_marker_write_failure_is_reported(self):
+        client = FakeClient({"SplunkCaseAutopilot": {"investigationRunAdd": {"id": "run-1"}}})
+        context = FakeAlertContext(FakeAlertHelper(), client=client, detector=FakeDetector((FEATURE_CASE_AUTOPILOT,)))
+        context.cache.set = mock.Mock(side_effect=RuntimeError("KV Store down"))
+        self.assertEqual(program_actions.run_case_autopilot(context, "incident--x"), "run-1")
+        self.assertTrue(any(level == "error" and "may start another one" in line for level, line in context.logger.lines))
+
     def test_nothing_scheduled_on_older_platforms(self):
         helper = FakeAlertHelper(params={"name": "Brute force", "tlp": "tlp_clear", "observables_extraction": "disable",
                                          "timeline_milestone": "1", "run_case_autopilot": "1"},
