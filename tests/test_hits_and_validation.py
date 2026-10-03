@@ -147,6 +147,16 @@ class HitReporterTest(unittest.TestCase):
         reporter.flush()
         self.assertEqual(len(client.bundles), 1)
 
+    def test_history_write_failure_is_visible_on_the_row(self):
+        class FailingKV(FakeKV):
+            def upsert(self, records):
+                raise RuntimeError("KV Store is not ready")
+
+        client = FakeClient({"SplunkIndicatorHits": {"indicatorReportHits": {"id": "s"}}})
+        result = self._reporter(client, (FEATURE_HITS,), history=FailingKV()).report(dict(ROW))
+        self.assertEqual(result["opencti_hit_status"], STATUS_REPORTED)
+        self.assertIn("KV Store is not ready", result["opencti_hit_message"])
+
     def test_no_platform(self):
         reporter = self._reporter(FakeClient(), (FEATURE_HITS,), platform=None)
         self.assertEqual(reporter.report(dict(ROW))["opencti_hit_status"], STATUS_NO_PLATFORM)
@@ -259,6 +269,29 @@ class ValidationProverTest(unittest.TestCase):
         self.assertEqual((relation["validation_status"], relation["validation_run_id"]), ("detected", "request-1"))
         self.assertEqual([o for o in objects if o["type"] == "sighting"], [])
         self.assertTrue(list(results.records.values())[0]["reported"])
+
+    def test_hit_recorded_by_opencti_proves_detection_without_local_history(self):
+        request = _request()
+        request["deployments"][0]["last_hit_at"] = _iso(NOW - timedelta(minutes=80))
+        client = _client([request])
+        rows = self._prover(client, features=(FEATURE_IOC_VALIDATION, FEATURE_HITS)).run()
+        self.assertEqual(rows[0]["outcome"], OUTCOME_DETECTED)
+        query = client.calls[0]
+        self.assertEqual(query[0], "SplunkIocValidationRequests")
+
+    def test_incomplete_local_history_never_declares_a_miss(self):
+        request = _request()
+        request["deployments"][0]["last_hit_at"] = _iso(NOW - timedelta(minutes=5))
+        rows = self._prover(_client([request]), features=(FEATURE_IOC_VALIDATION, FEATURE_HITS)).run()
+        self.assertEqual(rows[0]["outcome"], OUTCOME_PENDING)
+
+    def test_later_hit_held_locally_keeps_the_miss(self):
+        later = (NOW - timedelta(minutes=5)).timestamp()
+        request = _request()
+        request["deployments"][0]["last_hit_at"] = _iso(NOW - timedelta(minutes=5))
+        rows = self._prover(_client([request]), features=(FEATURE_IOC_VALIDATION, FEATURE_HITS),
+                            hits=self._hits([later, later, 1])).run()
+        self.assertEqual(rows[0]["outcome"], OUTCOME_MISSED)
 
     def test_missed_creates_a_negative_sighting(self):
         client = _client([_request()])

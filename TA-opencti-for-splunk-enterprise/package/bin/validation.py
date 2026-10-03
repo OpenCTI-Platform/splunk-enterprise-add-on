@@ -26,7 +26,7 @@ import stix2
 
 from addon_state import state_key, utc_now_iso
 from hits import load_windows
-from opencti_features import FEATURE_IOC_VALIDATION, FEATURE_IOC_VALIDATION_RESULTS
+from opencti_features import FEATURE_HITS, FEATURE_IOC_VALIDATION, FEATURE_IOC_VALIDATION_RESULTS
 from utils import generate_identity_id, generate_relation_id, generate_validation_sighting_id, to_epoch, to_iso
 
 OUTCOME_DETECTED = "detected"
@@ -63,6 +63,7 @@ query SplunkIocValidationRequests($first: Int, $after: ID) {
           id
           validation_status
           validation_run_id
+          %s
           from { ... on Indicator { id standard_id } }
           to { ... on SecurityPlatform { id standard_id } }
         }
@@ -98,13 +99,15 @@ def validation_window(request, grace_minutes):
     return start, end, decide_after
 
 
-def decide_outcome(start, end, decide_after, hit_windows, grace_minutes, now):
+def decide_outcome(start, end, decide_after, hit_windows, grace_minutes, now, platform_last_hit=None):
     """
     :param start: test window start (aware datetime)
     :param end: completion time or None while running
     :param decide_after: time after which a miss can be declared, or None
     :param hit_windows: [[first_epoch, last_epoch, count], ...]
     :param now: aware datetime
+    :param platform_last_hit: last hit OpenCTI recorded on the deployment
+        (epoch), the cross-check of the local hit history
     :return: (outcome, first matching hit epoch or None)
     """
     if start is None:
@@ -114,7 +117,15 @@ def decide_outcome(start, end, decide_after, hit_windows, grace_minutes, now):
     matches = [w for w in hit_windows if float(w[1]) >= low and float(w[0]) <= high]
     if matches:
         return OUTCOME_DETECTED, min(max(float(w[0]), low) for w in matches)
+    if platform_last_hit is not None and low <= platform_last_hit <= high:
+        return OUTCOME_DETECTED, platform_last_hit
     if decide_after is not None and now >= decide_after:
+        if platform_last_hit is not None and platform_last_hit > high and not any(
+            float(w[0]) <= platform_last_hit <= float(w[1]) for w in hit_windows
+        ):
+            # A later hit the local history does not hold: the history is
+            # incomplete (lost KV Store write), a miss cannot be proven.
+            return OUTCOME_PENDING, None
         return OUTCOME_MISSED, None
     return OUTCOME_PENDING, None
 
@@ -154,7 +165,8 @@ class ValidationProver:
         horizon = self.now - timedelta(days=LOOKBACK_DAYS)
         after = None
         for _ in range(MAX_PAGES):
-            data = self.client.graphql_query(REQUESTS_QUERY, {"first": PAGE_SIZE, "after": after})
+            hit_fields = "last_hit_at" if self.detector.has(FEATURE_HITS) else ""
+            data = self.client.graphql_query(REQUESTS_QUERY % hit_fields, {"first": PAGE_SIZE, "after": after})
             connection = data.get("iocValidationRequests") or {}
             for edge in connection.get("edges") or []:
                 node = (edge or {}).get("node") or {}
@@ -172,8 +184,8 @@ class ValidationProver:
 
     def pairs(self, request):
         """
-        :return: list of (indicator internal id, indicator STIX id, ioc) for the
-            pairs of this platform still waiting for a result
+        :return: list of (indicator internal id, indicator STIX id, ioc,
+            deployment) for the pairs of this platform still waiting for a result
         """
         deployments = {}
         for deployment in request.get("deployments") or []:
@@ -190,7 +202,7 @@ class ValidationProver:
             deployment, standard_id = entry
             if deployment.get("validation_status") not in (None, "requested"):
                 continue
-            pairs.append((indicator_internal_id, standard_id, ioc))
+            pairs.append((indicator_internal_id, standard_id, ioc, deployment))
         return pairs
 
     def _report(self, request, decided):
@@ -260,7 +272,7 @@ class ValidationProver:
         for request in self.requests():
             start, end, decide_after = validation_window(request, self.grace_minutes)
             decided = []
-            for internal_id, standard_id, ioc in self.pairs(request):
+            for internal_id, standard_id, ioc, deployment in self.pairs(request):
                 key = state_key(request["id"], standard_id, self.platform["id"])
                 previous = self.results.get(key) or {}
                 row = {
@@ -278,7 +290,8 @@ class ValidationProver:
                     continue
                 history = self.hits_history.get(state_key(standard_id)) or {}
                 outcome, observed = decide_outcome(
-                    start, end, decide_after, load_windows(history), self.grace_minutes, self.now
+                    start, end, decide_after, load_windows(history), self.grace_minutes, self.now,
+                    platform_last_hit=to_epoch(deployment.get("last_hit_at")),
                 )
                 row["outcome"] = outcome
                 row["first_matching_hit"] = to_iso(observed) if observed else ""

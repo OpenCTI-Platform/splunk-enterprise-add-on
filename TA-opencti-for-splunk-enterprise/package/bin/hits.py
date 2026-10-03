@@ -211,8 +211,11 @@ class HitReporter:
                 return {"opencti_hit_status": STATUS_ERROR, "opencti_hit_message": str(ex)[:1000]}
             history = merge_hit_history(existing, row, STATUS_REPORTED, self.platform.get("id"))
             self._latest[row.indicator_id] = history
-            self._save([history])
-            return {"opencti_hit_status": STATUS_REPORTED, "opencti_hit_message": ""}
+            error = self._save([history])
+            return {
+                "opencti_hit_status": STATUS_REPORTED,
+                "opencti_hit_message": f"hit history not stored in the KV Store: {error}" if error else "",
+            }
         if self.detector.require(FEATURE_SECURITY_PLATFORM, "Indicator hit sightings"):
             history = merge_hit_history(existing, row, STATUS_REPORTED_AS_SIGHTING, self.platform.get("id"))
             self._latest[row.indicator_id] = history
@@ -223,12 +226,18 @@ class HitReporter:
         return {"opencti_hit_status": STATUS_NO_PLATFORM, "opencti_hit_message": "no Security Platform support"}
 
     def _save(self, records):
+        """
+        :return: None, or the error when the history could not be stored (the
+            IOC validation proof then cross-checks the hits OpenCTI recorded)
+        """
         if not records:
-            return
+            return None
         try:
             self.history.upsert(records)
         except Exception as ex:
             self.logger.warning(f"Unable to store the hit history in the KV Store: {ex}")
+            return str(ex)[:500]
+        return None
 
     def flush(self):
         """

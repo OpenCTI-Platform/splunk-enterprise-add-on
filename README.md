@@ -564,10 +564,12 @@ the Splunk Security Platform and, for each indicator of the request still waitin
 platform:
 
 - **detected** when a hit window of the indicator overlaps the test window (dispatch to completion of the
-  request, plus the grace period);
+  request, plus the grace period), or when the last hit OpenCTI recorded on the deployment does;
 - **missed** when the request is completed, the grace period is over and no hit overlaps; a sighting
   with `x_opencti_negative = true` records the miss on the Security Platform;
-- **requested** otherwise: no result yet, nothing is written.
+- **requested** otherwise: no result yet, nothing is written. This includes a later hit recorded by
+  OpenCTI that the local hit history does not hold (lost KV Store write): a miss is never declared on an
+  incomplete history.
 
 Outcomes are written once per request and indicator (`opencti_validation_results`): through
 `iocValidationReportResults` when the platform has it, otherwise through a STIX bundle carrying the

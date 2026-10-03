@@ -105,6 +105,17 @@ class ExitCodeTest(unittest.TestCase):
 
         self.assertEqual(_run(boom, helper, FakeAlertContext(helper)), 2)
 
+    def test_unkeyed_collisions_are_logged(self):
+        import alert_create_incident_helper
+
+        params = {"name": "Brute force", "tlp": "tlp_clear", "observables_extraction": "disable"}
+        helper = FakeAlertHelper(params=params, events=[{"_time": "1727000000", "user": u} for u in ("bob", "eve")])
+        context = FakeAlertContext(helper)
+        self.assertEqual(_run(alert_create_incident_helper.create_incident, helper, context), 0)
+        incidents = {o["id"] for b in context.client.bundles for o in json.loads(b)["objects"] if o["type"] == "incident"}
+        self.assertEqual(len(incidents), 2)
+        self.assertTrue(any(level == "warning" and "Incident key" in message for level, message in helper.logs))
+
     def test_unusable_configuration_is_a_failure(self):
         helper = FakeAlertHelper(events=[{}])
 

@@ -240,6 +240,13 @@ def run_alert(helper, action_name, handler, context_factory=AlertContext):
             succeeded = False
         if not succeeded:
             failures += 1
+    collisions = sum(count - 1 for count in (getattr(context, "container_ids", None) or {}).values() if count > 1)
+    if collisions:
+        helper.log_warn(
+            f"Alert action {action_name}: {collisions} results shared a name and time without an Incident key and "
+            "were told apart by their row order; set the Incident key so each result keeps its own object "
+            "even when the row order changes"
+        )
     context.run_followups()
     if failures:
         helper.log_error(f"Alert action {action_name}: {failures} of {total} results failed")

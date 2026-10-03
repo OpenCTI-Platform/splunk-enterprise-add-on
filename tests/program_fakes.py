@@ -213,6 +213,7 @@ class FakeAlertContext:
         self.cache = FakeCache()
         self.service = service
         self.followups = []
+        self.container_ids = {}
         self._real = AlertContext
 
     @property
