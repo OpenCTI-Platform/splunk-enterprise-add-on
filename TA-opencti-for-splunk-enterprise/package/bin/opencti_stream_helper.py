@@ -7,22 +7,32 @@ import solnlib.conf_manager as conf_manager  # type: ignore
 import solnlib.log as log  # type: ignore
 import solnlib.modular_input.checkpointer as checkpointer  # type: ignore
 import splunklib.modularinput as smi  # type: ignore
-import utils
 
-from app_connector_helper import SplunkAppConnectorHelper
+from addon_config import load_settings
+from addon_state import DEPLOYMENTS_COLLECTION, KVCollection, KVStoreCache
 from constants import (
-    resolve_ssl_verify,
     INDICATORS_KVSTORE_NAME,
     REPORTS_KVSTORE_NAME,
     MARKINGS_KVSTORE_NAME,
     IDENTITIES_KVSTORE_NAME,
     ADDON_NAME,
 )
+from deployment_reporter import (
+    DeploymentReporter,
+    STATUS_DEPLOYED,
+    STATUS_EXPIRED,
+    STATUS_FAILED,
+    removal_status,
+)
 from filigran_sseclient import SSEClient  # type: ignore
+from knowledge_fields import enrichment_graphql_fields, merge_knowledge_fields, provenance_from_extension, pulse_from_extension
+from opencti_features import OpenCTIFeatureDetector
+from security_platform import SecurityPlatformResolver
 from stix2patterns.v21.pattern import Pattern  # type: ignore
 import six  # type: ignore
 from datetime import datetime, timedelta, timezone
 import sys
+import utils
 
 MARKING_DEFs = {}
 IDENTITY_DEFs = {}
@@ -86,11 +96,17 @@ def validate_input(definition):
 
 
 def exist_in_kvstore(kv_store, key_id):
+    """
+    :return: True when the KV Store holds key_id, False when it does not
+    :raise: any other KV Store failure: the entry may still be there
+    """
     try:
         kv_store.query_by_id(key_id)
         return True
-    except Exception:
-        return False
+    except Exception as ex:
+        if getattr(ex, "status", None) == 404 or "404" in str(ex):
+            return False
+        raise
 
 
 def parse_stix_pattern(stix_pattern):
@@ -169,6 +185,12 @@ def enrich_payload(stream_id, input_name, payload, msg_event):
         return None
     payload["type"] = parsed_stix["type"]
     payload["value"] = parsed_stix["value"]
+
+    # Provenance and Threat Pulse summaries travel as STIX extensions; keep
+    # them before the extensions are dropped.
+    knowledge = provenance_from_extension(payload.get("extensions"))
+    knowledge.update(pulse_from_extension(payload.get("extensions")))
+    payload.update(knowledge)
 
     if "extensions" in payload:
         for ext in payload["extensions"].values():
@@ -271,6 +293,96 @@ def get_kvstore_name_for_entity(entity_type, data):
 
     return ENTITY_KVSTORE_MAP.get(entity_type)
 
+def kv_external_id(collection, key):
+    """External id of an indicator held in a KV Store collection (deployed-on)."""
+    return f"kvstore:{collection}/{key}"
+
+
+def index_external_id(index, indicator_id):
+    """External id of an indicator written as events (deployed-on), stable across its updates."""
+    return f"index:{index or 'default'}/{indicator_id}"
+
+
+def indexed_indicator_kv_keys(indicator):
+    """
+    :return: the opencti_indicators keys an indicator streamed in index mode
+        can have: its STIX id (the "Update OpenCTI Indicators Lookup" searches
+        set _key = id) and its OpenCTI internal id (KV Store mode)
+    """
+    keys = []
+    for key in (indicator.get("id"), indicator.get("_key")):
+        if key and key not in keys:
+            keys.append(key)
+    return keys
+
+
+def report_indicator_state(reporter, event, indicator, external_id, error=None):
+    """
+    Queue the deployment state of an indicator after a Splunk write.
+
+    :param reporter: DeploymentReporter or None (write-back disabled)
+    :param event: stream event (create, update, delete)
+    :param indicator: enriched indicator payload
+    :param external_id: kv_external_id() or index_external_id()
+    :param error: write failure message, if any
+    :return: the reported status, or None
+    """
+    if reporter is None or not indicator:
+        return None
+    indicator_id = indicator.get("id")
+    if not indicator_id:
+        return None
+    if error:
+        status = STATUS_FAILED
+        reporter.report(indicator_id, status, external_id, error_message=error)
+    elif event == "delete" or utils.get_bool_val(indicator.get("revoked")):
+        # A revoked indicator stays as a record but no detection uses it.
+        status = removal_status(indicator)
+        removed_at = indicator.get("valid_until") if status == STATUS_EXPIRED else None
+        reporter.report(indicator_id, status, external_id, removed_at=removed_at)
+    else:
+        status = STATUS_DEPLOYED
+        reporter.report(indicator_id, status, external_id)
+    return status
+
+
+def build_deployment_reporter(settings, client_helper, service, logger):
+    """
+    :return: (detector, DeploymentReporter or None)
+    """
+    cache = None
+    try:
+        cache = KVStoreCache(service)
+    except Exception as ex:
+        logger.warning(f"Add-on state collection unavailable, caching in memory only: {ex}")
+    detector = OpenCTIFeatureDetector(client_helper, logger=logger, cache=cache, ttl=settings.feature_cache_ttl)
+    if not settings.deployment_writeback:
+        logger.info("Indicator deployment write-back disabled in Configuration > Security Platform")
+        return detector, None
+    resolver = SecurityPlatformResolver(
+        client_helper, detector, settings.platform, server_name=settings.server_name, cache=cache, logger=logger
+    )
+
+    def platform_id():
+        platform = resolver.resolve()
+        return platform.get("id") if platform else None
+
+    def sink(records):
+        KVCollection(service, DEPLOYMENTS_COLLECTION).upsert(records)
+
+    reporter = DeploymentReporter(
+        client_helper,
+        detector,
+        platform_id,
+        batch_size=settings.writeback_batch_size,
+        rate_per_minute=settings.writeback_rate_limit,
+        logger=logger,
+        state_sink=sink,
+        on_platform_missing=resolver.invalidate,
+    )
+    return detector, reporter
+
+
 def stream_events(inputs, event_writer):
     # inputs.inputs is a Python dictionary object like:
     # {
@@ -297,16 +409,10 @@ def stream_events(inputs, event_writer):
             )
             logger.setLevel(log_level)
 
-            cfm = conf_manager.ConfManager(
-                session_key,
-                ADDON_NAME,
-                realm=f"__REST_CREDENTIAL__#{ADDON_NAME}#configs/conf-ta-opencti-for-splunk-enterprise_settings",
-            )
-            conf = cfm.get_conf("ta-opencti-for-splunk-enterprise_settings")
-            opencti_url = conf.get("account").get("opencti_url")
-            opencti_api_key = conf.get("account").get("opencti_api_key")
-            ca_bundle_path = conf.get("account").get("ca_bundle_path", "")
-            ssl_verify = resolve_ssl_verify(ca_bundle_path)
+            settings = load_settings(session_key, logger)
+            opencti_url = settings.opencti_url
+            opencti_api_key = settings.opencti_api_key
+            ssl_verify = settings.ssl_verify
 
             log.modular_input_start(logger, normalized_input_name)
             logger.info("OpenCTI data input module start")
@@ -319,28 +425,15 @@ def stream_events(inputs, event_writer):
             logger.info(f"OpenCTI URL: {opencti_url}")
             logger.info(f"Fetching data from OpenCTI stream.id: {stream_id}")
             logger.info(f"Selected input type: {input_type}")
+            logger.info(f"Proxy settings: {utils.redact_proxy_settings(settings.proxy_settings)}")
 
-            # resolve proxy configurations
-            proxy_settings = conf_manager.get_proxy_dict(
-                logger=logger,
-                session_key=session_key,
-                app_name=ADDON_NAME,
-                conf_name="ta-opencti-for-splunk-enterprise_settings",
-            )
-            logger.info(f"Proxy settings: {proxy_settings}")
-
-            user_agent = utils.get_user_agent(session_key)
+            user_agent = settings.user_agent
             logger.debug(f"User-Agent: {user_agent}")
 
             # Create Splunk App Connector Helper
-            connector_helper = SplunkAppConnectorHelper(
+            connector_helper = settings.build_client(
                 connector_id="splunk-stream-input",
                 connector_name="Splunk Stream Input",
-                opencti_url=opencti_url,
-                opencti_api_key=opencti_api_key,
-                proxy_settings=proxy_settings,
-                verify=ssl_verify,
-                user_agent=user_agent,
             )
 
             kvstore_checkpointer = checkpointer.KVStoreCheckpointer(
@@ -384,7 +477,9 @@ def stream_events(inputs, event_writer):
                 logger.error(f"Failed to connect to Splunk service: {e}")
                 return
 
-            proxies = utils.get_proxy_config(proxy_settings=proxy_settings)
+            detector, reporter = build_deployment_reporter(settings, connector_helper, service, logger)
+
+            proxies = utils.get_proxy_config(proxy_settings=settings.proxy_settings)
             try:
                 messages = SSEClient(
                     live_stream_url,
@@ -400,6 +495,10 @@ def stream_events(inputs, event_writer):
                     proxies=proxies,
                 )
                 for msg in messages:
+                    # Before the event filter: OpenCTI sends a heartbeat event every 5 s
+                    # (app:live_stream:heartbeat_period), so an idle stream still flushes.
+                    if reporter is not None:
+                        reporter.flush_if_due()
                     if msg.event not in ["create", "update", "delete"]:
                         continue
                     logger.debug(f"Received message ID: {msg.id} | Event: {msg.event}")
@@ -416,10 +515,10 @@ def stream_events(inputs, event_writer):
                     parsed_stix = None
                     if entity_type == "indicator" and data.get("pattern_type") == "stix":
                         parsed_stix = enrich_payload(stream_id, input_name, data, msg.event)
-                        if parsed_stix is not None:
+                        if parsed_stix is not None and msg.event != "delete":
                             try:
                                 enrich_row = connector_helper.get_indicator_enrichment(
-                                    data["id"]
+                                    data["id"], extra_fields=enrichment_graphql_fields(detector)
                                 )
                                 if enrich_row:
                                     parsed_stix["attack_patterns"] = enrich_row.get(
@@ -434,6 +533,7 @@ def stream_events(inputs, event_writer):
                                     parsed_stix["vulnerabilities"] = enrich_row.get(
                                         "vulnerabilities", []
                                     )
+                                    merge_knowledge_fields(parsed_stix, {}, enrich_row.get("indicator"))
                             except Exception as e:
                                 logger.warning(
                                     f"OpenCTI enrichment failed for {data['id']}: {e}"
@@ -444,6 +544,7 @@ def stream_events(inputs, event_writer):
                         logger.error(f"Could not enrich data for msg {msg.id}")
                         continue
 
+                    is_indicator = entity_type == "indicator"
                     indicator_value = parsed_stix.get("value") or data.get("value")
                     logger.info(
                         f"[Indicator {parsed_stix.get('_key')}] Processing value={indicator_value} event={msg.event}"
@@ -459,6 +560,8 @@ def stream_events(inputs, event_writer):
                                 f"x_opencti_type={parsed_stix.get('x_opencti_type')}"
                             )
                         else:
+                            key_id = parsed_stix.get("_key")
+                            external_id = kv_external_id(kvstore_name, key_id)
                             try:
                                 # Lazily cache the kvstore.data handle per collection
                                 if kvstore_name not in kvstore_handles:
@@ -470,7 +573,6 @@ def stream_events(inputs, event_writer):
                                     )
 
                                 kv = kvstore_handles[kvstore_name]
-                                key_id = parsed_stix.get("_key")
 
                                 if msg.event == "delete":
                                     if key_id and exist_in_kvstore(kv, key_id):
@@ -485,15 +587,23 @@ def stream_events(inputs, event_writer):
                                     logger.info(
                                         f"KV Store [{kvstore_name}]: Inserted/Updated {key_id}"
                                     )
+                                if is_indicator:
+                                    report_indicator_state(reporter, msg.event, parsed_stix, external_id)
                             except Exception as kv_ex:
                                 logger.error(
                                     f"KV Store operation failed for collection={kvstore_name}: {kv_ex}"
                                 )
+                                if is_indicator:
+                                    report_indicator_state(
+                                        reporter, msg.event, parsed_stix, external_id,
+                                        error=f"KV Store {kvstore_name} write failed: {kv_ex}",
+                                    )
                                 continue
 
                     elif input_type == "index":
                         # If this is an indicator delete event, also purge it from the indicator KV
-                        if entity_type == "indicator" and msg.event == "delete":
+                        purge_error = None
+                        if is_indicator and msg.event == "delete":
                             try:
                                 # Lazily init the indicators KV handle via kvstore_handles
                                 if INDICATORS_KVSTORE_NAME not in kvstore_handles:
@@ -505,21 +615,22 @@ def stream_events(inputs, event_writer):
                                     )
 
                                 kv_indicators = kvstore_handles[INDICATORS_KVSTORE_NAME]
-                                key_id = parsed_stix.get("id")
-
-                                if key_id and exist_in_kvstore(kv_indicators, key_id):
-                                    kv_indicators.delete_by_id(key_id)
-                                    logger.info(
-                                        f"KV Store [{INDICATORS_KVSTORE_NAME}]: Deleted {key_id} on delete event"
-                                    )
-                                else:
-                                    logger.debug(
-                                        f"No existing KV entry for {key_id} in [{INDICATORS_KVSTORE_NAME}]"
-                                    )
+                                for key_id in indexed_indicator_kv_keys(parsed_stix):
+                                    if exist_in_kvstore(kv_indicators, key_id):
+                                        kv_indicators.delete_by_id(key_id)
+                                        logger.info(
+                                            f"KV Store [{INDICATORS_KVSTORE_NAME}]: Deleted {key_id} on delete event"
+                                        )
+                                    else:
+                                        logger.debug(
+                                            f"No existing KV entry for {key_id} in [{INDICATORS_KVSTORE_NAME}]"
+                                        )
                             except Exception as e:
                                 logger.warning(
                                     f"Failed to delete indicator from KV store [{INDICATORS_KVSTORE_NAME}]: {e}"
                                 )
+                                # Detections still match the KV entry: not removed from Splunk.
+                                purge_error = f"KV Store {INDICATORS_KVSTORE_NAME} delete failed: {e}"
 
                         # Always write the event to the index (create/update/delete)
                         event_time = parsed_stix.get("updated_at")
@@ -534,17 +645,29 @@ def stream_events(inputs, event_writer):
                                 )
                                 event_time = None
 
-                        event_obj = smi.Event(  # type: ignore[attr-defined]
-                            data=json.dumps(parsed_stix),
-                            time=event_time,
-                            host=None,
-                            index=target_index,
-                            source="opencti",
-                            sourcetype=f"opencti:{entity_type}",
-                            done=True,
-                            unbroken=True,
-                        )
-                        event_writer.write_event(event_obj)
+                        external_id = index_external_id(target_index, parsed_stix.get("id"))
+                        try:
+                            event_obj = smi.Event(  # type: ignore[attr-defined]
+                                data=json.dumps(parsed_stix),
+                                time=event_time,
+                                host=None,
+                                index=target_index,
+                                source="opencti",
+                                sourcetype=f"opencti:{entity_type}",
+                                done=True,
+                                unbroken=True,
+                            )
+                            event_writer.write_event(event_obj)
+                        except Exception as write_ex:
+                            logger.error(f"Index write failed for {parsed_stix.get('id')}: {write_ex}")
+                            if is_indicator:
+                                report_indicator_state(
+                                    reporter, msg.event, parsed_stix, external_id,
+                                    error=f"Index {target_index} write failed: {write_ex}",
+                                )
+                            raise
+                        if is_indicator:
+                            report_indicator_state(reporter, msg.event, parsed_stix, external_id, error=purge_error)
 
                     else:
                         logger.warning(f"Unknown input_type: {input_type}")
@@ -558,7 +681,10 @@ def stream_events(inputs, event_writer):
                 exc_type, exc_value, exc_tb = sys.exc_info()
                 if exc_type and exc_value and exc_tb:
                     sys.excepthook(exc_type, exc_value, exc_tb)
+            finally:
+                if reporter is not None:
+                    reporter.flush(force=True)
+                    logger.info(f"Deployment write-back statistics: {reporter.stats}")
 
         except Exception as e:
             log.log_exception(logger, e, "my custom error type", msg_before="Exception raised while ingesting data")
-
