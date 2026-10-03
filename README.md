@@ -510,6 +510,11 @@ capabilities are skipped with one log line such as
 | 1.2.0          | 6.x and later   | Security Platform sightings where the entity exists; every other feature disabled and logged     |
 | 1.2.0          | program releases | every capability the platform provides, detected at runtime (no configuration per version)     |
 
+The custom search commands (`openctireporthits`, `openctivalidation`, `openctireconcile`,
+`openctiprovides`) declare `python.required = 3.13`, the Python runtime of Splunk Enterprise 10: the
+libraries the add-on ships (stix2 3.0.2) need Python 3.10 or later, so the Python 3.9 runtime is not
+supported.
+
 Innovations without a Splunk surface (source intelligence, autonomous curation, graph analytics, time
 machine) need nothing here: the hits and sightings reported by the add-on feed the source impact
 metrics of OpenCTI.
@@ -748,10 +753,13 @@ Example: alert only on corroborated indicators, keeping indicators of platforms 
 ```
 | tstats count from datamodel=Network_Traffic.All_Traffic by All_Traffic.dest_ip
 | rename All_Traffic.dest_ip AS value
-| lookup opencti_indicators value OUTPUT id AS indicator_id corroboration_count pulse_prevalence revoked
-| where isnotnull(indicator_id) AND `opencti_usable_indicator`
-    AND (isnull(corroboration_count) OR `opencti_corroborated_indicator(2)`)
+| `opencti_hits_match`
+| lookup opencti_indicators id AS indicator_id OUTPUT corroboration_count pulse_prevalence
+| where isnull(corroboration_count) OR `opencti_corroborated_indicator(2)`
 ```
+
+`opencti_hits_match` returns one row per matching indicator that is not revoked (several indicators can
+share a value), so the knowledge fields are read per indicator.
 
 ### Custom search commands
 

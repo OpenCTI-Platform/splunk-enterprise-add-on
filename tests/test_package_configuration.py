@@ -170,6 +170,16 @@ class CommandsTest(unittest.TestCase):
                      "opencti_prevalent_indicator", "opencti_inventory_scope"):
             self.assertIn(name, macros.sections())
 
+    def test_hits_match_yields_one_row_per_indicator(self):
+        steps = [step.strip() for step in _conf("macros.conf").get("opencti_hits_match", "definition").split("|")]
+        self.assertEqual(steps[0], "lookup opencti_indicators value OUTPUT id AS indicator_id",
+                         "revoked is read per indicator, never as a multivalue aligned by position")
+        self.assertLess(steps.index("eval indicator_id = mvdedup(indicator_id)"), steps.index("mvexpand indicator_id"))
+        self.assertLess(steps.index("mvexpand indicator_id"),
+                        steps.index("lookup opencti_indicators id AS indicator_id OUTPUT revoked"))
+        self.assertEqual(steps[-1], "where `opencti_usable_indicator`")
+        self.assertIn("mvfind(revoked", _conf("macros.conf").get("opencti_usable_indicator", "definition"))
+
 
 class GlobalConfigTest(unittest.TestCase):
     def setUp(self):

@@ -170,10 +170,13 @@ class OpenCTIFeatureDetector:
         return "features|" + (getattr(self.client, "opencti_url", "") or "")
 
     def _fresh(self, entry):
-        if not isinstance(entry, dict):
+        if not isinstance(entry, dict) or not isinstance(entry.get("features"), list):
             return False
-        ttl = entry.get("ttl") or self.ttl
-        return self.clock() - float(entry.get("detected_at") or 0) < float(ttl)
+        try:
+            ttl = float(entry.get("ttl") or self.ttl)
+            return self.clock() - float(entry.get("detected_at") or 0) < ttl
+        except (TypeError, ValueError):
+            return False
 
     def _load_cached(self):
         entry = OpenCTIFeatureDetector._memory.get(self.cache_key)
@@ -186,7 +189,11 @@ class OpenCTIFeatureDetector:
                 self.logger.warning(f"OpenCTI feature cache read failed: {ex}")
                 entry = None
             if isinstance(entry, dict) and isinstance(entry.get("features"), str):
-                entry = dict(entry, features=json.loads(entry["features"]))
+                try:
+                    entry = dict(entry, features=json.loads(entry["features"]))
+                except ValueError:
+                    self.logger.warning("OpenCTI feature cache entry is corrupt: detecting again")
+                    entry = None
             if self._fresh(entry):
                 OpenCTIFeatureDetector._memory[self.cache_key] = entry
                 return entry

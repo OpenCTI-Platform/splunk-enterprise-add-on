@@ -103,6 +103,22 @@ class DetectorTest(unittest.TestCase):
         self.assertTrue(self._detector(second, cache=cache).has(features.FEATURE_HITS))
         self.assertEqual(second.calls, [])
 
+    def test_corrupt_persistent_entries_are_detected_again(self):
+        for corrupt in (
+            {"features": "not json", "detected_at": 1000.0},
+            {"features": '{"hits": true}', "detected_at": 1000.0},
+            {"features": "[]", "detected_at": "yesterday"},
+            {"features": "[]", "detected_at": 1000.0, "ttl": "soon"},
+        ):
+            with self.subTest(corrupt=corrupt):
+                OpenCTIFeatureDetector.clear_memory()
+                client = _client(_schema(("indicatorReportHits",)))
+                cache = FakeCache()
+                detector = self._detector(client, cache=cache)
+                cache.set(detector.cache_key, corrupt)
+                self.assertTrue(detector.has(features.FEATURE_HITS))
+                self.assertEqual(len(client.calls_of("OpenCTIFeatureDetection")), 1)
+
     def test_cache_expires_after_ttl(self):
         client = _client(_schema(("indicatorReportHits",)))
         detector = self._detector(client, ttl=60)
