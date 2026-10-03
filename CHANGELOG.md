@@ -68,8 +68,10 @@ Compatibility with the OpenCTI autonomous threat management program
 - `register()` and `send_stix_bundle()` check GraphQL errors returned with HTTP 200 (#19); the
   connector registers once per alert run; every OpenCTI call has a timeout.
 - Index mode: delete events purge the KV Store entry by its `_key` (#20), and by the STIX id the
-  lookup searches key it with. The incremental and nightly lookup searches read delete events too,
-  so a deleted indicator is never written back to `opencti_indicators`.
+  lookup searches key it with. The incremental and nightly lookup searches read delete events too:
+  the incremental search overwrites a deleted indicator with a revoked tombstone without value or
+  pattern (so an entry restored by a concurrent run never stays matchable), and the nightly rebuild
+  leaves it out of `opencti_indicators`.
 - The Security Platform must be of type SIEM: a same-name platform of another type is neither adopted
   nor shadowed by a new one, a configured id of another type is rejected, and a cached resolution is
   reused only for a SIEM platform while its configuration (auto mode, name) is unchanged.

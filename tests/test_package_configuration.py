@@ -92,8 +92,20 @@ class SavedSearchesTest(unittest.TestCase):
             with self.subTest(stanza=stanza):
                 self.assertIn('OR event="delete"', search)
                 self.assertIn("sort 0 id -_time -is_delete", search)
-                self.assertLess(search.index("dedup id"), search.index("where is_delete == 0"))
-                self.assertLess(search.index("where is_delete == 0"), search.index("outputlookup"))
+        # The incremental upsert only touches the rows it outputs: a winning
+        # delete overwrites the entry with a non-matchable revoked tombstone.
+        incremental = self.searches.get("Update OpenCTI Indicators Lookup", "search")
+        self.assertNotIn("where is_delete == 0", incremental)
+        tombstone = incremental.index('revoked = if(is_delete == 1, "true", revoked)')
+        self.assertLess(incremental.index("dedup id"), tombstone)
+        self.assertIn("value = if(is_delete == 1, null(), value)", incremental)
+        self.assertIn("pattern = if(is_delete == 1, null(), pattern)", incremental)
+        self.assertLess(tombstone, incremental.index("outputlookup append=t"))
+        # The nightly rebuild replaces the collection: delete winners are dropped.
+        nightly = self.searches.get("Nightly Rebuild OpenCTI Indicators Lookup", "search")
+        self.assertLess(nightly.index("dedup id"), nightly.index("where is_delete == 0"))
+        self.assertLess(nightly.index("where is_delete == 0"), nightly.index("outputlookup opencti_indicators"))
+        self.assertNotIn("append", nightly[nightly.index("outputlookup"):])
 
     def test_kv_sync_searches_keep_the_knowledge_fields(self):
         for stanza in ("Update OpenCTI Indicators Lookup", "Nightly Rebuild OpenCTI Indicators Lookup"):
