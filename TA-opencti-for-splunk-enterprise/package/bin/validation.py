@@ -99,7 +99,25 @@ def validation_window(request, grace_minutes):
     return start, end, decide_after
 
 
-def decide_outcome(start, end, decide_after, hit_windows, grace_minutes, now, platform_last_hit=None):
+def history_covered_from(history, windows):
+    """
+    :param history: opencti_indicator_hits record
+    :param windows: its recent hit windows
+    :return: None when the windows hold every recorded hit, otherwise the
+        start of the oldest retained window (older ones were trimmed)
+    """
+    try:
+        total = int((history or {}).get("hit_count") or 0)
+    except (TypeError, ValueError):
+        total = 0
+    retained = sum(int(w[2] or 0) for w in windows)
+    if total <= retained:
+        return None
+    return min(float(w[0]) for w in windows) if windows else float("inf")
+
+
+def decide_outcome(start, end, decide_after, hit_windows, grace_minutes, now, platform_last_hit=None,
+                   covered_from=None):
     """
     :param start: test window start (aware datetime)
     :param end: completion time or None while running
@@ -108,6 +126,8 @@ def decide_outcome(start, end, decide_after, hit_windows, grace_minutes, now, pl
     :param now: aware datetime
     :param platform_last_hit: last hit OpenCTI recorded on the deployment
         (epoch), the cross-check of the local hit history
+    :param covered_from: epoch from which hit_windows is complete, None when
+        it holds the whole history (see history_covered_from)
     :return: (outcome, first matching hit epoch or None)
     """
     if start is None:
@@ -125,6 +145,9 @@ def decide_outcome(start, end, decide_after, hit_windows, grace_minutes, now, pl
         ):
             # A later hit the local history does not hold: the history is
             # incomplete (lost KV Store write), a miss cannot be proven.
+            return OUTCOME_PENDING, None
+        if covered_from is not None and covered_from > low:
+            # The windows of the test period were trimmed from the history.
             return OUTCOME_PENDING, None
         return OUTCOME_MISSED, None
     return OUTCOME_PENDING, None
@@ -291,9 +314,11 @@ class ValidationProver:
                     rows.append(row)
                     continue
                 history = self.hits_history.get(hit_history_key(self.platform["id"], standard_id)) or {}
+                windows = load_windows(history)
                 outcome, observed = decide_outcome(
-                    start, end, decide_after, load_windows(history), self.grace_minutes, self.now,
+                    start, end, decide_after, windows, self.grace_minutes, self.now,
                     platform_last_hit=to_epoch(deployment.get("last_hit_at")),
+                    covered_from=history_covered_from(history, windows),
                 )
                 row["outcome"] = outcome
                 row["first_matching_hit"] = to_iso(observed) if observed else ""

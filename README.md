@@ -574,7 +574,8 @@ platform:
 - **missed** when the request is completed, the grace period is over and no hit overlaps; a sighting
   with `x_opencti_negative = true` records the miss on the Security Platform;
 - **requested** otherwise: no result yet, nothing is written. This includes a later hit recorded by
-  OpenCTI that the local hit history does not hold (lost KV Store write): a miss is never declared on an
+  OpenCTI that the local hit history does not hold (lost KV Store write), and a history whose oldest
+  windows (beyond the last 50) were trimmed after the test started: a miss is never declared on an
   incomplete history.
 
 Outcomes are written once per request and indicator (`opencti_validation_results`): through

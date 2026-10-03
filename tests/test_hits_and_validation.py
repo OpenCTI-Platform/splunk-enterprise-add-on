@@ -31,6 +31,7 @@ from validation import (
     OUTCOME_PENDING,
     ValidationProver,
     decide_outcome,
+    history_covered_from,
     validation_window,
 )
 
@@ -233,6 +234,18 @@ class DecideOutcomeTest(unittest.TestCase):
         self.assertEqual(decide_outcome(start, end, decide_after, [], 30, NOW)[0], OUTCOME_PENDING)
         hit = (NOW - timedelta(minutes=5)).timestamp()
         self.assertEqual(decide_outcome(start, end, decide_after, [[hit, hit, 1]], 30, NOW)[0], OUTCOME_DETECTED)
+
+    def test_trimmed_history_never_declares_a_miss(self):
+        later = (NOW - timedelta(minutes=20)).timestamp()
+        windows = [[later, later, 1]]
+        trimmed = history_covered_from({"hit_count": 7}, windows)
+        self.assertEqual(trimmed, later)
+        self.assertEqual(decide_outcome(self.start, self.end, self.decide_after, windows, 30, NOW,
+                                        covered_from=trimmed)[0], OUTCOME_PENDING)
+        self.assertIsNone(history_covered_from({"hit_count": 1}, windows))
+        older = (NOW - timedelta(hours=5)).timestamp()
+        self.assertEqual(decide_outcome(self.start, self.end, self.decide_after, [[older, older, 1]], 30, NOW,
+                                        covered_from=older)[0], OUTCOME_MISSED)
 
 
 def _request(status="completed", validation_status="requested", platform=PLATFORM, ioc_value="evil.example"):

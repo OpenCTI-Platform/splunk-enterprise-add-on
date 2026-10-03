@@ -121,8 +121,10 @@ class SecurityPlatformResolver:
         if not isinstance(entry, dict) or not isinstance(entry.get("platform"), dict):
             return None
         if not self.settings.platform_id:
-            # A changed configured name invalidates an auto resolution, and
-            # an auto resolution only ever holds a SIEM platform.
+            # Disabling auto mode or changing the configured name invalidates
+            # an auto resolution, and an auto resolution only holds a SIEM platform.
+            if not self.settings.auto_create:
+                return None
             if (entry.get("configured_name") or "") != self.settings.name:
                 return None
             if (entry["platform"].get("security_platform_type") or "").upper() != SECURITY_PLATFORM_TYPE:

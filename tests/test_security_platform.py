@@ -92,6 +92,13 @@ class ResolverTest(unittest.TestCase):
         self.assertEqual(_resolver(client, PlatformSettings(), cache=cache).resolve(), PLATFORM)
         self.assertEqual(len(client.calls_of("SplunkSecurityPlatformByName")), 1)
 
+    def test_cached_auto_resolution_is_dropped_once_auto_mode_is_disabled(self):
+        cache = FakeCache()
+        _resolver(FakeClient({"SplunkSecurityPlatformByName": _by_name([PLATFORM])}), PlatformSettings(), cache=cache).resolve()
+        client = FakeClient({})
+        self.assertIsNone(_resolver(client, PlatformSettings(auto_create=False), cache=cache).resolve())
+        self.assertEqual(client.calls_of("SplunkSecurityPlatformByName"), [])
+
     def test_configured_id_of_another_type_is_kept_with_a_warning(self):
         edr = dict(PLATFORM, security_platform_type="EDR")
         client = FakeClient({"SplunkSecurityPlatform": {"securityPlatform": edr}})
