@@ -193,8 +193,11 @@ class ConverterTest(unittest.TestCase):
         self.assertNotEqual(first["id"], later["id"], "a later scheduled run is a new detection")
 
     def test_ad_hoc_sid_and_unknown_sid(self):
-        ad_hoc = _object(convert_to_incident(dict(ALERT_PARAMS, sid="1727000400.42"), {"user": "alice"}), "incident")
-        self.assertTrue(ad_hoc["created"].startswith("2024-09-22T10:20:00"))
+        for sid in ("1727000400.42", "rt_1727000400.42", "1727000400.42_7E5C5F5F-1B2C-4D3E-8F90-0A1B2C3D4E5F",
+                    "scheduler__nobody__search__RMD5ab_at_1727000400_9_7E5C5F5F-1B2C-4D3E-8F90-0A1B2C3D4E5F"):
+            with self.subTest(sid=sid):
+                incident = _object(convert_to_incident(dict(ALERT_PARAMS, sid=sid), {"user": "alice"}), "incident")
+                self.assertTrue(incident["created"].startswith("2024-09-22T10:20:00"))
         before = datetime.now(timezone.utc).replace(microsecond=0)
         unknown = _object(convert_to_incident(dict(ALERT_PARAMS, sid="custom"), {"user": "alice"}), "incident")
         self.assertGreaterEqual(datetime.fromisoformat(unknown["created"].replace("Z", "+00:00")), before)
