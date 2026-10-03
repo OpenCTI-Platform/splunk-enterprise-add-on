@@ -600,7 +600,7 @@
     "ds_YI12Xgn7": {
       "name": "OpenCTI added IOCs over time",
       "options": {
-        "query": "| inputlookup opencti_indicators | eval added_at = strptime(added_at, \"%Y-%m-%dT%H:%M:%SZ\") | eval _time = added_at | timechart count AS Count",
+        "query": "| inputlookup opencti_indicators | eval added_at = coalesce(strptime(added_at, \"%Y-%m-%dT%H:%M:%S.%3NZ\"), strptime(added_at, \"%Y-%m-%dT%H:%M:%SZ\")) | eval _time = added_at | timechart count AS Count",
         "queryParameters": {
           "earliest": "$global_time.earliest$",
           "latest": "$global_time.latest$"
@@ -668,7 +668,7 @@
     "ds_dep_last_sync": {
       "name": "Last sync",
       "options": {
-        "query": "| inputlookup opencti_deployments | eval t=strptime(reported_at, \"%Y-%m-%dT%H:%M:%SZ\") | stats max(t) AS last | eval last_sync=strftime(last, \"%Y-%m-%d %H:%M:%S UTC\") | fields last_sync",
+        "query": "| inputlookup opencti_deployments | eval t=coalesce(strptime(reported_at, \"%Y-%m-%dT%H:%M:%S.%3NZ\"), strptime(reported_at, \"%Y-%m-%dT%H:%M:%SZ\")) | stats max(t) AS last | eval last_sync=strftime(last, \"%Y-%m-%d %H:%M:%S UTC\") | fields last_sync",
         "queryParameters": {}
       },
       "type": "ds.search"
@@ -700,7 +700,7 @@
     "ds_hits_daily": {
       "name": "Indicators hit per day (last hit)",
       "options": {
-        "query": "| inputlookup opencti_indicator_hits | eval _time=strptime(last_hit, \"%Y-%m-%dT%H:%M:%S.%3NZ\") | where _time >= relative_time(now(), \"-30d@d\") | timechart span=1d count AS indicators_hit",
+        "query": "| inputlookup opencti_indicator_hits | eval _time=coalesce(strptime(last_hit, \"%Y-%m-%dT%H:%M:%S.%3NZ\"), strptime(last_hit, \"%Y-%m-%dT%H:%M:%SZ\")) | where _time >= relative_time(now(), \"-30d@d\") | timechart span=1d count AS indicators_hit",
         "queryParameters": {}
       },
       "type": "ds.search"

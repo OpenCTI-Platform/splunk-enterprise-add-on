@@ -253,6 +253,24 @@ class DashboardTest(unittest.TestCase):
                 visualization = dashboard["visualizations"][item["item"]]
                 self.assertIn(visualization["dataSources"]["primary"], dashboard["dataSources"])
 
+    def test_iso_timestamps_parse_both_precisions(self):
+        # KV Store rows hold second (utc_now_iso, stream added_at) and millisecond (to_iso) timestamps
+        with open(os.path.join(TA, "custom_dashboard.json"), encoding="utf-8") as handle:
+            dashboard = json.load(handle)
+        parsed = 0
+        for name, source in dashboard["dataSources"].items():
+            query = source.get("options", {}).get("query", "")
+            for field in set(re.findall(r'strptime\((\w+), "%Y-%m-%dT', query)):
+                parsed += 1
+                self.assertIn(f'strptime({field}, "%Y-%m-%dT%H:%M:%S.%3NZ")', query, name)
+                self.assertIn(f'strptime({field}, "%Y-%m-%dT%H:%M:%SZ")', query, name)
+        self.assertGreaterEqual(parsed, 3)
+
+    def test_existing_added_at_parses_both_precisions(self):
+        search = _conf("savedsearches.conf").get("Update OpenCTI Indicators Lookup", "search")
+        self.assertIn('strptime(existing_added_at, "%Y-%m-%dT%H:%M:%S.%3NZ")', search)
+        self.assertIn('strptime(existing_added_at, "%Y-%m-%dT%H:%M:%SZ")', search)
+
 
 if __name__ == "__main__":
     unittest.main()
