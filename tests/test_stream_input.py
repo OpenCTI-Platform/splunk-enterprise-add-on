@@ -71,6 +71,7 @@ class RecordingReporter:
     def __init__(self):
         self.reports = []
         self.flushes = 0
+        self.due_checks = []
         self.stats = {}
 
     def report(self, indicator_id, status, external_id=None, error_message=None, removed_at=None, deployed_at=None):
@@ -79,7 +80,7 @@ class RecordingReporter:
         return True
 
     def flush_if_due(self):
-        pass
+        self.due_checks.append(len(self.reports))
 
     def flush(self, force=False):
         self.flushes += 1
@@ -121,6 +122,11 @@ class StreamInputTest(unittest.TestCase):
                                              "external_id": f"kvstore:opencti_indicators/{INTERNAL_ID}",
                                              "error": None, "removed_at": None}])
         self.assertEqual(reporter.flushes, 1, "pending reports are flushed when the stream ends")
+
+    def test_heartbeats_of_an_idle_stream_flush_due_reports(self):
+        heartbeat = SimpleNamespace(event="heartbeat", id="1727000000002-0", data="2024-09-22T10:13:20.000Z")
+        _, reporter, _, _ = self._run([_message("create", _indicator(), 1), heartbeat, heartbeat])
+        self.assertEqual(reporter.due_checks, [0, 1, 1], "every heartbeat checks the pending batch")
 
     def test_knowledge_fields_are_stored(self):
         enrichment = {"attack_patterns": ["T1071"], "malware": [], "threat_actors": [], "vulnerabilities": [],

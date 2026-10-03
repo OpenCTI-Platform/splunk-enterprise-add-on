@@ -495,6 +495,8 @@ def stream_events(inputs, event_writer):
                     proxies=proxies,
                 )
                 for msg in messages:
+                    # Before the event filter: OpenCTI sends a heartbeat event every 5 s
+                    # (app:live_stream:heartbeat_period), so an idle stream still flushes.
                     if reporter is not None:
                         reporter.flush_if_due()
                     if msg.event not in ["create", "update", "delete"]:
