@@ -134,6 +134,27 @@ class ResolverTest(unittest.TestCase):
         self.assertEqual(_resolver(second, PlatformSettings(), server_name="sh02", cache=cache).resolve(), PLATFORM)
         self.assertEqual(second.calls, [])
 
+    def test_corrupt_or_future_cache_time_resolves_again_and_rewrites_the_entry(self):
+        # resolver clock: 1000.0; a millisecond timestamp lies far in the future
+        for resolved_at in ("not-a-time", "nan", 1000.0 * 1000):
+            cache = FakeCache()
+            _resolver(FakeClient({"SplunkSecurityPlatformByName": _by_name([PLATFORM])}), PlatformSettings(), cache=cache).resolve()
+            key = next(key for key in cache.values if key.startswith("platform|"))
+            cache.values[key]["resolved_at"] = resolved_at
+            client = FakeClient({"SplunkSecurityPlatformByName": _by_name([PLATFORM])})
+            self.assertEqual(_resolver(client, PlatformSettings(), cache=cache).resolve(), PLATFORM, resolved_at)
+            self.assertEqual(len(client.calls_of("SplunkSecurityPlatformByName")), 1, resolved_at)
+            self.assertEqual(cache.values[key]["resolved_at"], 1000.0, resolved_at)
+
+    def test_cache_time_within_the_clock_skew_of_another_search_head_is_fresh(self):
+        cache = FakeCache()
+        _resolver(FakeClient({"SplunkSecurityPlatformByName": _by_name([PLATFORM])}), PlatformSettings(), cache=cache).resolve()
+        key = next(key for key in cache.values if key.startswith("platform|"))
+        cache.values[key]["resolved_at"] = 1000.0 + 120
+        client = FakeClient()
+        self.assertEqual(_resolver(client, PlatformSettings(), cache=cache).resolve(), PLATFORM)
+        self.assertEqual(client.calls, [])
+
     def test_search_heads_resolving_concurrently_create_one_platform_name(self):
         cache = FakeCache()
         # sh02 resolves before sh01 cached anything: both use the name sh01 recorded first

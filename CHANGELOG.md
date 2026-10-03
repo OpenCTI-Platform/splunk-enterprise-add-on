@@ -163,6 +163,9 @@ Compatibility with the OpenCTI autonomous threat management program
 - An indexed event whose search dropped `_cd` is identified by its raw text together with its `index`,
   `host`, `source` and `sourcetype`, so identical text logged by two hosts in the same second creates two
   incidents instead of one.
+- A corrupt or future resolution time in the Security Platform cache (KV Store) makes the add-on resolve
+  the platform again and rewrite the entry, instead of failing every platform-aware operation until the
+  entry is removed by hand.
 - Dashboards and the indicator lookup searches read KV Store timestamps at second and millisecond
   precision alike (the 30-day hit chart, the indicators added chart, the last deployment sync, the
   `added_at` of an indicator first written by the KV Store mode).

@@ -19,6 +19,8 @@ from utils import generate_identity_id
 SECURITY_PLATFORM_TYPE = "SIEM"
 DEFAULT_PLATFORM_PREFIX = "Splunk"
 CACHE_TTL_SECONDS = 3600
+# Clock difference tolerated between the search heads sharing the KV Store cache
+CACHE_CLOCK_SKEW_SECONDS = 300
 # A missing platform (not found, not readable, not created) is looked up again after this delay.
 NEGATIVE_TTL_SECONDS = 300
 # Error OpenCTI returns for a platformId it does not know (indicatorReportDeployment and siblings)
@@ -154,7 +156,12 @@ class SecurityPlatformResolver:
         return entry
 
     def _fresh(self, entry):
-        return self.clock() - float(entry.get("resolved_at") or 0) <= CACHE_TTL_SECONDS
+        """A corrupt or future resolution time is stale: the platform is resolved again and the entry rewritten."""
+        try:
+            age = self.clock() - float(entry.get("resolved_at") or 0)
+        except (TypeError, ValueError):
+            return False
+        return -CACHE_CLOCK_SKEW_SECONDS <= age <= CACHE_TTL_SECONDS
 
     def _to_cache(self, platform):
         if self.cache is None:
