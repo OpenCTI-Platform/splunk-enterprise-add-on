@@ -796,7 +796,7 @@ def convert_to_hunt_evidence(alert_params, event, hunt_run_id, platform_ref=None
     if observables:
         object_ids = sorted({observable.id for observable in observables})
         observed_data = stix2.ObservedData(
-            id=generate_observed_data_id(object_ids, hunt_run_id),
+            id=generate_observed_data_id(object_ids, hunt_run_id, first_seen, last_seen),
             created_by_ref=author.id,
             first_observed=first_seen,
             last_observed=last_seen,

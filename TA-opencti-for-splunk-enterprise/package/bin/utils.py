@@ -316,15 +316,21 @@ def generate_indicator_id(pattern):
     entity_id = str(uuid.uuid5(uuid.UUID("00abedb4-aa42-466c-9c01-fed23315a9b7"), data))
     return "indicator--" + entity_id
 
-def generate_observed_data_id(object_ids, hunt_run_id=None):
+def generate_observed_data_id(object_ids, hunt_run_id=None, first_observed=None, last_observed=None):
     """
     :param object_ids: STIX ids of the observed objects
     :param hunt_run_id: hunt run the observation belongs to
-    :return: deterministic Observed-Data id (one per run and object set)
+    :param first_observed: start of the observation window (datetime or ISO string)
+    :param last_observed: end of the observation window
+    :return: deterministic Observed-Data id (one per run, object set and
+        window: observations of other windows never overwrite each other)
     """
     data = {"objects": sorted(object_ids)}
     if hunt_run_id:
         data["hunt_run_id"] = str(hunt_run_id)
+    for name, value in (("first_observed", first_observed), ("last_observed", last_observed)):
+        if value is not None:
+            data[name] = value.isoformat() if isinstance(value, datetime.datetime) else str(value)
     data = canonicalize(data, utf8=False)
     entity_id = str(uuid.uuid5(uuid.UUID("00abedb4-aa42-466c-9c01-fed23315a9b7"), data))
     return "observed-data--" + entity_id

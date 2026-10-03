@@ -120,9 +120,13 @@ class SecurityPlatformResolver:
             return None
         if not isinstance(entry, dict) or not isinstance(entry.get("platform"), dict):
             return None
-        # A changed configured name invalidates an auto resolution.
-        if not self.settings.platform_id and (entry.get("configured_name") or "") != self.settings.name:
-            return None
+        if not self.settings.platform_id:
+            # A changed configured name invalidates an auto resolution, and
+            # an auto resolution only ever holds a SIEM platform.
+            if (entry.get("configured_name") or "") != self.settings.name:
+                return None
+            if (entry["platform"].get("security_platform_type") or "").upper() != SECURITY_PLATFORM_TYPE:
+                return None
         return entry
 
     def _fresh(self, entry):

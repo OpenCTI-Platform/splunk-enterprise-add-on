@@ -82,6 +82,16 @@ class ResolverTest(unittest.TestCase):
         self.assertEqual(client.calls_of("SplunkSecurityPlatformAdd"), [])
         self.assertTrue(resolver.logger.has("error", "not of type SIEM"))
 
+    def test_cached_auto_resolution_of_another_type_is_not_reused(self):
+        cache = FakeCache()
+        edr = dict(PLATFORM, id="internal-edr", security_platform_type="EDR")
+        _resolver(FakeClient({"SplunkSecurityPlatformByName": _by_name([PLATFORM])}), PlatformSettings(), cache=cache).resolve()
+        entry = next(iter(cache.values.values()))
+        entry["platform"] = edr
+        client = FakeClient({"SplunkSecurityPlatformByName": _by_name([PLATFORM])})
+        self.assertEqual(_resolver(client, PlatformSettings(), cache=cache).resolve(), PLATFORM)
+        self.assertEqual(len(client.calls_of("SplunkSecurityPlatformByName")), 1)
+
     def test_configured_id_of_another_type_is_kept_with_a_warning(self):
         edr = dict(PLATFORM, security_platform_type="EDR")
         client = FakeClient({"SplunkSecurityPlatform": {"securityPlatform": edr}})

@@ -192,14 +192,16 @@ class ValidationProver:
             if not _platform_matches(deployment.get("to"), self.platform):
                 continue
             source = deployment.get("from") or {}
-            deployments[source.get("id")] = (deployment, source.get("standard_id"))
+            # An IOC references its indicator by internal or by STIX id
+            for key in (source.get("id"), source.get("standard_id")):
+                if key:
+                    deployments[key] = (deployment, source.get("id"), source.get("standard_id"))
         pairs = []
         for ioc in request.get("iocs") or []:
-            indicator_internal_id = ioc.get("indicator_id")
-            entry = deployments.get(indicator_internal_id)
+            entry = deployments.get(ioc.get("indicator_id"))
             if entry is None:
                 continue
-            deployment, standard_id = entry
+            deployment, indicator_internal_id, standard_id = entry
             if deployment.get("validation_status") not in (None, "requested"):
                 continue
             pairs.append((indicator_internal_id, standard_id, ioc, deployment))

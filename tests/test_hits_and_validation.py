@@ -337,6 +337,12 @@ class ValidationProverTest(unittest.TestCase):
         self.assertEqual(rows[0]["reported"], "already")
         self.assertEqual(len(client.bundles), 1)
 
+    def test_ioc_referencing_its_indicator_by_stix_id_is_matched(self):
+        request = _request()
+        request["iocs"][0]["indicator_id"] = IND
+        pairs = self._prover(_client([request])).pairs(request)
+        self.assertEqual([(p[0], p[1]) for p in pairs], [("ind-internal", IND)])
+
     def test_pairs_already_validated_by_openaev_are_left_alone(self):
         client = _client([_request(validation_status="prevented")])
         self.assertEqual(self._prover(client).run(), [])

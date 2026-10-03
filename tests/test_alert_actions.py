@@ -272,6 +272,14 @@ class IndicatorResolutionTest(unittest.TestCase):
         self.assertEqual(program_actions.find_indicator_in_kvstore(kv, "https://evil.example/payload", "url"),
                          "indicator--lower-url")
 
+    def test_kv_store_entry_of_another_observable_type_is_not_sighted(self):
+        kv = FakeKV([
+            {"_key": "k1", "id": "indicator--hostname", "value": "evil.example", "main_observable_type": "Hostname"},
+            {"_key": "k2", "id": INDICATOR_ID, "value": "evil.example", "main_observable_type": "Domain-Name"},
+        ])
+        self.assertEqual(program_actions.find_indicator_in_kvstore(kv, "evil.example", "domain", "Domain-Name"), INDICATOR_ID)
+        self.assertIsNone(program_actions.find_indicator_in_kvstore(kv, "evil.example", "url", "Url"))
+
     def test_revoked_kv_entries_are_ignored_then_opencti_pattern(self):
         kv = FakeKV([{"_key": "k1", "id": "indicator--old", "value": "evil.example", "revoked": True}])
         client = FakeClient({"SplunkIndicatorsByPattern": {"indicators": {"edges": [

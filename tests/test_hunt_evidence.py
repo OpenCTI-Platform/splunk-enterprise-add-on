@@ -42,6 +42,12 @@ class ConverterTest(unittest.TestCase):
         other_run = convert_to_hunt_evidence(PARAMS, EVENT, "run-2", PLATFORM["standard_id"], [TECHNIQUE])[1]
         self.assertNotEqual(first[0], other_run[0])
 
+    def test_later_observation_of_the_same_objects_is_a_new_observed_data(self):
+        first = convert_to_hunt_evidence(PARAMS, EVENT, "run-1", PLATFORM["standard_id"], [TECHNIQUE])[1]
+        later = convert_to_hunt_evidence(PARAMS, dict(EVENT, _time="1727003600"), "run-1",
+                                         PLATFORM["standard_id"], [TECHNIQUE])[1]
+        self.assertNotEqual(first[0], later[0], "a later window never overwrites the earlier observation")
+
     def test_without_platform_the_author_is_where_sighted(self):
         bundle, _ = convert_to_hunt_evidence(PARAMS, EVENT, "run-1", None, [TECHNIQUE])
         author = _objects(bundle, "identity")[0]["id"]

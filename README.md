@@ -663,6 +663,8 @@ an OpenCTI hunt run:
 For each result, the action creates an Observed-Data over the extracted observables (`number_observed` =
 count) and a sighting of each target of the hunt (indicators, attack patterns, threats) on the Splunk
 Security Platform; every object carries `x_opencti_hunt_run_id` and names the run in its description.
+Ids are deterministic per run, objects and observation window, so a re-sent result updates its
+evidence while a later observation of the same objects adds new evidence.
 When the platform supports it, the objects are attached to the hunt run (`huntRunEvidenceAdd`).
 
 Example hunt search, run with the id of the hunt run OpenCTI created:

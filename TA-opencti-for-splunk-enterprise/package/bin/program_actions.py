@@ -244,12 +244,14 @@ def find_indicator_by_id(client, indicator_id):
     return node.get("standard_id") if isinstance(node, dict) and node.get("standard_id") else None
 
 
-def find_indicator_in_kvstore(kv_collection, value, kind=None):
+def find_indicator_in_kvstore(kv_collection, value, kind=None, main_type=None):
     """
     :param kv_collection: addon_state.KVCollection over opencti_indicators
     :param value: observable value
     :param kind: observable kind; only case-insensitive kinds also match the
         lower and upper case forms of the value
+    :param main_type: OpenCTI main observable type the indicator must have
+        (an entry that does not record it is accepted)
     :return: STIX id of a non-revoked indicator holding this value, or None
     """
     # KV Store queries are case sensitive; a URL path is too, unlike hosts and hashes
@@ -259,10 +261,14 @@ def find_indicator_in_kvstore(kv_collection, value, kind=None):
             if candidate not in candidates:
                 candidates.append(candidate)
     for candidate in candidates:
-        records = kv_collection.query(query={"value": candidate}, limit=10, fields=["id", "revoked"])
+        records = kv_collection.query(query={"value": candidate}, limit=10, fields=["id", "revoked", "main_observable_type"])
         for record in records or []:
-            if record.get("id") and str(record.get("revoked", "false")).lower() not in ("true", "1"):
-                return record["id"]
+            if not record.get("id") or str(record.get("revoked", "false")).lower() in ("true", "1"):
+                continue
+            recorded_type = record.get("main_observable_type")
+            if main_type and recorded_type and recorded_type.lower() != main_type.lower():
+                continue
+            return record["id"]
     return None
 
 
@@ -301,11 +307,11 @@ def resolve_sighted_indicator(context, sighting_of_type, value, kind):
         if found is None:
             raise ValueError(f"Indicator {value} not found in OpenCTI or not readable by the add-on account")
         return {"id": found}
-    patterns, _ = indicator_patterns(kind, value)
+    patterns, main_type = indicator_patterns(kind, value)
     try:
         from addon_state import KVCollection
 
-        found = find_indicator_in_kvstore(KVCollection(context.service, INDICATORS_KVSTORE_NAME), value, kind)
+        found = find_indicator_in_kvstore(KVCollection(context.service, INDICATORS_KVSTORE_NAME), value, kind, main_type)
         if found:
             return {"id": found}
     except Exception as ex:
