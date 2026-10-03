@@ -9,8 +9,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Python of Splunk Enterprise 9.x (3.9) and 10.x (3.13)
-        python-version: ["3.9", "3.13"]
+        # 3.12: Python the build job vendors lib/ with; 3.13: Python of Splunk Enterprise 10.
+        # The pinned libraries (stix2 3.0.2) require Python 3.10 or later.
+        python-version: ["3.12", "3.13"]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
