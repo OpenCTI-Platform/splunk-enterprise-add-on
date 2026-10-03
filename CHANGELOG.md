@@ -67,5 +67,10 @@ Compatibility with the OpenCTI autonomous threat management program
 - Alert actions return a non-zero exit code when a result fails, so Splunk reports the failure (#18).
 - `register()` and `send_stix_bundle()` check GraphQL errors returned with HTTP 200 (#19); the
   connector registers once per alert run; every OpenCTI call has a timeout.
-- Index mode: delete events purge the KV Store entry by its `_key` (#20).
+- Index mode: delete events purge the KV Store entry by its `_key` (#20), and by the STIX id the
+  lookup searches key it with.
 - The modular input no longer logs the proxy password.
+- Hash detections and hit reporting reduce `Filesystem.file_hash` to its digest (CIM values such as
+  `sha256=<digest>`), as already done for `Processes.process_hash`.
+- Run Case Autopilot reserves the container atomically in the KV Store, so concurrent alert runs
+  never start two runs for the same object.

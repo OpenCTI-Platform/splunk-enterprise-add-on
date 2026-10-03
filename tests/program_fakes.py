@@ -130,6 +130,15 @@ class FakeCache:
     def set(self, key, value):
         self.values[key] = value
 
+    def reserve(self, key, value):
+        if key in self.values:
+            return False
+        self.values[key] = value
+        return True
+
+    def release(self, key):
+        self.values.pop(key, None)
+
 
 class FakeLogger:
     def __init__(self):

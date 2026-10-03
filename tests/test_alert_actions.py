@@ -393,7 +393,38 @@ class FollowupTest(unittest.TestCase):
         context = FakeAlertContext(FakeAlertHelper(), client=client, detector=FakeDetector((FEATURE_CASE_AUTOPILOT,)))
         context.cache.set = mock.Mock(side_effect=RuntimeError("KV Store down"))
         self.assertEqual(program_actions.run_case_autopilot(context, "incident--x"), "run-1")
-        self.assertTrue(any(level == "error" and "may start another one" in line for level, line in context.logger.lines))
+        self.assertTrue(context.logger.has("error", "reservation expires"))
+        self.assertIsNone(program_actions.run_case_autopilot(context, "incident--x"), "the pending reservation blocks a second run")
+        self.assertEqual(len(client.calls_of("SplunkCaseAutopilot")), 1)
+
+    def _autopilot_context(self, response=None):
+        client = FakeClient({"SplunkCaseAutopilot": response or {"investigationRunAdd": {"id": "run-1"}}})
+        context = FakeAlertContext(FakeAlertHelper(), client=client, detector=FakeDetector((FEATURE_CASE_AUTOPILOT,)))
+        return context, client, f"autopilot|{client.opencti_url}|incident--x"
+
+    def test_case_autopilot_reserved_by_a_concurrent_run_is_skipped(self):
+        context, client, marker = self._autopilot_context()
+        context.cache.reserve(marker, {"status": "pending", "reserved_at": program_actions.utc_now_iso()})
+        self.assertIsNone(program_actions.run_case_autopilot(context, "incident--x"))
+        self.assertEqual(client.calls_of("SplunkCaseAutopilot"), [])
+
+    def test_case_autopilot_lost_reservation_race_is_skipped(self):
+        context, client, _ = self._autopilot_context()
+        context.cache.reserve = mock.Mock(return_value=False)
+        self.assertIsNone(program_actions.run_case_autopilot(context, "incident--x"))
+        self.assertEqual(client.calls_of("SplunkCaseAutopilot"), [])
+
+    def test_case_autopilot_stale_reservation_is_retried(self):
+        context, client, marker = self._autopilot_context()
+        context.cache.set(marker, {"status": "pending", "reserved_at": "2020-01-01T00:00:00Z"})
+        self.assertEqual(program_actions.run_case_autopilot(context, "incident--x"), "run-1")
+        self.assertEqual(context.cache.get(marker)["run_id"], "run-1")
+
+    def test_case_autopilot_failure_releases_the_reservation(self):
+        context, client, marker = self._autopilot_context(graphql_error("policy not found"))
+        with self.assertRaises(Exception):
+            program_actions.run_case_autopilot(context, "incident--x")
+        self.assertIsNone(context.cache.get(marker), "the next run of the alert retries")
 
     def test_nothing_scheduled_on_older_platforms(self):
         helper = FakeAlertHelper(params={"name": "Brute force", "tlp": "tlp_clear", "observables_extraction": "disable",

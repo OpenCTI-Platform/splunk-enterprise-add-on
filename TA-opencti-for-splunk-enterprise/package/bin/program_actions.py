@@ -21,8 +21,9 @@ from opencti_features import (
     FEATURE_TIMELINE,
 )
 from stix_converter import indicator_patterns, pattern_indicator
-from utils import to_iso
+from utils import parse_iso, to_iso
 
+AUTOPILOT_RESERVATION_SECONDS = 3600
 CASE_INSENSITIVE_KINDS = frozenset({"domain", "ipv4", "ipv6", "email_addr", "file_hash"})
 
 TIMELINE_TITLE_MAX = 512
@@ -163,6 +164,20 @@ def schedule_container_followups(context, container_id, event):
 
 
 # region Case Autopilot
+def _stale_reservation(marker, now=None):
+    """
+    :return: True for a pending reservation older than AUTOPILOT_RESERVATION_SECONDS
+        (the process holding it died before recording the run)
+    """
+    if marker.get("status") != "pending":
+        return False
+    reserved_at = parse_iso(marker.get("reserved_at"))
+    if reserved_at is None:
+        return True
+    now = now or datetime.now(timezone.utc)
+    return (now - reserved_at).total_seconds() > AUTOPILOT_RESERVATION_SECONDS
+
+
 def run_case_autopilot(context, container_id, policy_id=None):
     """
     Run Case Autopilot once per container (repeated alerts on the same
@@ -181,20 +196,33 @@ def run_case_autopilot(context, container_id, policy_id=None):
         )
         return None
     marker = f"autopilot|{context.client.opencti_url}|{container_id}"
-    if context.cache.get(marker):
+    existing = context.cache.get(marker)
+    if existing and not _stale_reservation(existing):
         context.logger.info(f"Case Autopilot already run for {container_id}")
         return None
-    data = context.client.graphql_query(AUTOPILOT_ADD_MUTATION, {
-        "subjectId": container_id,
-        "policyId": (policy_id or "").strip() or None,
-    })
+    if existing:
+        context.logger.warning(f"Case Autopilot reservation for {container_id} never completed, retrying")
+        context.cache.release(marker)
+    # Atomic: of concurrent alert runs on one container, one only starts a run
+    if not context.cache.reserve(marker, {"status": "pending", "reserved_at": utc_now_iso()}):
+        context.logger.info(f"Case Autopilot already being started for {container_id}")
+        return None
+    try:
+        data = context.client.graphql_query(AUTOPILOT_ADD_MUTATION, {
+            "subjectId": container_id,
+            "policyId": (policy_id or "").strip() or None,
+        })
+    except Exception:
+        context.cache.release(marker)
+        raise
     run = data.get("investigationRunAdd") or {}
     try:
         context.cache.set(marker, {"run_id": run.get("id"), "launched_at": utc_now_iso()})
     except Exception as ex:
         context.logger.error(
             f"Case Autopilot run {run.get('id')} started for {container_id} but not recorded in the "
-            f"add-on state collection, the next run of the alert may start another one: {ex}"
+            f"add-on state collection; another run may start once the reservation expires "
+            f"({AUTOPILOT_RESERVATION_SECONDS}s): {ex}"
         )
         return run.get("id")
     context.logger.info(f"Case Autopilot run {run.get('id')} started for {container_id}")

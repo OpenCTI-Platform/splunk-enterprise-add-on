@@ -82,6 +82,20 @@ class KVCollection:
             self._data.batch_save(*records[start:start + KV_BATCH_MAX])
         return len(records)
 
+    def insert(self, record):
+        """
+        :param record: document carrying its _key
+        :return: True when inserted, False when a document already has this key
+            (the KV Store rejects it atomically, unlike upsert)
+        """
+        try:
+            self._data.insert(record)
+            return True
+        except Exception as ex:
+            if getattr(ex, "status", None) == 409 or "409" in str(ex):
+                return False
+            raise
+
     def query(self, query=None, limit=0, skip=0, fields=None, sort=None):
         kwargs = {}
         if query:
@@ -156,13 +170,24 @@ class KVStoreCache:
             return None
         return value if isinstance(value, dict) else None
 
-    def set(self, key, value):
-        self._collection.upsert([{
+    @staticmethod
+    def _record(key, value):
+        return {
             "_key": state_key(key),
             "name": key,
             "value": json.dumps(value),
             "updated_at": utc_now_iso(),
-        }])
+        }
+
+    def set(self, key, value):
+        self._collection.upsert([self._record(key, value)])
+
+    def reserve(self, key, value):
+        """:return: True when this caller created the entry, False when it already existed"""
+        return self._collection.insert(self._record(key, value))
+
+    def release(self, key):
+        self._collection.delete(state_key(key))
 
 
 class MemoryCache:
@@ -178,3 +203,12 @@ class MemoryCache:
 
     def set(self, key, value):
         self.values[key] = value
+
+    def reserve(self, key, value):
+        if key in self.values:
+            return False
+        self.values[key] = value
+        return True
+
+    def release(self, key):
+        self.values.pop(key, None)

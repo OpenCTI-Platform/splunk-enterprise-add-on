@@ -28,6 +28,18 @@ class FakeData:
         limit = kwargs.get("limit") or len(documents)
         return documents[skip:skip + limit]
 
+    def query_by_id(self, key):
+        for document in self.documents:
+            if document["_key"] == key:
+                return dict(document)
+        raise Exception("HTTP 404 Not Found")
+
+    def insert(self, document):
+        if any(d["_key"] == document["_key"] for d in self.documents):
+            raise Exception("HTTP 409 Conflict -- A document with the same key already exists")
+        self.documents.append(dict(document))
+        return {"_key": document["_key"]}
+
 
 class FakeService:
     def __init__(self, data):
@@ -47,6 +59,17 @@ class KVCollectionTest(unittest.TestCase):
         documents = KVCollection(FakeService(data), "c").get_many(keys)
         self.assertEqual(len(documents), addon_state.GET_MANY_CHUNK + 3)
         self.assertEqual(len(data.calls), 2)
+
+    def test_insert_reports_an_existing_key(self):
+        collection = KVCollection(FakeService(FakeData([])), "c")
+        self.assertTrue(collection.insert({"_key": "k"}))
+        self.assertFalse(collection.insert({"_key": "k"}))
+
+    def test_cache_reservation_is_exclusive(self):
+        cache = addon_state.KVStoreCache(FakeService(FakeData([])), collection="c")
+        self.assertTrue(cache.reserve("autopilot|x", {"status": "pending"}))
+        self.assertFalse(cache.reserve("autopilot|x", {"status": "pending"}))
+        self.assertEqual(cache.get("autopilot|x"), {"status": "pending"})
 
 
 if __name__ == "__main__":

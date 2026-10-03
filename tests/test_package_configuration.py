@@ -77,6 +77,15 @@ class SavedSearchesTest(unittest.TestCase):
                          ("-20m@m", "-5m@m"))
         self.assertIn("| openctireporthits", self.searches.get(stanza, "search"))
 
+    def test_hash_fields_are_reduced_to_the_digest(self):
+        """CIM hash fields carry values such as sha256=<digest>; the indicators hold the raw digest."""
+        for stanza in ("OpenCTI - File or process matching an indicator hash", "OpenCTI - Report indicator hits"):
+            search = self.searches.get(stanza, "search")
+            for field in ("Filesystem.file_hash", "Processes.process_hash"):
+                with self.subTest(stanza=stanza, field=field):
+                    self.assertIn(f"rex field={field} max_match=0", search)
+                    self.assertNotIn(f'rename "{field}" AS value', search)
+
     def test_kv_sync_searches_keep_the_knowledge_fields(self):
         for stanza in ("Update OpenCTI Indicators Lookup", "Nightly Rebuild OpenCTI Indicators Lookup"):
             search = self.searches.get(stanza, "search")
