@@ -75,9 +75,12 @@ def parse_hit_row(record, id_field="indicator_id", count_field="hit_count", firs
     first_hit = to_epoch(record.get(first_field)) or last_hit
     if first_hit > last_hit:
         first_hit, last_hit = last_hit, first_hit
+    value = record.get("value")
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else ""
     return HitRow(
         indicator_id, count, first_hit, last_hit,
-        value=str(record.get("value") or ""), indicator_type=str(record.get("type") or ""),
+        value=str(value or ""), indicator_type=str(record.get("type") or ""),
     )
 
 

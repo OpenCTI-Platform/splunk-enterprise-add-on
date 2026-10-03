@@ -55,6 +55,139 @@
                     ]
                 },
                 {
+                    "name": "platform",
+                    "title": "Security Platform",
+                    "entity": [
+                        {
+                            "type": "text",
+                            "label": "Security Platform ID",
+                            "field": "security_platform_id",
+                            "help": "Id (internal or STIX) of the OpenCTI Security Platform representing this Splunk deployment. Leave empty to resolve or create it by name.",
+                            "required": false,
+                            "validators": [
+                                {
+                                    "type": "string",
+                                    "errorMsg": "Max length of text input is 8192",
+                                    "minLength": 0,
+                                    "maxLength": 8192
+                                }
+                            ]
+                        },
+                        {
+                            "type": "checkbox",
+                            "label": "Create the Security Platform",
+                            "field": "security_platform_auto_create",
+                            "help": "When no ID is set, find the Security Platform by name or create it (type SIEM).",
+                            "defaultValue": 1
+                        },
+                        {
+                            "type": "text",
+                            "label": "Security Platform name",
+                            "field": "security_platform_name",
+                            "help": "Name used to find or create the Security Platform. Default: Splunk <server name>. Use the same name as the platform_name of the OpenCTI splunk-saved-searches connector.",
+                            "required": false,
+                            "validators": [
+                                {
+                                    "type": "string",
+                                    "errorMsg": "Max length of text input is 256",
+                                    "minLength": 0,
+                                    "maxLength": 256
+                                }
+                            ]
+                        },
+                        {
+                            "type": "checkbox",
+                            "label": "Deployment write-back",
+                            "field": "deployment_writeback",
+                            "help": "Report to OpenCTI which indicators are deployed, removed, expired or failed in Splunk (OpenCTI with dissemination assurance).",
+                            "defaultValue": 1
+                        },
+                        {
+                            "type": "text",
+                            "label": "Write-back batch size",
+                            "field": "writeback_batch_size",
+                            "help": "Deployment reports sent per call (1-500).",
+                            "defaultValue": "100",
+                            "required": false,
+                            "validators": [
+                                {
+                                    "type": "number",
+                                    "range": [
+                                        1,
+                                        500
+                                    ],
+                                    "isInteger": true,
+                                    "errorMsg": "Batch size must be an integer between 1 and 500"
+                                }
+                            ]
+                        },
+                        {
+                            "type": "text",
+                            "label": "Write-back rate limit (calls per minute)",
+                            "field": "writeback_rate_limit",
+                            "help": "Maximum write-back calls per minute to OpenCTI (1-6000).",
+                            "defaultValue": "60",
+                            "required": false,
+                            "validators": [
+                                {
+                                    "type": "number",
+                                    "range": [
+                                        1,
+                                        6000
+                                    ],
+                                    "isInteger": true,
+                                    "errorMsg": "Rate limit must be an integer between 1 and 6000"
+                                }
+                            ]
+                        },
+                        {
+                            "type": "checkbox",
+                            "label": "IOC validation write-back",
+                            "field": "validation_writeback",
+                            "help": "Write the outcomes decided by the OpenCTI - IOC validation proof search back to OpenCTI.",
+                            "defaultValue": 1
+                        },
+                        {
+                            "type": "text",
+                            "label": "IOC validation grace period (minutes)",
+                            "field": "validation_grace_minutes",
+                            "help": "Delay after the end of a validation test before a missing hit is reported as missed (0-1440).",
+                            "defaultValue": "30",
+                            "required": false,
+                            "validators": [
+                                {
+                                    "type": "number",
+                                    "range": [
+                                        0,
+                                        1440
+                                    ],
+                                    "isInteger": true,
+                                    "errorMsg": "Grace period must be an integer between 0 and 1440"
+                                }
+                            ]
+                        },
+                        {
+                            "type": "text",
+                            "label": "Feature detection cache (minutes)",
+                            "field": "feature_cache_ttl",
+                            "help": "How long the OpenCTI capabilities read from the GraphQL schema are cached (1-1440).",
+                            "defaultValue": "60",
+                            "required": false,
+                            "validators": [
+                                {
+                                    "type": "number",
+                                    "range": [
+                                        1,
+                                        1440
+                                    ],
+                                    "isInteger": true,
+                                    "errorMsg": "Cache duration must be an integer between 1 and 1440"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
                     "name": "proxy",
                     "title": "Proxy",
                     "entity": [
@@ -481,6 +614,36 @@
                     "help": "Enable extraction of observables",
                     "required": false,
                     "defaultValue": "disable"
+                },
+                {
+                    "type": "text",
+                    "label": "Incident key",
+                    "field": "incident_key",
+                    "defaultValue": "",
+                    "required": false,
+                    "help": "Optional token identifying the result (for example $result.event_id$). Distinct keys always create distinct objects, the same key upserts."
+                },
+                {
+                    "type": "checkbox",
+                    "label": "Add a timeline milestone",
+                    "field": "timeline_milestone",
+                    "defaultValue": 1,
+                    "help": "Add the alert (name, trigger time, link to the results) as a milestone of the timeline (OpenCTI with incident and case timelines)."
+                },
+                {
+                    "type": "checkbox",
+                    "label": "Launch Case Autopilot",
+                    "field": "launch_case_autopilot",
+                    "defaultValue": 0,
+                    "help": "Start a Case Autopilot investigation once per created object (OpenCTI Enterprise Edition with Case Autopilot)."
+                },
+                {
+                    "type": "text",
+                    "label": "Case Autopilot policy ID",
+                    "field": "autopilot_policy_id",
+                    "defaultValue": "",
+                    "required": false,
+                    "help": "Optional investigation policy; the platform default applies when empty."
                 }
             ]
         },
@@ -602,6 +765,36 @@
                     "help": "Enable extraction of observables",
                     "required": false,
                     "defaultValue": "disable"
+                },
+                {
+                    "type": "text",
+                    "label": "Incident key",
+                    "field": "incident_key",
+                    "defaultValue": "",
+                    "required": false,
+                    "help": "Optional token identifying the result (for example $result.event_id$). Distinct keys always create distinct objects, the same key upserts."
+                },
+                {
+                    "type": "checkbox",
+                    "label": "Add a timeline milestone",
+                    "field": "timeline_milestone",
+                    "defaultValue": 1,
+                    "help": "Add the alert (name, trigger time, link to the results) as a milestone of the timeline (OpenCTI with incident and case timelines)."
+                },
+                {
+                    "type": "checkbox",
+                    "label": "Launch Case Autopilot",
+                    "field": "launch_case_autopilot",
+                    "defaultValue": 0,
+                    "help": "Start a Case Autopilot investigation once per created object (OpenCTI Enterprise Edition with Case Autopilot)."
+                },
+                {
+                    "type": "text",
+                    "label": "Case Autopilot policy ID",
+                    "field": "autopilot_policy_id",
+                    "defaultValue": "",
+                    "required": false,
+                    "help": "Optional investigation policy; the platform default applies when empty."
                 }
             ]
         },
@@ -644,19 +837,56 @@
                             {
                                 "value": "file_hash_observable",
                                 "label": "File Hash Observable (MD5, SHA-1, SHA-256, SHA-512)"
+                            },
+                            {
+                                "value": "indicator_id",
+                                "label": "Indicator ID (STIX id of an existing indicator)"
+                            },
+                            {
+                                "value": "url_indicator",
+                                "label": "URL Indicator"
+                            },
+                            {
+                                "value": "domain_indicator",
+                                "label": "Domain Indicator"
+                            },
+                            {
+                                "value": "ipv4_indicator",
+                                "label": "IPV4 Indicator"
+                            },
+                            {
+                                "value": "ipv6_indicator",
+                                "label": "IPV6 Indicator"
+                            },
+                            {
+                                "value": "file_hash_indicator",
+                                "label": "File Hash Indicator (MD5, SHA-1, SHA-256, SHA-512)"
+                            },
+                            {
+                                "value": "email_indicator",
+                                "label": "Email Address Indicator"
                             }
                         ]
                     },
-                    "help": "Select any one option from the list. For File Hash, the algorithm is detected from the value",
+                    "help": "Indicator types sight an OpenCTI indicator (by STIX id, or found or created from the value); Observable types sight an observable. For File Hash, the algorithm is detected from the value",
                     "required": false,
                     "defaultValue": "domain_observable"
+                },
+                {
+                    "type": "text",
+                    "label": "Count",
+                    "field": "count",
+                    "defaultValue": "1",
+                    "required": false,
+                    "help": "Number of times the value was seen (for example $result.count$)."
                 },
                 {
                     "type": "text",
                     "label": "Where Sighted (value)",
                     "field": "where_sighted_value",
                     "defaultValue": "",
-                    "required": true
+                    "required": false,
+                    "help": "Optional System or Organization where the value was sighted, in addition to the Splunk Security Platform"
                 },
                 {
                     "type": "singleSelect",
@@ -677,6 +907,101 @@
                     "help": "Select any one option from the list",
                     "required": false,
                     "defaultValue": "system"
+                },
+                {
+                    "type": "checkbox",
+                    "label": "Sighted on the Splunk Security Platform",
+                    "field": "sighted_on_platform",
+                    "defaultValue": 1,
+                    "help": "Add the Splunk Security Platform (Configuration > Security Platform) to where the value was sighted."
+                },
+                {
+                    "type": "text",
+                    "label": "Labels",
+                    "field": "labels",
+                    "defaultValue": "",
+                    "required": false
+                },
+                {
+                    "type": "singleSelect",
+                    "label": "TLP",
+                    "field": "tlp",
+                    "options": {
+                        "items": [
+                            {
+                                "value": "tlp_clear",
+                                "label": "TLP:CLEAR"
+                            },
+                            {
+                                "value": "tlp_green",
+                                "label": "TLP:GREEN"
+                            },
+                            {
+                                "value": "tlp_amber",
+                                "label": "TLP:AMBER"
+                            },
+                            {
+                                "value": "tlp_amber_strict",
+                                "label": "TLP:AMBER+STRICT"
+                            },
+                            {
+                                "value": "tlp_red",
+                                "label": "TLP:RED"
+                            }
+                        ]
+                    },
+                    "help": "Select any one option from the list",
+                    "required": false,
+                    "defaultValue": "tlp_amber"
+                }
+            ]
+        },
+        {
+            "name": "opencti_report_hunt_evidence",
+            "label": "OpenCTI - Report hunt evidence",
+            "description": "Report the results of a hunt search as evidence of an OpenCTI hunt run",
+            "iconFileName": "alert_icon.png",
+            "customScript": "alert_report_hunt_evidence_helper",
+            "entity": [
+                {
+                    "type": "text",
+                    "label": "Hunt run ID",
+                    "field": "hunt_run_id",
+                    "defaultValue": "$result.hunt_run_id$",
+                    "required": true,
+                    "help": "Id of the OpenCTI hunt run, usually passed as a token of the search ($result.hunt_run_id$)."
+                },
+                {
+                    "type": "text",
+                    "label": "Count",
+                    "field": "count",
+                    "defaultValue": "$result.count$",
+                    "required": false,
+                    "help": "Number of matching events of this result (for example $result.count$)."
+                },
+                {
+                    "type": "singleSelect",
+                    "label": "Observables Extraction",
+                    "field": "observables_extraction",
+                    "options": {
+                        "items": [
+                            {
+                                "value": "cim_model",
+                                "label": "CIM Model"
+                            },
+                            {
+                                "value": "field_mapping",
+                                "label": "Field Mapping"
+                            },
+                            {
+                                "value": "disable",
+                                "label": "Disable"
+                            }
+                        ]
+                    },
+                    "help": "Observables of the result recorded as Observed-Data of the hunt run",
+                    "required": false,
+                    "defaultValue": "cim_model"
                 },
                 {
                     "type": "text",
@@ -723,7 +1048,7 @@
     "meta": {
         "name": "TA-opencti-for-splunk-enterprise",
         "restRoot": "TA-opencti-for-splunk-enterprise",
-        "version": "1.1.1",
+        "version": "1.2.0",
         "displayName": "OpenCTI for Splunk Enterprise",
         "schemaVersion": "0.0.10",
         "hideUCCVersion": true,
