@@ -323,6 +323,20 @@ def generate_observed_data_id(object_ids, hunt_run_id=None):
     entity_id = str(uuid.uuid5(uuid.UUID("00abedb4-aa42-466c-9c01-fed23315a9b7"), data))
     return "observed-data--" + entity_id
 
+def generate_validation_sighting_id(indicator_id, platform_id, validation_run_id):
+    """
+    :return: deterministic id of the negative sighting recording that the
+        validation request ``validation_run_id`` was missed on a platform
+    """
+    data = canonicalize({
+        "type": "sighting",
+        "sighting_of_ref": indicator_id,
+        "where_sighted_refs": [platform_id],
+        "validation_run_id": str(validation_run_id),
+    }, utf8=False)
+    entity_id = str(uuid.uuid5(uuid.UUID("00abedb4-aa42-466c-9c01-fed23315a9b7"), data))
+    return "sighting--" + entity_id
+
 def generate_sighting_id(
         sighting_of_ref,
         where_sighted_refs,

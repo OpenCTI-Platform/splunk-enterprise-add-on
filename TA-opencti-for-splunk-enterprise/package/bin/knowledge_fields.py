@@ -164,7 +164,7 @@ def enrichment_graphql_fields(detector):
     return " ".join(fields)
 
 
-def merge_knowledge_fields(payload, extension_fields, indicator_node):
+def merge_knowledge_fields(payload, extension_fields, indicator_node, overwrite=False):
     """
     Set the knowledge fields on ``payload``: the stream extension first,
     GraphQL values filling (and, for source names, refining) the rest.
@@ -172,12 +172,13 @@ def merge_knowledge_fields(payload, extension_fields, indicator_node):
     :param payload: KV / index record (mutated)
     :param extension_fields: dict from provenance_from_extension / pulse_from_extension
     :param indicator_node: enrichment Indicator node, or None
+    :param overwrite: GraphQL values replace the existing ones (periodic refresh)
     :return: payload
     """
     for key, value in (extension_fields or {}).items():
         payload[key] = value
     for key, value in provenance_from_graphql(indicator_node).items():
-        if key == "sources" or key not in payload:
+        if overwrite or key == "sources" or key not in payload:
             payload[key] = value
     for key, value in pulse_from_graphql(indicator_node or {}).items():
         payload[key] = value

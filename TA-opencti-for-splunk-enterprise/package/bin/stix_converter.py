@@ -495,7 +495,7 @@ def _sighting_window(event):
     return first_seen, last_seen
 
 
-def _sighting_count(value):
+def sighting_count(value):
     try:
         return max(1, int(float(str(value).strip())))
     except (TypeError, ValueError):
@@ -588,7 +588,7 @@ def convert_to_sighting(alert_params, event, platform_ref=None, indicator=None):
     """
     bundle_objects = []
     first_seen, last_seen = _sighting_window(event)
-    count = _sighting_count(alert_params.get("count"))
+    count = sighting_count(alert_params.get("count"))
 
     # manage marking
     marking_id = _get_stix_marking_id(alert_params.get("tlp"))
@@ -733,7 +733,7 @@ def convert_to_hunt_evidence(alert_params, event, hunt_run_id, platform_ref=None
         raise ValueError("Hunt run id is empty: pass it with the hunt_run_id token ($result.hunt_run_id$)")
     hunt_run_id = str(hunt_run_id).strip()
     first_seen, last_seen = _sighting_window(event)
-    count = _sighting_count(alert_params.get("count"))
+    count = sighting_count(alert_params.get("count"))
     labels = alert_params.get("labels") or None
     search_name = alert_params.get("search_name") or "Splunk search"
     description = f"Evidence of OpenCTI hunt run {hunt_run_id} found by the Splunk search '{search_name}'"
