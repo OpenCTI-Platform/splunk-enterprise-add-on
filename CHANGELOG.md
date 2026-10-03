@@ -35,7 +35,10 @@ Compatibility with the OpenCTI autonomous threat management program
   holding data to MITRE Data Components through the editable `opencti_cim_data_components` lookup and
   declares them as `provides` relationships (`| openctiprovides`).
 - Alert action `OpenCTI - Report hunt evidence`: Observed-Data and sightings of the hunt targets on the
-  Security Platform, carrying `x_opencti_hunt_run_id`, attached to the hunt run when supported.
+  Security Platform, carrying `x_opencti_hunt_run_id`, attached to the hunt run when supported. Their
+  ids are OpenCTI's standard ids (the same observation is one object linked to each run), and they
+  are attached once the OpenCTI workers ingested them; objects still not ingested after 15 seconds
+  are attached by the next evidence report of the run.
 - Provenance (`corroboration_count`, `last_asserted_at`, `single_sourced`, sources...) and Threat Pulse
   (`pulse_prevalence`, `pulse_trend`, `pulse_first_seen_network`) fields on `opencti_indicators` and
   index events, refreshed daily (`| openctireconcile mode=knowledge`), with filter macros.

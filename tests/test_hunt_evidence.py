@@ -1,6 +1,7 @@
 """Tests for the Report hunt evidence alert action (WS-D, #68)."""
 import json
 import unittest
+from unittest import mock
 
 from program_fakes import FakeAlertContext, FakeAlertHelper, FakeClient, FakeDetector, graphql_error
 
@@ -9,6 +10,10 @@ import alert_report_hunt_evidence_helper as action
 import program_actions
 from opencti_features import FEATURE_HUNT_EVIDENCE, FEATURE_HUNTS
 from stix_converter import convert_to_hunt_evidence
+from utils import generate_observed_data_id
+
+INGESTED = {"stixObjectOrStixRelationship": {"id": "internal"}}
+NOT_INGESTED = {"stixObjectOrStixRelationship": None}
 
 PLATFORM = {"id": "platform-internal", "standard_id": "identity--5b1fb3f9-2d4e-5f2c-9c6a-1d0f1e2f3a4b"}
 TECHNIQUE = "attack-pattern--7e33a43e-e34b-40ec-89da-36c9bb2cacd5"
@@ -35,18 +40,19 @@ class ConverterTest(unittest.TestCase):
         self.assertTrue(all("run-1" in s["description"] for s in sightings))
         self.assertEqual(len(result_ids), 3)
 
-    def test_same_run_and_objects_give_the_same_ids(self):
-        first = convert_to_hunt_evidence(PARAMS, EVENT, "run-1", PLATFORM["standard_id"], [TECHNIQUE])[1]
-        second = convert_to_hunt_evidence(PARAMS, EVENT, "run-1", PLATFORM["standard_id"], [TECHNIQUE])[1]
-        self.assertEqual(first, second)
+    def test_evidence_ids_are_the_opencti_standard_ids(self):
+        bundle, first = convert_to_hunt_evidence(PARAMS, EVENT, "run-1", PLATFORM["standard_id"], [TECHNIQUE])
+        observed = _objects(bundle, "observed-data")[0]
+        # OpenCTI keys an Observed-Data on its objects only, a sighting on its
+        # target, where sighted and window: the same observation reported by
+        # two runs is one object, linked to each run by huntRunEvidenceAdd.
+        self.assertEqual(observed["id"], generate_observed_data_id(observed["object_refs"]))
         other_run = convert_to_hunt_evidence(PARAMS, EVENT, "run-2", PLATFORM["standard_id"], [TECHNIQUE])[1]
-        self.assertNotEqual(first[0], other_run[0])
-
-    def test_later_observation_of_the_same_objects_is_a_new_observed_data(self):
-        first = convert_to_hunt_evidence(PARAMS, EVENT, "run-1", PLATFORM["standard_id"], [TECHNIQUE])[1]
+        self.assertEqual(first, other_run)
         later = convert_to_hunt_evidence(PARAMS, dict(EVENT, _time="1727003600"), "run-1",
                                          PLATFORM["standard_id"], [TECHNIQUE])[1]
-        self.assertNotEqual(first[0], later[0], "a later window never overwrites the earlier observation")
+        self.assertEqual(first[0], later[0])
+        self.assertNotEqual(first[1], later[1], "a sighting of another window is another sighting")
 
     def test_without_platform_the_author_is_where_sighted(self):
         bundle, _ = convert_to_hunt_evidence(PARAMS, EVENT, "run-1", None, [TECHNIQUE])
@@ -71,6 +77,7 @@ class ActionTest(unittest.TestCase):
                 {"id": "t2", "standard_id": "report--1", "entity_type": "Report"},
             ]),
             "SplunkHuntRunEvidence": {"huntRunEvidenceAdd": {"id": "run-1"}},
+            "SplunkEvidenceIngested": INGESTED,
         })
         helper = FakeAlertHelper(params={"hunt_run_id": "run-1", "tlp": "tlp_green", "count": "3"}, events=[EVENT])
         context = FakeAlertContext(helper, client=client, detector=FakeDetector((FEATURE_HUNTS, FEATURE_HUNT_EVIDENCE)),
@@ -105,6 +112,7 @@ class ActionTest(unittest.TestCase):
         client = FakeClient({
             "SplunkHuntRun": self._hunt_run([{"id": "t1", "standard_id": TECHNIQUE, "entity_type": "Attack-Pattern"}]),
             "SplunkHuntRunEvidence": graphql_error("run is archived"),
+            "SplunkEvidenceIngested": INGESTED,
         })
         helper = FakeAlertHelper(params={"hunt_run_id": "run-1", "tlp": "tlp_green"}, events=[EVENT])
         context = FakeAlertContext(helper, client=client, detector=FakeDetector((FEATURE_HUNTS, FEATURE_HUNT_EVIDENCE)),
@@ -112,6 +120,60 @@ class ActionTest(unittest.TestCase):
         code = alert_common.run_alert(helper, "report_hunt_evidence", action.report_hunt_evidence, context_factory=lambda h: context)
         self.assertEqual(code, 0)
         self.assertTrue(any("not attached" in m for level, m in helper.logs if level == "warning"))
+
+    def _evidence_context(self, ingested):
+        client = FakeClient({
+            "SplunkHuntRunEvidence": {"huntRunEvidenceAdd": {"id": "run-1"}},
+            "SplunkEvidenceIngested": lambda variables: INGESTED if variables["id"] in ingested else NOT_INGESTED,
+        })
+        return FakeAlertContext(FakeAlertHelper(), client=client,
+                                detector=FakeDetector((FEATURE_HUNTS, FEATURE_HUNT_EVIDENCE)), platform=PLATFORM)
+
+    def test_evidence_is_attached_once_ingested(self):
+        ingested = set()
+        context = self._evidence_context(ingested)
+        waits = []
+
+        def sleep(delay):
+            waits.append(delay)
+            if len(waits) == 2:
+                ingested.update({"observed-data--1", "sighting--1"})
+
+        with mock.patch.object(program_actions.time, "sleep", side_effect=sleep):
+            self.assertTrue(program_actions.report_hunt_evidence(context, "run-1", ["observed-data--1", "sighting--1"], 3))
+        self.assertEqual(waits, [1, 2])
+        evidence = context.client.calls_of("SplunkHuntRunEvidence")
+        self.assertEqual(len(evidence), 1)
+        self.assertEqual(evidence[0]["input"]["result_ids"], ["observed-data--1", "sighting--1"])
+
+    def test_evidence_not_ingested_is_attached_by_the_next_report(self):
+        ingested = set()
+        context = self._evidence_context(ingested)
+        with mock.patch.object(program_actions.time, "sleep"):
+            with self.assertRaises(ValueError):
+                program_actions.report_hunt_evidence(context, "run-1", ["observed-data--1"], 3, observed_at=1727000000)
+            self.assertEqual(context.client.calls_of("SplunkHuntRunEvidence"), [])
+            ingested.update({"observed-data--1", "sighting--2"})
+            program_actions.report_hunt_evidence(context, "run-1", ["sighting--2"], 1)
+        evidence = context.client.calls_of("SplunkHuntRunEvidence")
+        self.assertEqual([call["input"]["result_ids"] for call in evidence], [["observed-data--1"], ["sighting--2"]])
+        self.assertEqual(evidence[0]["input"]["hits_count"], 3, "the deferred link keeps its own report")
+        self.assertEqual(evidence[0]["input"]["observed_at"], "2024-09-22T10:13:20.000Z")
+        self.assertNotIn("parked_at", evidence[0]["input"])
+        self.assertEqual(context.cache.get("hunt_evidence_pending|run-1"), {})
+
+    def test_evidence_never_ingested_is_dropped_after_a_day(self):
+        context = self._evidence_context({"sighting--2"})
+        context.cache.set("hunt_evidence_pending|run-1", {"items": [
+            {"result_ids": ["observed-data--lost"], "hits_count": 1, "source": "splunk-alert-action",
+             "parked_at": "2020-01-01T00:00:00.000Z"},
+        ]})
+        with mock.patch.object(program_actions.time, "sleep"):
+            program_actions.report_hunt_evidence(context, "run-1", ["sighting--2"], 1)
+        self.assertEqual([call["input"]["result_ids"] for call in context.client.calls_of("SplunkHuntRunEvidence")],
+                         [["sighting--2"]])
+        self.assertTrue(context.logger.has("warning", "never ingested"))
+        self.assertEqual(context.cache.get("hunt_evidence_pending|run-1"), {})
 
     def test_hunt_targets_without_feature(self):
         context = FakeAlertContext(FakeAlertHelper(), detector=FakeDetector())

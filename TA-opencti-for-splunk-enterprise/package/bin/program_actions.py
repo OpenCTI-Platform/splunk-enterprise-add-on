@@ -10,6 +10,7 @@
   evidence write-back (huntRunEvidenceAdd, requested on #18671).
 """
 
+import time
 from datetime import datetime, timezone
 
 from addon_state import state_key, utc_now_iso
@@ -71,6 +72,22 @@ mutation SplunkHuntRunEvidence($id: ID!, $input: HuntRunEvidenceAddInput!) {
   huntRunEvidenceAdd(id: $id, input: $input) { id }
 }
 """
+
+EVIDENCE_INGESTED_QUERY = """
+query SplunkEvidenceIngested($id: String!) {
+  stixObjectOrStixRelationship(id: $id) {
+    ... on BasicObject { id }
+    ... on BasicRelationship { id }
+  }
+}
+"""
+
+# The OpenCTI workers ingest a pushed bundle asynchronously: the evidence is
+# attached to the run once it exists, after at most these waits.
+EVIDENCE_INGESTION_DELAYS_SECONDS = (1, 2, 4, 8)
+# Evidence still not ingested is attached by a later report of the same run,
+# within this delay.
+EVIDENCE_PENDING_SECONDS = 86400
 
 # Types a hunt evidence sighting can target (sighting_of_ref must be an SDO)
 HUNT_SIGHTABLE_TYPES = {
@@ -345,16 +362,79 @@ def hunt_targets(context, hunt_run_id):
     return targets, hunt.get("name")
 
 
+def _ingested(context, object_ids):
+    """
+    :return: the ids among object_ids that OpenCTI already holds
+    """
+    present = []
+    for object_id in object_ids:
+        data = context.client.graphql_query(EVIDENCE_INGESTED_QUERY, {"id": object_id})
+        if data.get("stixObjectOrStixRelationship"):
+            present.append(object_id)
+    return present
+
+
+def wait_for_ingestion(context, object_ids, delays=EVIDENCE_INGESTION_DELAYS_SECONDS):
+    """
+    :return: (ids OpenCTI holds, ids still not ingested after the waits)
+    """
+    pending = list(object_ids)
+    for delay in (0,) + tuple(delays):
+        if delay:
+            time.sleep(delay)
+        present = set(_ingested(context, pending))
+        pending = [object_id for object_id in pending if object_id not in present]
+        if not pending:
+            break
+    return [object_id for object_id in object_ids if object_id not in pending], pending
+
+
+def _pending_key(hunt_run_id):
+    return f"hunt_evidence_pending|{hunt_run_id}"
+
+
+def _attach_pending(context, hunt_run_id):
+    """Attach the evidence of earlier reports of this run that is now ingested."""
+    key = _pending_key(hunt_run_id)
+    entry = context.cache.get(key) or {}
+    kept = []
+    for item in entry.get("items") or []:
+        parked_at = parse_iso(item.get("parked_at"))
+        if parked_at is None or time.time() - parked_at.timestamp() > EVIDENCE_PENDING_SECONDS:
+            context.logger.warning(
+                f"Hunt evidence {item.get('result_ids')} never ingested by OpenCTI: not attached to run {hunt_run_id}"
+            )
+            continue
+        present = _ingested(context, item.get("result_ids") or [])
+        if present:
+            payload = {k: v for k, v in item.items() if k != "parked_at"}
+            payload["result_ids"] = present
+            context.client.graphql_query(HUNT_EVIDENCE_MUTATION, {"id": hunt_run_id, "input": payload})
+        remaining = [object_id for object_id in item.get("result_ids") or [] if object_id not in present]
+        if remaining:
+            kept.append(dict(item, result_ids=remaining))
+    if kept:
+        context.cache.set(key, {"items": kept})
+    elif entry:
+        context.cache.set(key, {})
+
+
 def report_hunt_evidence(context, hunt_run_id, result_ids, hits_count, platform_id=None, observed_at=None):
     """
-    Attach the evidence objects to the hunt run when the platform supports it.
+    Attach the evidence objects to the hunt run when the platform supports it,
+    once OpenCTI ingested them. Objects still not ingested are attached by a
+    later report of the same run.
 
     :return: True when attached, False when the mutation is absent
+    :raise ValueError: when no object was ingested yet (attachment deferred)
     """
     if not context.detector.require(FEATURE_HUNT_EVIDENCE, "Hunt evidence attachment to the run"):
         return False
+    try:
+        _attach_pending(context, hunt_run_id)
+    except Exception as ex:
+        context.logger.warning(f"Deferred hunt evidence of run {hunt_run_id} not attached yet: {ex}")
     payload = {
-        "result_ids": list(result_ids),
         "hits_count": int(hits_count),
         "source": "splunk-alert-action",
     }
@@ -362,6 +442,22 @@ def report_hunt_evidence(context, hunt_run_id, result_ids, hits_count, platform_
         payload["security_platform_id"] = platform_id
     if observed_at is not None:
         payload["observed_at"] = to_iso(observed_at)
-    context.client.graphql_query(HUNT_EVIDENCE_MUTATION, {"id": hunt_run_id, "input": payload})
+    ingested, pending = wait_for_ingestion(context, list(result_ids))
+    if pending:
+        key = _pending_key(hunt_run_id)
+        items = (context.cache.get(key) or {}).get("items") or []
+        items.append(dict(payload, result_ids=pending, parked_at=utc_now_iso()))
+        context.cache.set(key, {"items": items})
+    if not ingested:
+        raise ValueError(
+            f"{len(pending)} evidence objects not ingested by OpenCTI yet: "
+            "they are attached by the next evidence report of the run"
+        )
+    context.client.graphql_query(HUNT_EVIDENCE_MUTATION, {"id": hunt_run_id, "input": dict(payload, result_ids=ingested)})
+    if pending:
+        context.logger.warning(
+            f"{len(pending)} hunt evidence objects not ingested by OpenCTI yet: "
+            "they are attached by the next evidence report of the run"
+        )
     return True
 # endregion
