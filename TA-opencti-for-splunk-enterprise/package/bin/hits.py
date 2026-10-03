@@ -25,6 +25,8 @@ from opencti_features import FEATURE_HITS, FEATURE_SECURITY_PLATFORM
 from utils import generate_identity_id, generate_sighting_id, to_epoch, to_iso
 
 MAX_RECENT_WINDOWS = 50
+# Row the shipped hits search appends last (see openctireporthits.py)
+HEARTBEAT_FIELD = "opencti_hits_heartbeat"
 SIGHTINGS_PER_BUNDLE = 200
 RETRY_DELAYS_SECONDS = (2, 10)
 
@@ -91,6 +93,28 @@ def hit_history_key(platform_id, indicator_id):
     return state_key(platform_id, indicator_id)
 
 
+def coverage_key(platform_id):
+    return f"hits_coverage|{platform_id}"
+
+
+def read_coverage(cache, platform_id):
+    """
+    :param cache: addon_state cache
+    :return: (since, until) epochs of the contiguous span over which every hit
+        was reported for this platform, or None
+    """
+    if cache is None or not getattr(cache, "persistent", False) or not platform_id:
+        return None
+    try:
+        entry = cache.get(coverage_key(platform_id))
+    except Exception:
+        return None
+    if not isinstance(entry, dict):
+        return None
+    since, until = to_epoch(entry.get("covered_since")), to_epoch(entry.get("covered_until"))
+    return (since, until) if since is not None and until is not None else None
+
+
 def load_windows(record):
     try:
         windows = json.loads((record or {}).get("recent_windows") or "[]")
@@ -152,17 +176,21 @@ def hits_sighting(row, platform_ref, author):
 
 class HitReporter:
     def __init__(self, client, detector, platform, history, logger=None, rate_per_minute=120, author_name="Splunk",
-                 sleep=time.sleep):
+                 sleep=time.sleep, cache=None):
         """
         :param client: SplunkAppConnectorHelper
         :param detector: OpenCTIFeatureDetector
         :param platform: Splunk Security Platform node (id, standard_id) or None
         :param history: addon_state.KVCollection over opencti_indicator_hits (or a fake)
+        :param cache: addon_state cache holding the hit coverage
         """
         self.client = client
         self.detector = detector
         self.platform = platform or {}
         self.history = history
+        self.cache = cache
+        # A window not recorded in the history must not count as searched.
+        self.failed = False
         self.logger = logger or logging.getLogger(__name__)
         self.limiter = RateLimiter(rate_per_minute)
         self.sleep = sleep
@@ -219,6 +247,7 @@ class HitReporter:
         try:
             row = parse_hit_row(record, **fields)
         except ValueError as ex:
+            self.failed = True
             return {"opencti_hit_status": STATUS_INVALID, "opencti_hit_message": str(ex)}
         if not self.platform.get("id"):
             return {
@@ -233,6 +262,7 @@ class HitReporter:
                 self._report_mutation(row)
             except OpenCTIGraphQLError as ex:
                 self.logger.error(f"Hit report of {row.indicator_id} failed: {ex}")
+                self.failed = True
                 return {"opencti_hit_status": STATUS_ERROR, "opencti_hit_message": str(ex)[:1000]}
             history = merge_hit_history(existing, row, STATUS_REPORTED, self.platform.get("id"))
             self._latest[row.indicator_id] = history
@@ -248,6 +278,7 @@ class HitReporter:
                 (row.indicator_id, hits_sighting(row, self.platform["standard_id"], self.author), history)
             )
             return {"opencti_hit_status": STATUS_REPORTED_AS_SIGHTING, "opencti_hit_message": ""}
+        self.failed = True
         return {"opencti_hit_status": STATUS_NO_PLATFORM, "opencti_hit_message": "no Security Platform support"}
 
     def _save(self, records):
@@ -261,8 +292,41 @@ class HitReporter:
             self.history.upsert(records)
         except Exception as ex:
             self.logger.warning(f"Unable to store the hit history in the KV Store: {ex}")
+            self.failed = True
             return str(ex)[:500]
         return None
+
+    def record_coverage(self, earliest_epoch, latest_epoch):
+        """
+        Record that every hit of the search time range was reported, so the
+        IOC validation proof may declare a miss. The coverage is one
+        contiguous span: a range starting after its end (a failed or skipped
+        run in between) starts a new span.
+
+        :return: True when the coverage was recorded
+        """
+        platform_id = self.platform.get("id")
+        if self.failed or not platform_id or not earliest_epoch or not latest_epoch:
+            return False
+        if earliest_epoch <= 0 or latest_epoch <= earliest_epoch:
+            return False
+        if self.cache is None or not getattr(self.cache, "persistent", False):
+            return False
+        current = read_coverage(self.cache, platform_id)
+        if current is not None and current[0] <= earliest_epoch <= current[1]:
+            if latest_epoch <= current[1]:
+                return True
+            since = current[0]
+        else:
+            since = earliest_epoch
+        try:
+            self.cache.set(coverage_key(platform_id), {
+                "covered_since": to_iso(since), "covered_until": to_iso(latest_epoch),
+            })
+        except Exception as ex:
+            self.logger.warning(f"Unable to store the hit coverage: {ex}")
+            return False
+        return True
 
     def flush(self):
         """
@@ -282,6 +346,7 @@ class HitReporter:
                 self._with_retry(lambda: self.client.send_stix_bundle(serialized))
             except Exception as ex:
                 self.logger.error(f"{len(chunk)} hit sightings not sent to OpenCTI: {ex}")
+                self.failed = True
                 for indicator_id, _, _ in chunk:
                     failed[indicator_id] = str(ex)[:1000]
                     # The window was not counted: a later report of it is not a replay.

@@ -3,14 +3,15 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from program_fakes import FakeClient, FakeDetector, FakeKV, FakeLogger, graphql_error
+from program_fakes import FakeCache, FakeClient, FakeDetector, FakeKV, FakeLogger, graphql_error
 
 import openctiprovides
 import openctireconcile
 import openctireporthits
 import openctivalidation
 from addon_config import AddonSettings
-from opencti_features import FEATURE_DEPLOYED_ON, FEATURE_PROVIDES, FEATURE_SECURITY_PLATFORM
+from hits import read_coverage
+from opencti_features import FEATURE_DEPLOYED_ON, FEATURE_HITS, FEATURE_PROVIDES, FEATURE_SECURITY_PLATFORM
 
 PLATFORM = {"id": "platform-internal", "standard_id": "identity--5b1fb3f9-2d4e-5f2c-9c6a-1d0f1e2f3a4b"}
 IND = "indicator--51b92778-cef0-4a90-b7ec-ebd620d01ac9"
@@ -24,6 +25,7 @@ class FakeCommandContext:
         self.logger = FakeLogger()
         self.settings = AddonSettings({"opencti_url": "https://opencti.example", "opencti_api_key": "k"}, server_name="sh01")
         self.collections = collections if collections is not None else {}
+        self.cache = FakeCache()
         self.invalidated = 0
 
     def invalidate_platform(self):
@@ -47,6 +49,27 @@ class ReportHitsCommandTest(unittest.TestCase):
             rows = list(command.transform([{"indicator_id": IND, "hit_count": "2", "last_hit": "1727000000"}]))
         self.assertEqual(rows[0]["opencti_hit_status"], "error")
         self.assertIn("bundle rejected", rows[0]["opencti_hit_message"])
+
+    def test_heartbeat_records_the_searched_range_and_is_not_output(self):
+        client = FakeClient({"SplunkIndicatorHits": {"indicatorReportHits": {"id": "s"}}})
+        context = FakeCommandContext(client, (FEATURE_HITS,))
+        command = openctireporthits.OpenCTIReportHitsCommand()
+        command._metadata = SimpleNamespace(searchinfo=SimpleNamespace(earliest_time=1000.0, latest_time=1900.0))
+        with mock.patch.object(openctireporthits, "CommandContext", return_value=context):
+            rows = list(command.transform([
+                {"indicator_id": IND, "hit_count": "2", "last_hit": "1500"},
+                {"opencti_hits_heartbeat": "1"},
+            ]))
+        self.assertEqual([row.get("indicator_id") for row in rows], [IND])
+        self.assertEqual(read_coverage(context.cache, PLATFORM["id"]), (1000.0, 1900.0))
+
+    def test_no_heartbeat_no_coverage(self):
+        context = FakeCommandContext(FakeClient({"SplunkIndicatorHits": {"indicatorReportHits": {"id": "s"}}}), (FEATURE_HITS,))
+        command = openctireporthits.OpenCTIReportHitsCommand()
+        command._metadata = SimpleNamespace(searchinfo=SimpleNamespace(earliest_time=1000.0, latest_time=1900.0))
+        with mock.patch.object(openctireporthits, "CommandContext", return_value=context):
+            list(command.transform([{"indicator_id": IND, "hit_count": "2", "last_hit": "1500"}]))
+        self.assertIsNone(read_coverage(context.cache, PLATFORM["id"]))
 
     def test_context_is_built_once_per_search(self):
         context = FakeCommandContext(FakeClient(), (FEATURE_SECURITY_PLATFORM,))

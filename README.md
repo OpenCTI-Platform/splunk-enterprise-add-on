@@ -562,6 +562,11 @@ models are accelerated. Remove an `append` branch of the search to skip a data m
 `opencti_hit_status` (`reported`, `reported_as_sighting`, `duplicate`, `invalid`, `error`,
 `skipped_no_platform`) and the history is kept in `opencti_indicator_hits`.
 
+The search ends with a heartbeat row (`| append [| makeresults | eval opencti_hits_heartbeat = 1 | fields - _time]`):
+when every row of the run was reported, it records the search time range as searched (a contiguous span
+per Security Platform, restarted after a failed or skipped run). The IOC validation proof declares a miss
+only over a searched span, so keep the heartbeat when you adapt the search.
+
 #### IOC validation proof
 
 OpenCTI asks OpenAEV to run benign tests built from deployed indicators (IOC validation requests).
@@ -573,9 +578,11 @@ platform:
   give or take 5 minutes of clock skew), or when the last hit OpenCTI recorded on the deployment does.
   Hits carry their event time: the grace period delays the decision for indexing lag, it does not widen
   the window;
-- **missed** when the request is completed, the grace period is over and no hit falls in the window; a sighting
+- **missed** when the request is completed, the grace period is over, `OpenCTI - Report indicator hits`
+  searched the whole test window (see the heartbeat above) and no hit falls in it; a sighting
   with `x_opencti_negative = true` records the miss on the Security Platform;
-- **requested** otherwise: no result yet, nothing is written. This includes a later hit recorded by
+- **requested** otherwise: no result yet, nothing is written (the `hits_searched_until` column shows how far
+  the hit reporting got). This includes a later hit recorded by
   OpenCTI that the local hit history does not hold (lost KV Store write), a hit window running from
   before to after the test (a hit during the test can be neither proven nor ruled out), and a history whose oldest
   windows (beyond the last 50) were trimmed after the test started: a miss is never declared on an

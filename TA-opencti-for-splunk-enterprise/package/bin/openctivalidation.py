@@ -37,6 +37,7 @@ class OpenCTIValidationCommand(GeneratingCommand):
             writeback=writeback,
             logger=context.logger,
             author_name=context.settings.server_name or "Splunk",
+            cache=context.cache,
         )
         rows = prover.run()
         if not rows:

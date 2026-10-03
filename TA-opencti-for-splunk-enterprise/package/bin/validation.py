@@ -25,7 +25,7 @@ from datetime import datetime, timedelta, timezone
 import stix2
 
 from addon_state import state_key, utc_now_iso
-from hits import hit_history_key, load_windows
+from hits import hit_history_key, load_windows, read_coverage
 from opencti_features import FEATURE_HITS, FEATURE_IOC_VALIDATION, FEATURE_IOC_VALIDATION_RESULTS
 from utils import generate_identity_id, generate_relation_id, generate_validation_sighting_id, to_epoch, to_iso
 
@@ -117,7 +117,7 @@ def history_covered_from(history, windows):
 
 
 def decide_outcome(start, end, decide_after, hit_windows, grace_minutes, now, platform_last_hit=None,
-                   covered_from=None):
+                   covered_from=None, hits_coverage=None):
     """
     :param start: test window start (aware datetime)
     :param end: completion time or None while running
@@ -128,6 +128,8 @@ def decide_outcome(start, end, decide_after, hit_windows, grace_minutes, now, pl
         (epoch), the cross-check of the local hit history
     :param covered_from: epoch from which hit_windows is complete, None when
         it holds the whole history (see history_covered_from)
+    :param hits_coverage: (since, until) span the hit reporting searched
+        completely (hits.read_coverage); a miss needs it to hold the test window
     :return: (outcome, first matching hit epoch or None)
     """
     if start is None:
@@ -159,6 +161,10 @@ def decide_outcome(start, end, decide_after, hit_windows, grace_minutes, now, pl
         if covered_from is not None and covered_from > low:
             # The windows of the test period were trimmed from the history.
             return OUTCOME_PENDING, None
+        if hits_coverage is None or hits_coverage[0] > low or hits_coverage[1] < high:
+            # No proof that the hit reporting searched the whole test window
+            # (hits search disabled, failed or not caught up yet).
+            return OUTCOME_PENDING, None
         return OUTCOME_MISSED, None
     return OUTCOME_PENDING, None
 
@@ -172,14 +178,16 @@ def _platform_matches(node, platform):
 
 class ValidationProver:
     def __init__(self, client, detector, platform, hits_history, results, grace_minutes=30, writeback=True,
-                 logger=None, now=None, author_name="Splunk"):
+                 logger=None, now=None, author_name="Splunk", cache=None):
         """
         :param client: SplunkAppConnectorHelper
         :param detector: OpenCTIFeatureDetector
         :param platform: Splunk Security Platform node (id, standard_id)
         :param hits_history: KVCollection over opencti_indicator_hits
         :param results: KVCollection over opencti_validation_results
+        :param cache: addon_state cache holding the hit coverage
         """
+        self.cache = cache
         self.client = client
         self.detector = detector
         self.platform = platform or {}
@@ -304,6 +312,7 @@ class ValidationProver:
         if not self.detector.require(FEATURE_IOC_VALIDATION, "IOC validation proof"):
             return []
         rows = []
+        coverage = read_coverage(self.cache, self.platform["id"])
         for request in self.requests():
             start, end, decide_after = validation_window(request, self.grace_minutes)
             decided = []
@@ -329,9 +338,11 @@ class ValidationProver:
                     start, end, decide_after, windows, self.grace_minutes, self.now,
                     platform_last_hit=to_epoch(deployment.get("last_hit_at")),
                     covered_from=history_covered_from(history, windows),
+                    hits_coverage=coverage,
                 )
                 row["outcome"] = outcome
                 row["first_matching_hit"] = to_iso(observed) if observed else ""
+                row["hits_searched_until"] = to_iso(coverage[1]) if coverage else ""
                 if outcome != OUTCOME_PENDING:
                     decided.append((standard_id, outcome, observed, ioc))
                 row["reported"] = "no"

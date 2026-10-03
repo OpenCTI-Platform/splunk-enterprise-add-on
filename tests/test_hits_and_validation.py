@@ -3,11 +3,14 @@ import json
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from program_fakes import FakeClient, FakeDetector, FakeKV, FakeLogger, graphql_error, transport_error
+from program_fakes import FakeCache, FakeClient, FakeDetector, FakeKV, FakeLogger, graphql_error, transport_error
 
+from addon_state import MemoryCache
 from hits import (
     HitReporter,
+    coverage_key,
     hit_history_key,
+    read_coverage,
     STATUS_DUPLICATE,
     STATUS_ERROR,
     STATUS_INVALID,
@@ -196,6 +199,37 @@ class HitReporterTest(unittest.TestCase):
         self.assertEqual(status["opencti_hit_status"], STATUS_REPORTED)
 
 
+class HitCoverageTest(unittest.TestCase):
+    def _reporter(self, cache, handler=None):
+        client = FakeClient({"SplunkIndicatorHits": handler or {"indicatorReportHits": {"id": "s"}}})
+        return HitReporter(client, FakeDetector((FEATURE_HITS,)), PLATFORM, FakeKV(), logger=FakeLogger(),
+                           sleep=lambda _: None, cache=cache)
+
+    def test_contiguous_runs_extend_one_span(self):
+        cache = FakeCache()
+        self.assertTrue(self._reporter(cache).record_coverage(1000.0, 1900.0))
+        self.assertTrue(self._reporter(cache).record_coverage(1900.0, 2800.0))
+        self.assertEqual(read_coverage(cache, PLATFORM["id"]), (1000.0, 2800.0))
+
+    def test_gap_starts_a_new_span(self):
+        cache = FakeCache()
+        self._reporter(cache).record_coverage(1000.0, 1900.0)
+        self._reporter(cache).record_coverage(2800.0, 3700.0)
+        self.assertEqual(read_coverage(cache, PLATFORM["id"]), (2800.0, 3700.0))
+
+    def test_failed_report_does_not_count_as_searched(self):
+        cache = FakeCache()
+        reporter = self._reporter(cache, graphql_error("Indicator not found"))
+        self.assertEqual(reporter.report(dict(ROW))["opencti_hit_status"], STATUS_ERROR)
+        self.assertFalse(reporter.record_coverage(1000.0, 1900.0))
+        self.assertIsNone(cache.get(coverage_key(PLATFORM["id"])))
+
+    def test_coverage_needs_a_persistent_cache_and_a_time_range(self):
+        self.assertFalse(self._reporter(MemoryCache()).record_coverage(1000.0, 1900.0))
+        self.assertFalse(self._reporter(None).record_coverage(1000.0, 1900.0))
+        self.assertFalse(self._reporter(FakeCache()).record_coverage(0.0, 0.0))
+
+
 NOW = datetime(2026, 10, 3, 12, 0, tzinfo=timezone.utc)
 
 
@@ -208,6 +242,18 @@ class DecideOutcomeTest(unittest.TestCase):
         self.request = {"status": "completed", "dispatched_at": _iso(NOW - timedelta(hours=2)),
                         "completed_at": _iso(NOW - timedelta(hours=1))}
         self.start, self.end, self.decide_after = validation_window(self.request, 30)
+        self.covered = ((NOW - timedelta(days=1)).timestamp(), (NOW - timedelta(minutes=5)).timestamp())
+
+    def test_miss_needs_the_hit_reporting_to_have_searched_the_window(self):
+        self.assertEqual(decide_outcome(self.start, self.end, self.decide_after, [], 30, NOW)[0], OUTCOME_PENDING)
+        not_caught_up = (self.covered[0], (NOW - timedelta(minutes=70)).timestamp())
+        self.assertEqual(decide_outcome(self.start, self.end, self.decide_after, [], 30, NOW,
+                                        hits_coverage=not_caught_up)[0], OUTCOME_PENDING)
+        started_late = ((NOW - timedelta(minutes=90)).timestamp(), self.covered[1])
+        self.assertEqual(decide_outcome(self.start, self.end, self.decide_after, [], 30, NOW,
+                                        hits_coverage=started_late)[0], OUTCOME_PENDING)
+        self.assertEqual(decide_outcome(self.start, self.end, self.decide_after, [], 30, NOW,
+                                        hits_coverage=self.covered)[0], OUTCOME_MISSED)
 
     def test_detected_when_a_hit_overlaps_the_window(self):
         hit = (NOW - timedelta(minutes=90)).timestamp()
@@ -220,8 +266,8 @@ class DecideOutcomeTest(unittest.TestCase):
         self.assertEqual(decide_outcome(self.start, self.end, self.decide_after, [[skewed, skewed, 1]], 30, NOW)[0],
                          OUTCOME_DETECTED)
         after = (NOW - timedelta(minutes=45)).timestamp()
-        self.assertEqual(decide_outcome(self.start, self.end, self.decide_after, [[after, after, 1]], 30, NOW)[0],
-                         OUTCOME_MISSED)
+        self.assertEqual(decide_outcome(self.start, self.end, self.decide_after, [[after, after, 1]], 30, NOW,
+                                        hits_coverage=self.covered)[0], OUTCOME_MISSED)
 
     def test_window_spanning_the_test_proves_nothing(self):
         before = (NOW - timedelta(hours=3)).timestamp()
@@ -237,12 +283,14 @@ class DecideOutcomeTest(unittest.TestCase):
 
     def test_hit_before_dispatch_does_not_count(self):
         hit = (NOW - timedelta(hours=5)).timestamp()
-        self.assertEqual(decide_outcome(self.start, self.end, self.decide_after, [[hit, hit, 1]], 30, NOW)[0], OUTCOME_MISSED)
+        self.assertEqual(decide_outcome(self.start, self.end, self.decide_after, [[hit, hit, 1]], 30, NOW,
+                                        hits_coverage=self.covered)[0], OUTCOME_MISSED)
 
     def test_missed_only_after_the_grace_period(self):
         early = self.end + timedelta(minutes=10)
         self.assertEqual(decide_outcome(self.start, self.end, self.decide_after, [], 30, early)[0], OUTCOME_PENDING)
-        self.assertEqual(decide_outcome(self.start, self.end, self.decide_after, [], 30, NOW)[0], OUTCOME_MISSED)
+        self.assertEqual(decide_outcome(self.start, self.end, self.decide_after, [], 30, NOW,
+                                        hits_coverage=self.covered)[0], OUTCOME_MISSED)
 
     def test_running_request_is_never_missed(self):
         start, end, decide_after = validation_window(dict(self.request, status="running"), 30)
@@ -261,7 +309,7 @@ class DecideOutcomeTest(unittest.TestCase):
         self.assertIsNone(history_covered_from({"hit_count": 1}, windows))
         older = (NOW - timedelta(hours=5)).timestamp()
         self.assertEqual(decide_outcome(self.start, self.end, self.decide_after, [[older, older, 1]], 30, NOW,
-                                        covered_from=older)[0], OUTCOME_MISSED)
+                                        covered_from=older, hits_coverage=self.covered)[0], OUTCOME_MISSED)
 
 
 def _request(status="completed", validation_status="requested", platform=PLATFORM, ioc_value="evil.example"):
@@ -295,9 +343,21 @@ def _client(requests_nodes, **handlers):
 
 
 class ValidationProverTest(unittest.TestCase):
-    def _prover(self, client, features=(FEATURE_IOC_VALIDATION,), hits=None, results=None, writeback=True):
+    def _prover(self, client, features=(FEATURE_IOC_VALIDATION,), hits=None, results=None, writeback=True, cache=None):
+        if cache is None:
+            cache = FakeCache()
+            cache.set(coverage_key(PLATFORM["id"]), {
+                "covered_since": _iso(NOW - timedelta(days=1)), "covered_until": _iso(NOW - timedelta(minutes=5)),
+            })
         return ValidationProver(client, FakeDetector(features), PLATFORM, hits or FakeKV(), results or FakeKV(),
-                                grace_minutes=30, writeback=writeback, logger=FakeLogger(), now=NOW)
+                                grace_minutes=30, writeback=writeback, logger=FakeLogger(), now=NOW, cache=cache)
+
+    def test_no_hit_coverage_keeps_the_pair_requested(self):
+        client = _client([_request()])
+        rows = self._prover(client, cache=FakeCache()).run()
+        self.assertEqual(rows[0]["outcome"], OUTCOME_PENDING)
+        self.assertEqual(rows[0]["hits_searched_until"], "")
+        self.assertEqual(client.bundles, [])
 
     def _hits(self, *windows):
         return FakeKV([{"_key": hit_history_key(PLATFORM["id"], IND), "indicator_id": IND, "recent_windows": json.dumps(list(windows))}])

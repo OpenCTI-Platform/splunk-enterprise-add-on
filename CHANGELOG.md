@@ -77,7 +77,9 @@ Compatibility with the OpenCTI autonomous threat management program
   reused only for a SIEM platform while its configuration (auto mode, name) is unchanged.
 - IOC validation proves a detection only with a hit inside the test window (the grace period no
   longer widens it), and never declares a miss when a hit window spans the test or the hit history
-  was trimmed past its start.
+  was trimmed past its start. A miss also needs proof that `OpenCTI - Report indicator hits` searched
+  the whole test window: the search ends with a heartbeat row that records its time range as one
+  contiguous span per Security Platform, only when every row of the run was reported.
 - The modular input no longer logs the proxy password.
 - Hash detections and hit reporting reduce `Filesystem.file_hash` to its digest (CIM values such as
   `sha256=<digest>`), as already done for `Processes.process_hash`.

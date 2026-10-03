@@ -107,6 +107,12 @@ class SavedSearchesTest(unittest.TestCase):
         self.assertLess(nightly.index("where is_delete == 0"), nightly.index("outputlookup opencti_indicators"))
         self.assertNotIn("append", nightly[nightly.index("outputlookup"):])
 
+    def test_hits_search_ends_with_the_coverage_heartbeat(self):
+        search = self.searches.get("OpenCTI - Report indicator hits", "search")
+        heartbeat = search.index("eval opencti_hits_heartbeat = 1")
+        self.assertLess(search.index("by indicator_id"), heartbeat)
+        self.assertLess(heartbeat, search.index("| openctireporthits"))
+
     def test_kv_sync_searches_keep_the_knowledge_fields(self):
         for stanza in ("Update OpenCTI Indicators Lookup", "Nightly Rebuild OpenCTI Indicators Lookup"):
             search = self.searches.get(stanza, "search")

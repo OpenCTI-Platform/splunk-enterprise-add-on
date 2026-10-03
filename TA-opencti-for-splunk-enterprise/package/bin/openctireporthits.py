@@ -3,6 +3,11 @@
 """| openctireporthits [id_field=<field>] [count_field=<field>] [first_field=<field>] [last_field=<field>]
 
 Report indicator hits to OpenCTI on the Splunk Security Platform (see hits.py).
+
+A row carrying ``opencti_hits_heartbeat`` (appended last by the shipped
+search) is not reported: it records that every hit of the search time range
+was reported, which the IOC validation proof requires before it declares a
+miss.
 """
 import sys
 
@@ -11,7 +16,7 @@ from splunklib.searchcommands import Configuration, EventingCommand, Option, dis
 
 from addon_state import HITS_COLLECTION
 from command_common import CommandContext
-from hits import HitReporter, STATUS_ERROR, STATUS_REPORTED_AS_SIGHTING
+from hits import HEARTBEAT_FIELD, HitReporter, STATUS_ERROR, STATUS_REPORTED_AS_SIGHTING
 
 
 @Configuration()
@@ -26,6 +31,13 @@ class OpenCTIReportHitsCommand(EventingCommand):
         self._context = None
         self._reporter = None
 
+    def _search_time_range(self):
+        try:
+            info = self.metadata.searchinfo
+            return float(info.earliest_time or 0), float(info.latest_time or 0)
+        except (AttributeError, TypeError, ValueError):
+            return 0.0, 0.0
+
     def transform(self, records):
         if self._reporter is None:
             self._context = CommandContext(self, "openctireporthits")
@@ -36,6 +48,7 @@ class OpenCTIReportHitsCommand(EventingCommand):
                 self._context.collection(HITS_COLLECTION),
                 logger=self._context.logger,
                 author_name=self._context.settings.server_name or "Splunk",
+                cache=self._context.cache,
             )
         reporter = self._reporter
         fields = {
@@ -47,7 +60,11 @@ class OpenCTIReportHitsCommand(EventingCommand):
         # Buffer the chunk: fallback sightings are sent in one bundle at the
         # end, and their status depends on that call.
         output = []
+        heartbeat = False
         for record in records:
+            if record.get(HEARTBEAT_FIELD):
+                heartbeat = True
+                continue
             record.update(reporter.report(record, **fields))
             output.append(record)
         failed = reporter.flush()
@@ -58,6 +75,8 @@ class OpenCTIReportHitsCommand(EventingCommand):
                 if message is not None and record.get("opencti_hit_status") == STATUS_REPORTED_AS_SIGHTING:
                     record["opencti_hit_status"] = STATUS_ERROR
                     record["opencti_hit_message"] = message
+        if heartbeat:
+            reporter.record_coverage(*self._search_time_range())
         for record in output:
             yield record
 
