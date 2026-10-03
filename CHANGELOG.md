@@ -97,10 +97,18 @@ Compatibility with the OpenCTI autonomous threat management program
 - Hash detections and hit reporting reduce `Filesystem.file_hash` to its digest (CIM values such as
   `sha256=<digest>`), as already done for `Processes.process_hash`.
 - Run Case Autopilot reserves the container atomically in the KV Store, so concurrent alert runs
-  never start two runs for the same object; a stale reservation is reclaimed atomically too (one
-  reclaim key per stale reservation), so two processes never both take it over.
+  never start two runs for the same object; a stale reservation is taken over atomically too (one
+  takeover key per stale reservation), so two processes never both take it over.
 - Report hunt evidence parks each report's not-yet-ingested evidence under its own KV Store entry and
   claims an entry atomically before attaching it, so concurrent reports of one hunt run never lose
   or double-attach deferred evidence. A claim left by a dead process is taken over after ten minutes
   (atomically, once), and without a persistent KV Store the evidence that is not ingested yet is
   reported as not attached instead of being parked in process memory.
+- A process that dies while taking over a stale Case Autopilot reservation or hunt evidence claim no
+  longer blocks it for good: its takeover entry goes stale in turn and is taken over the same way.
+- Timeline milestones and Case Autopilot runs whose incident is not ingested within the 60 second wait,
+  or whose call failed, are parked in the KV Store and retried by the next OpenCTI alert action runs
+  (24 hours, 5 failed calls at most) instead of being dropped.
+- Dashboards and the indicator lookup searches read KV Store timestamps at second and millisecond
+  precision alike (the 30-day hit chart, the indicators added chart, the last deployment sync, the
+  `added_at` of an indicator first written by the KV Store mode).

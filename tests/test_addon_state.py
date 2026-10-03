@@ -87,5 +87,51 @@ class KVCollectionTest(unittest.TestCase):
         self.assertEqual(cache.items("pending|run|"), [("pending|run|a", {"result_ids": ["x"]})])
 
 
+def _stale(value):
+    return value.get("at") == "old"
+
+
+class TakeOverTest(unittest.TestCase):
+    def setUp(self):
+        self.cache = addon_state.MemoryCache()
+
+    def test_free_key_is_created(self):
+        self.assertEqual(addon_state.take_over(self.cache, "k", {"at": "now"}, _stale), [])
+        self.assertEqual(self.cache.get("k")["at"], "now")
+        self.assertTrue(self.cache.get("k")["lease"])
+
+    def test_live_holder_keeps_it(self):
+        self.cache.set("k", {"at": "now"})
+        self.assertIsNone(addon_state.take_over(self.cache, "k", {"at": "now"}, _stale))
+        self.assertEqual(self.cache.get("k"), {"at": "now"})
+
+    def test_stale_holder_is_taken_over_once(self):
+        stale = {"at": "old", "lease": "a"}
+        self.cache.set("k", stale)
+        self.assertEqual(addon_state.take_over(self.cache, "k", {"at": "now"}, _stale), ["k|takeover|a"])
+        self.assertEqual(self.cache.get("k")["at"], "now")
+        # A process that read the same stale value meanwhile loses
+        self.cache.get = lambda key, real=self.cache.get: stale if key == "k" else real(key)
+        self.assertIsNone(addon_state.take_over(self.cache, "k", {"at": "now"}, _stale))
+
+    def test_dead_takeover_is_taken_over_in_turn(self):
+        self.cache.set("k", {"at": "old", "lease": "a"})
+        self.cache.set("k|takeover|a", {"at": "old", "lease": "b"})
+        chain = addon_state.take_over(self.cache, "k", {"at": "now"}, _stale)
+        self.assertEqual(chain, ["k|takeover|a", "k|takeover|a|takeover|b"])
+        self.assertEqual(self.cache.get("k")["at"], "now")
+
+    def test_live_takeover_is_left_to_it(self):
+        self.cache.set("k", {"at": "old", "lease": "a"})
+        self.cache.set("k|takeover|a", {"at": "now", "lease": "b"})
+        self.assertIsNone(addon_state.take_over(self.cache, "k", {"at": "now"}, _stale))
+        self.assertEqual(self.cache.get("k")["at"], "old")
+
+    def test_values_without_lease_get_a_stable_takeover_key(self):
+        value = {"at": "old"}
+        self.assertEqual(addon_state.takeover_key("k", value), addon_state.takeover_key("k", dict(value)))
+        self.assertTrue(addon_state.takeover_key("k", value).startswith("k|takeover|"))
+
+
 if __name__ == "__main__":
     unittest.main()

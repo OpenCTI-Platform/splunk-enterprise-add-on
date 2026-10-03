@@ -8,6 +8,7 @@ from program_fakes import FakeAlertContext, FakeAlertHelper, FakeClient, FakeDet
 import alert_common
 import alert_report_hunt_evidence_helper as action
 import program_actions
+from addon_state import takeover_key
 from opencti_features import FEATURE_HUNT_EVIDENCE, FEATURE_HUNTS
 from stix_converter import convert_to_hunt_evidence
 from utils import generate_observed_data_id
@@ -194,18 +195,36 @@ class ActionTest(unittest.TestCase):
             "result_ids": ["observed-data--1"], "hits_count": 1, "source": "splunk-alert-action",
             "parked_at": program_actions.utc_now_iso(),
         })
+        claim = "hunt_evidence_pending|run-1|a|claim"
         stale = {"claimed_at": "2020-01-01T00:00:00Z"}
-        context.cache.set("hunt_evidence_pending|run-1|a|claim", stale)
-        context.cache.set("hunt_evidence_pending|run-1|a|claim|reclaim|2020-01-01T00:00:00Z", {"claimed_at": "x"})
+        context.cache.set(claim, stale)
+        context.cache.set(takeover_key(claim, stale), {"claimed_at": program_actions.utc_now_iso()})
         with mock.patch.object(program_actions.time, "sleep"):
             program_actions.report_hunt_evidence(context, "run-1", ["sighting--2"], 1)
         self.assertEqual(len(context.client.calls_of("SplunkHuntRunEvidence")), 1, "another report took it over")
-        del context.cache.values["hunt_evidence_pending|run-1|a|claim|reclaim|2020-01-01T00:00:00Z"]
+        del context.cache.values[takeover_key(claim, stale)]
         with mock.patch.object(program_actions.time, "sleep"):
             program_actions.report_hunt_evidence(context, "run-1", ["sighting--2"], 1)
         attached = [call["input"]["result_ids"] for call in context.client.calls_of("SplunkHuntRunEvidence")]
         self.assertEqual(attached, [["sighting--2"], ["observed-data--1"], ["sighting--2"]])
         self.assertEqual(context.cache.items("hunt_evidence_pending|run-1|"), [])
+
+    def test_dead_takeover_of_a_claim_is_taken_over(self):
+        context = self._evidence_context({"observed-data--1", "sighting--2"})
+        context.cache.set("hunt_evidence_pending|run-1|a", {
+            "result_ids": ["observed-data--1"], "hits_count": 1, "source": "splunk-alert-action",
+            "parked_at": program_actions.utc_now_iso(),
+        })
+        claim = "hunt_evidence_pending|run-1|a|claim"
+        stale = {"claimed_at": "2020-01-01T00:00:00Z"}
+        context.cache.set(claim, stale)
+        # The report that took the stale claim over died before rewriting it.
+        context.cache.set(takeover_key(claim, stale), dict(stale, lease="dead"))
+        with mock.patch.object(program_actions.time, "sleep"):
+            program_actions.report_hunt_evidence(context, "run-1", ["sighting--2"], 1)
+        attached = [call["input"]["result_ids"] for call in context.client.calls_of("SplunkHuntRunEvidence")]
+        self.assertEqual(attached, [["observed-data--1"], ["sighting--2"]])
+        self.assertEqual(context.cache.items("hunt_evidence_pending|run-1|"), [], "claim and takeovers released")
 
     def test_entry_attached_after_the_listing_is_not_attached_again(self):
         context = self._evidence_context({"observed-data--1", "sighting--2"})

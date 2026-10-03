@@ -11,6 +11,7 @@ Collections (declared in default/collections.conf):
 import hashlib
 import json
 import re
+import uuid
 from datetime import datetime, timezone
 
 STATE_COLLECTION = "opencti_addon_state"
@@ -22,6 +23,8 @@ PROVIDES_COLLECTION = "opencti_provides"
 # KV Store accepts at most 1000 documents per batch_save call.
 KV_BATCH_MAX = 1000
 GET_MANY_CHUNK = 50
+# Each level is a process that died while taking the entry over.
+TAKEOVER_MAX_DEPTH = 16
 
 
 def utc_now_iso():
@@ -35,6 +38,45 @@ def state_key(*parts):
     """
     raw = "|".join("" if part is None else str(part) for part in parts)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:40]
+
+
+def takeover_key(key, existing):
+    """
+    :param key: cache entry held by a process that died
+    :param existing: its current value
+    :return: the key whose creation takes this very value over
+    """
+    token = existing.get("lease") or state_key(json.dumps(existing, sort_keys=True))
+    return f"{key}|takeover|{token}"
+
+
+def take_over(cache, key, record, is_stale):
+    """
+    Atomically create ``key``, or take it over when the process holding it
+    died. Of the processes that see one stale value, the one creating its
+    takeover key (takeover_key) wins. A winner that dies before rewriting
+    ``key`` leaves a takeover entry that goes stale in turn and is taken over
+    the same way, so a crash at any step never blocks ``key`` for good.
+
+    :param cache: KVStoreCache-like (reserve is an atomic insert)
+    :param record: value written to ``key``, with a fresh "lease" token
+    :param is_stale: callable(value) -> True when its holder died
+    :return: None when a live process holds ``key``, else the takeover keys
+        on the way to it ([] when ``key`` was free)
+    """
+    record = dict(record, lease=uuid.uuid4().hex)
+    current, chain = key, []
+    for _ in range(TAKEOVER_MAX_DEPTH):
+        if cache.reserve(current, record):
+            if chain:
+                cache.set(key, record)
+            return chain
+        existing = cache.get(current)
+        if not existing or not is_stale(existing):
+            return None
+        current = takeover_key(current, existing)
+        chain.append(current)
+    return None
 
 
 def connect_service(session_key, app, splunkd_uri=None):

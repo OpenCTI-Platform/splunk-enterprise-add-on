@@ -1,4 +1,5 @@
 """Test doubles shared by the program compatibility tests (OpenCTI-Platform/splunk-enterprise-add-on#68)."""
+import json
 import os
 import re
 import sys
@@ -253,13 +254,16 @@ class FakeAlertContext:
 
         return is_true(self.helper.get_param(name), default)
 
-    def defer(self, entity_id, description, action):
-        self.followups.append((entity_id, description, action))
+    def defer(self, entity_id, description, kind, params):
+        json.dumps(params)  # parked follow-ups are stored as JSON
+        self.followups.append((entity_id, kind, params))
 
     def run_followups(self, sleep=None, budget=0):
+        from program_actions import run_followup
+
         pending, self.followups = self.followups, []
-        for _, _, action in pending:
-            action()
+        for entity_id, kind, params in pending:
+            run_followup(self, kind, entity_id, params)
         return 0
 
 

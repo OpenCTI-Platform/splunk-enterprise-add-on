@@ -7,22 +7,32 @@
 - Follow-ups (timeline milestones, Case Autopilot runs) that need the
   container created by the bundle: bundles are ingested asynchronously by
   the OpenCTI workers, so follow-ups run after every result was sent, once
-  the containers exist (bounded wait).
+  the containers exist (bounded wait). A follow-up whose container is still
+  not ingested, or that failed, is parked in the add-on state collection and
+  retried by the next alert runs (follow-ups are idempotent).
 """
 
 import json
 import time
 
 from addon_config import is_true, settings_from_alert_helper
-from addon_state import KVStoreCache, MemoryCache, connect_service
+from addon_state import KVStoreCache, MemoryCache, connect_service, state_key, utc_now_iso
 from constants import ADDON_NAME
 from opencti_features import OpenCTIFeatureDetector
+from program_actions import run_followup
 from security_platform import SecurityPlatformResolver
+from utils import parse_iso
 
 ALERT_FAILURE_EXIT_CODE = 2
 # Total seconds an alert run waits for the containers it created.
 FOLLOWUP_WAIT_SECONDS = 60
 FOLLOWUP_POLL_SECONDS = (2, 3, 5, 5, 10, 10, 10, 15)
+FOLLOWUP_PARKED_PREFIX = "alert_followup|"
+# A parked follow-up is retried by later alert runs within this delay...
+FOLLOWUP_PARKED_SECONDS = 86400
+# ...and dropped once it failed (not merely waited) this many times.
+FOLLOWUP_MAX_FAILURES = 5
+FOLLOWUP_RETRIED_PER_RUN = 100
 
 EXISTING_OBJECTS_QUERY = """
 query SplunkExistingObjects($filters: FilterGroup, $first: Int) {
@@ -141,15 +151,17 @@ class AlertContext:
     def flag(self, name, default=False):
         return is_true(self.helper.get_param(name), default)
 
-    def defer(self, entity_id, description, action):
+    def defer(self, entity_id, description, kind, params):
         """
-        Run ``action()`` once the object ``entity_id`` exists in OpenCTI.
+        Run the follow-up ``kind`` (program_actions.run_followup) once the
+        object ``entity_id`` exists in OpenCTI.
 
         :param entity_id: STIX id of the object created by a bundle
         :param description: for logs
-        :param action: callable without arguments
+        :param kind: program_actions.FOLLOWUP_*
+        :param params: JSON parameters (a later alert run may run it)
         """
-        self.followups.append((entity_id, description, action))
+        self.followups.append({"entity_id": entity_id, "description": description, "kind": kind, "params": params})
 
     def _existing(self, ids):
         found = set()
@@ -166,34 +178,104 @@ class AlertContext:
                         found.add(node[key])
         return found
 
+    def _found(self, ids):
+        try:
+            return self._existing(sorted(set(ids)))
+        except Exception as ex:
+            self.logger.warning(f"Unable to check the objects created in OpenCTI: {ex}")
+            return set()
+
+    def _run_followup(self, followup):
+        """:return: True when done, False when it failed"""
+        try:
+            run_followup(self, followup.get("kind"), followup.get("entity_id"), followup.get("params") or {})
+            return True
+        except Exception as ex:
+            self.logger.warning(f"{followup.get('description')} for {followup.get('entity_id')} failed: {ex}")
+            return False
+
+    def _parked_prefix(self):
+        return f"{FOLLOWUP_PARKED_PREFIX}{self.client.opencti_url}|"
+
+    def _park(self, followup, reason):
+        """:return: True when parked for the next alert runs"""
+        description, entity_id = followup["description"], followup["entity_id"]
+        if not getattr(self.cache, "persistent", False):
+            self.logger.warning(
+                f"{description} for {entity_id} skipped: {reason}, and the add-on state collection is "
+                "unavailable to retry it"
+            )
+            return False
+        params = followup.get("params") or {}
+        # One entry per follow-up, alert and container: a later trigger replaces it.
+        key = self._parked_prefix() + state_key(followup["kind"], entity_id, params.get("search_name"))
+        try:
+            self.cache.set(key, dict(followup, parked_at=utc_now_iso()))
+        except Exception as ex:
+            self.logger.error(f"{description} for {entity_id} lost: {reason}, and it cannot be parked: {ex}")
+            return False
+        self.logger.warning(f"{description} for {entity_id} deferred: {reason}; the next alert runs retry it")
+        return True
+
+    def _retry_parked(self):
+        """Run the follow-ups parked by earlier alert runs whose objects now exist."""
+        if not getattr(self.cache, "persistent", False):
+            return
+        try:
+            parked = self.cache.items(self._parked_prefix(), limit=FOLLOWUP_RETRIED_PER_RUN)
+            live = []
+            for key, followup in parked:
+                parked_at = parse_iso(followup.get("parked_at"))
+                if parked_at is not None and time.time() - parked_at.timestamp() <= FOLLOWUP_PARKED_SECONDS:
+                    live.append((key, followup))
+                    continue
+                self.logger.error(
+                    f"{followup.get('description')} for {followup.get('entity_id')} dropped: not ingested by "
+                    f"OpenCTI within {FOLLOWUP_PARKED_SECONDS // 3600}h"
+                )
+                self.cache.release(key)
+            found = self._found([followup.get("entity_id") for _, followup in live]) if live else set()
+            for key, followup in live:
+                if followup.get("entity_id") not in found:
+                    continue
+                if self._run_followup(followup):
+                    self.cache.release(key)
+                    continue
+                failures = int(followup.get("failures") or 0) + 1
+                if failures < FOLLOWUP_MAX_FAILURES:
+                    self.cache.set(key, dict(followup, failures=failures))
+                    continue
+                self.logger.error(
+                    f"{followup.get('description')} for {followup.get('entity_id')} dropped after {failures} "
+                    "failed attempts"
+                )
+                self.cache.release(key)
+        except Exception as ex:
+            self.logger.warning(f"Parked follow-ups not retried: {ex}")
+
     def run_followups(self, sleep=time.sleep, budget=FOLLOWUP_WAIT_SECONDS):
         """
-        :return: number of follow-ups that could not run (not failures of
-            the alert: they are retried by the next run of the alert, the
-            follow-ups being idempotent)
+        Retry the follow-ups parked by earlier alert runs, then run those of
+        this run once their objects exist. A follow-up whose object is not
+        ingested within ``budget``, or that failed, is parked (not a failure
+        of the alert: follow-ups are idempotent).
+
+        :return: number of follow-ups of this run that could not run yet
         """
-        if not self.followups:
-            return 0
         pending = list(self.followups)
         self.followups = []
+        self._retry_parked()
+        failed = []
         waited = 0.0
         attempt = 0
         while pending:
-            ids = sorted({entity_id for entity_id, _, _ in pending})
-            try:
-                found = self._existing(ids)
-            except Exception as ex:
-                self.logger.warning(f"Unable to check the objects created in OpenCTI: {ex}")
-                found = set()
+            found = self._found([followup["entity_id"] for followup in pending])
             remaining = []
-            for entity_id, description, action in pending:
-                if entity_id not in found:
-                    remaining.append((entity_id, description, action))
-                    continue
-                try:
-                    action()
-                except Exception as ex:
-                    self.logger.warning(f"{description} for {entity_id} failed: {ex}")
+            for followup in pending:
+                if followup["entity_id"] not in found:
+                    remaining.append(followup)
+                elif not self._run_followup(followup):
+                    failed.append(followup)
             pending = remaining
             if not pending:
                 break
@@ -203,12 +285,11 @@ class AlertContext:
             sleep(delay)
             waited += delay
             attempt += 1
-        for entity_id, description, _ in pending:
-            self.logger.warning(
-                f"{description} skipped: {entity_id} was not ingested by OpenCTI within {int(budget)}s "
-                "(the next run of this alert adds it, the operation is idempotent)"
-            )
-        return len(pending)
+        for followup in pending:
+            self._park(followup, f"{followup['entity_id']} was not ingested by OpenCTI within {int(budget)}s")
+        for followup in failed:
+            self._park(dict(followup, failures=1), "it failed")
+        return len(pending) + len(failed)
 
 
 def run_alert(helper, action_name, handler, context_factory=AlertContext):

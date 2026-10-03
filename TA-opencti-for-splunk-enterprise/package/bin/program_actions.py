@@ -14,7 +14,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 
-from addon_state import state_key, utc_now_iso
+from addon_state import state_key, take_over, utc_now_iso
 from constants import INDICATORS_KVSTORE_NAME
 from opencti_features import (
     FEATURE_CASE_AUTOPILOT,
@@ -26,6 +26,8 @@ from stix_converter import indicator_patterns, pattern_indicator
 from utils import parse_iso, to_iso
 
 AUTOPILOT_RESERVATION_SECONDS = 3600
+FOLLOWUP_TIMELINE = "timeline_milestone"
+FOLLOWUP_CASE_AUTOPILOT = "case_autopilot"
 CASE_INSENSITIVE_KINDS = frozenset({"domain", "ipv4", "ipv6", "email_addr", "file_hash"})
 
 TIMELINE_TITLE_MAX = 512
@@ -128,19 +130,22 @@ def build_milestone_input(container_id, search_name, trigger_time, event_time=No
     }
 
 
-def add_timeline_milestone(context, container_id, event_time=None, trigger_time=None):
+def add_timeline_milestone(context, container_id, event_time=None, trigger_time=None, search_name=None,
+                           results_link=None):
     """
     :param context: alert_common.AlertContext
+    :param search_name: alert that created the container (default: the running alert)
+    :param results_link: its search results (default: those of the running alert)
     :return: True when added, False when the platform has no timeline
     """
     if not context.detector.require(FEATURE_TIMELINE, "Timeline milestone"):
         return False
     milestone = build_milestone_input(
         container_id,
-        context.search_name,
+        context.search_name if search_name is None else search_name,
         trigger_time or datetime.now(timezone.utc),
         event_time,
-        context.results_link,
+        context.results_link if results_link is None else results_link,
     )
     context.client.graphql_query(TIMELINE_ADD_MUTATION, {"input": milestone})
     context.logger.info(f"Timeline milestone added on {container_id}")
@@ -164,23 +169,42 @@ def schedule_container_followups(context, container_id, event):
     :param container_id: STIX id of the Incident / Case-Incident
     :param event: the Splunk result
     """
-    trigger_time = datetime.now(timezone.utc)
     if context.flag("timeline_milestone", True) and context.detector.require(FEATURE_TIMELINE, "Timeline milestone"):
-        event_time = _event_time(event)
-        context.defer(
-            container_id,
-            "Timeline milestone",
-            lambda: add_timeline_milestone(context, container_id, event_time, trigger_time),
-        )
+        context.defer(container_id, "Timeline milestone", FOLLOWUP_TIMELINE, {
+            "search_name": context.search_name,
+            "results_link": context.results_link,
+            "trigger_time": to_iso(datetime.now(timezone.utc)),
+            "event_time": to_iso(_event_time(event)),
+        })
     if context.flag("run_case_autopilot", False) and context.detector.require(
         FEATURE_CASE_AUTOPILOT, "Run Case Autopilot"
     ):
-        policy_id = context.param("autopilot_policy_id", "")
-        context.defer(
+        context.defer(container_id, "Run Case Autopilot", FOLLOWUP_CASE_AUTOPILOT, {
+            "policy_id": context.param("autopilot_policy_id", ""),
+        })
+
+
+def run_followup(context, kind, container_id, params):
+    """
+    Run a follow-up deferred by schedule_container_followups, possibly parked
+    by an earlier alert run: everything it needs is in ``params``.
+
+    :param context: alert_common.AlertContext
+    :param kind: FOLLOWUP_TIMELINE or FOLLOWUP_CASE_AUTOPILOT
+    :param params: JSON parameters recorded when it was deferred
+    """
+    if kind == FOLLOWUP_TIMELINE:
+        return add_timeline_milestone(
+            context,
             container_id,
-            "Run Case Autopilot",
-            lambda: run_case_autopilot(context, container_id, policy_id),
+            params.get("event_time"),
+            params.get("trigger_time"),
+            params.get("search_name"),
+            params.get("results_link"),
         )
+    if kind == FOLLOWUP_CASE_AUTOPILOT:
+        return run_case_autopilot(context, container_id, params.get("policy_id"))
+    raise ValueError(f"Unknown follow-up {kind}")
 
 
 # region Case Autopilot
@@ -220,18 +244,13 @@ def run_case_autopilot(context, container_id, policy_id=None):
     if existing and not _stale_reservation(existing):
         context.logger.info(f"Case Autopilot already run for {container_id}")
         return None
-    reservation = {"status": "pending", "reserved_at": utc_now_iso()}
     if existing:
-        # Reclaim atomically: of the processes that read this stale reservation,
-        # only the one inserting its reclaim key may replace it.
-        reclaim = f"{marker}|reclaim|{existing.get('reserved_at') or ''}"
-        if not context.cache.reserve(reclaim, reservation):
-            context.logger.info(f"Case Autopilot already being started for {container_id}")
-            return None
         context.logger.warning(f"Case Autopilot reservation for {container_id} never completed, retrying")
-        context.cache.set(marker, reservation)
-    # Atomic: of concurrent alert runs on one container, one only starts a run
-    elif not context.cache.reserve(marker, reservation):
+    # Atomic: of concurrent alert runs on one container, one only starts a run.
+    # The takeover keys stay: a process that read the stale reservation late
+    # can never take it over again once the run is recorded.
+    reservation = {"status": "pending", "reserved_at": utc_now_iso()}
+    if take_over(context.cache, marker, reservation, _stale_reservation) is None:
         context.logger.info(f"Case Autopilot already being started for {container_id}")
         return None
     try:
@@ -408,28 +427,20 @@ def _park(context, hunt_run_id, item):
     context.cache.set(f"{_pending_prefix(hunt_run_id)}{uuid.uuid4().hex}", item)
 
 
+def _stale_claim(value):
+    """:return: True for a claim older than EVIDENCE_CLAIM_SECONDS (its holder died)"""
+    claimed_at = parse_iso(value.get("claimed_at"))
+    return claimed_at is None or time.time() - claimed_at.timestamp() > EVIDENCE_CLAIM_SECONDS
+
+
 def _claim(cache, claim):
     """
-    Atomic: of concurrent reports of the run, one only holds the claim. A claim
-    older than EVIDENCE_CLAIM_SECONDS (its holder died) is taken over through a
-    reclaim key unique to it, so two reports never both take it over.
+    Atomic: of concurrent reports of the run, one only holds the claim; a stale
+    claim is taken over (addon_state.take_over).
 
-    :return: reclaim key to release once done ("" when none), None when not claimed
+    :return: takeover keys to release with the claim once done, None when not claimed
     """
-    now = utc_now_iso()
-    if cache.reserve(claim, {"claimed_at": now}):
-        return ""
-    existing = cache.get(claim)
-    if not existing:
-        return None
-    claimed_at = parse_iso(existing.get("claimed_at"))
-    if claimed_at is not None and time.time() - claimed_at.timestamp() <= EVIDENCE_CLAIM_SECONDS:
-        return None
-    reclaim = f"{claim}|reclaim|{existing.get('claimed_at') or ''}"
-    if not cache.reserve(reclaim, {"claimed_at": now}):
-        return None
-    cache.set(claim, {"claimed_at": now})
-    return reclaim
+    return take_over(cache, claim, {"claimed_at": utc_now_iso()}, _stale_claim)
 
 
 def _attach_pending(context, hunt_run_id):
@@ -446,9 +457,11 @@ def _attach_pending(context, hunt_run_id):
             )
             context.cache.release(key)
             context.cache.release(claim)
+            for takeover, _ in context.cache.items(f"{claim}|takeover|"):
+                context.cache.release(takeover)
             continue
-        reclaim = _claim(context.cache, claim)
-        if reclaim is None:
+        takeovers = _claim(context.cache, claim)
+        if takeovers is None:
             continue
         try:
             # The listing may predate another report that attached this entry.
@@ -467,8 +480,8 @@ def _attach_pending(context, hunt_run_id):
                 context.cache.set(key, dict(item, result_ids=remaining, hits_count=0))
         finally:
             context.cache.release(claim)
-            if reclaim:
-                context.cache.release(reclaim)
+            for takeover in takeovers:
+                context.cache.release(takeover)
 
 
 def report_hunt_evidence(context, hunt_run_id, result_ids, hits_count, platform_id=None, observed_at=None):

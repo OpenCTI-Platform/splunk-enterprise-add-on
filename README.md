@@ -367,8 +367,11 @@ warning when this happens).
 > again by an overlapping scheduled run just after the upgrade creates a second object, once.
 
 The timeline milestone (lane `custom`) and Run Case Autopilot happen once OpenCTI has ingested the created object
-(the bundle is processed asynchronously by the OpenCTI workers, the action waits up to 60 seconds); both
-are idempotent, so a skipped milestone is added by the next run of the alert.
+(the bundle is processed asynchronously by the OpenCTI workers, the action waits up to 60 seconds). A follow-up
+whose object is still not ingested, or whose call failed, is parked in the `opencti_addon_state` KV Store
+collection and retried by the next runs of any OpenCTI alert action, with the alert name and results link of
+the run that deferred it; both are idempotent. A parked follow-up is dropped (logged as an error) after 24 hours
+without ingestion or after 5 failed calls.
 
 7. To create a sighting, complete the form with the following settings:
 
