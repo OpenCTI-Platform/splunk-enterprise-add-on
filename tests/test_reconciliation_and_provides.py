@@ -108,6 +108,44 @@ class ReconcilerTest(unittest.TestCase):
         self.assertIn(("indicator--revoked", STATUS_REMOVED, index_id, None), reporter.reports)
         self.assertIn(("indicator--gone", STATUS_REMOVED, "index:opencti/indicator--gone", None), reporter.reports)
 
+    def test_new_deployment_takes_the_identity_of_the_stream_input(self):
+        """Without an external id in OpenCTI: the one the stream input reported, else the lookup's index."""
+        from addon_state import state_key
+
+        empty = {"stixCoreRelationships": {"pageInfo": {"hasNextPage": False}, "edges": []}}
+        kv = FakeKV([
+            {"_key": "indicator--reported", "id": "indicator--reported", "source_index": "main"},
+            {"_key": "indicator--indexed", "id": "indicator--indexed", "source_index": "opencti"},
+            {"_key": "k3", "id": "indicator--kv"},
+        ])
+        deployments = FakeKV([{"_key": state_key("indicator--reported"), "indicator_id": "indicator--reported",
+                               "external_id": "index:default/indicator--reported"}])
+        reporter = FakeReporter()
+        Reconciler(FakeClient({"SplunkPlatformDeployments": empty}), FakeDetector((FEATURE_DEPLOYED_ON,)), PLATFORM, kv,
+                   reporter, logger=FakeLogger(), deployments=deployments).reconcile()
+        external_ids = {indicator_id: external_id for indicator_id, _, external_id, _ in reporter.reports}
+        self.assertEqual(external_ids, {
+            "indicator--reported": "index:default/indicator--reported",
+            "indicator--indexed": "index:opencti/indicator--indexed",
+            "indicator--kv": "kvstore:opencti_indicators/k3",
+        })
+
+    def test_unreadable_deployment_state_falls_back_to_the_lookup(self):
+        empty = {"stixCoreRelationships": {"pageInfo": {"hasNextPage": False}, "edges": []}}
+        deployments = FakeKV()
+
+        def unreadable(keys):
+            raise RuntimeError("KV down")
+
+        deployments.get_many = unreadable
+        reporter = FakeReporter()
+        logger = FakeLogger()
+        Reconciler(FakeClient({"SplunkPlatformDeployments": empty}), FakeDetector((FEATURE_DEPLOYED_ON,)), PLATFORM,
+                   FakeKV([{"_key": "k1", "id": "indicator--a"}]), reporter, logger=logger,
+                   deployments=deployments).reconcile()
+        self.assertEqual(reporter.reports[0][2], "kvstore:opencti_indicators/k1")
+        self.assertTrue(logger.has("warning", "opencti_deployments unreadable"))
+
     def test_skipped_without_feature_or_platform(self):
         reporter = FakeReporter()
         self.assertEqual(Reconciler(FakeClient(), FakeDetector(), PLATFORM, FakeKV(), reporter).reconcile()[0]["action"], "skipped")

@@ -16,6 +16,7 @@ indicators in opencti_indicators (OpenCTI updates them without stream events).
 import logging
 from datetime import datetime, timezone
 
+from addon_state import state_key
 from deployment_reporter import STATUS_DEPLOYED, STATUS_EXPIRED, STATUS_REMOVED, removal_status
 from knowledge_fields import KNOWLEDGE_FIELDS, enrichment_graphql_fields, refresh_knowledge_fields
 from opencti_features import FEATURE_DEPLOYED_ON, FEATURE_PROVENANCE, FEATURE_PULSE
@@ -106,13 +107,16 @@ def plan_reconciliation(splunk_indicators, opencti_deployments, refresh=False, n
 
 
 class Reconciler:
-    def __init__(self, client, detector, platform, indicators, reporter, logger=None, collection_name="opencti_indicators"):
+    def __init__(self, client, detector, platform, indicators, reporter, logger=None, collection_name="opencti_indicators",
+                 deployments=None):
         """
         :param client: SplunkAppConnectorHelper
         :param detector: OpenCTIFeatureDetector
         :param platform: Splunk Security Platform node
         :param indicators: KVCollection over opencti_indicators
         :param reporter: DeploymentReporter
+        :param deployments: optional KVCollection over opencti_deployments
+            (external ids the stream input reported)
         """
         self.client = client
         self.detector = detector
@@ -121,20 +125,44 @@ class Reconciler:
         self.reporter = reporter
         self.logger = logger or logging.getLogger(__name__)
         self.collection_name = collection_name
+        self.deployments = deployments
         self.external_ids = {}
+        self.reported_external_ids = {}
 
     def external_id(self, indicator_id, record):
         """
-        :return: the external id OpenCTI already holds for this deployment (set
-            by the stream input, KV Store or index mode), else the KV entry
+        The identity the stream input gives the deployment, so both address one:
+        the external id OpenCTI holds, else the one the stream input reported,
+        else the index the lookup entry was built from (index mode), else the
+        KV Store entry.
         """
-        if self.external_ids.get(indicator_id):
-            return self.external_ids[indicator_id]
-        return f"kvstore:{self.collection_name}/{record.get('_key')}" if record else None
+        for known in (self.external_ids, self.reported_external_ids):
+            if known.get(indicator_id):
+                return known[indicator_id]
+        if not record:
+            return None
+        if record.get("source_index"):
+            return f"index:{record['source_index']}/{indicator_id}"
+        return f"kvstore:{self.collection_name}/{record.get('_key')}"
+
+    def load_reported_external_ids(self, indicator_ids):
+        """Read the external ids the stream input reported for these indicators (opencti_deployments)."""
+        ids = [indicator_id for indicator_id in indicator_ids if not self.external_ids.get(indicator_id)]
+        if self.deployments is None or not ids:
+            return
+        try:
+            documents = self.deployments.get_many([state_key(indicator_id) for indicator_id in ids])
+        except Exception as ex:
+            self.logger.warning(f"opencti_deployments unreadable, external ids derived from the lookup: {ex}")
+            return
+        for document in documents.values():
+            if document.get("indicator_id") and document.get("external_id"):
+                self.reported_external_ids[document["indicator_id"]] = document["external_id"]
 
     def splunk_indicators(self):
         indicators = {}
-        for record in self.indicators.query_all(fields=["_key", "id", "revoked", "valid_until", "value", "type"]):
+        fields = ["_key", "id", "revoked", "valid_until", "value", "type", "source_index"]
+        for record in self.indicators.query_all(fields=fields):
             if record.get("id"):
                 indicators[record["id"]] = record
         return indicators
@@ -177,6 +205,7 @@ class Reconciler:
                 f"{self.collection_name} is empty: the {len(opencti)} deployments OpenCTI knows are left unchanged"
             )
         plan = plan_reconciliation(splunk, opencti, refresh=refresh, now=datetime.now(timezone.utc))
+        self.load_reported_external_ids([indicator_id for indicator_id, action, _, _ in plan if action != ACTION_NONE])
         rows = []
         counts = {}
         for indicator_id, action, status, record in plan:

@@ -33,6 +33,12 @@ class OpenCTIReconcileCommand(GeneratingCommand):
 
     def generate(self):
         context = CommandContext(self, "openctireconcile")
+        deployments_mode = (self.mode or "deployments") != "knowledge"
+        if deployments_mode and not context.settings.deployment_writeback:
+            # The repairs are deployment write-backs: the administrator switched them off
+            yield {"action": "skipped",
+                   "message": "Indicator deployment write-back disabled in Configuration > Security Platform"}
+            return
         platform = context.platform
         deployments = context.collection(DEPLOYMENTS_COLLECTION)
         reporter = DeploymentReporter(
@@ -53,11 +59,12 @@ class OpenCTIReconcileCommand(GeneratingCommand):
             reporter,
             logger=context.logger,
             collection_name=INDICATORS_KVSTORE_NAME,
+            deployments=deployments,
         )
-        if (self.mode or "deployments") == "knowledge":
-            rows = reconciler.refresh_knowledge()
-        else:
+        if deployments_mode:
             rows = reconciler.reconcile(refresh=bool(self.refresh))
+        else:
+            rows = reconciler.refresh_knowledge()
         for row in rows:
             yield row
 

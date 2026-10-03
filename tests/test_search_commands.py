@@ -104,6 +104,18 @@ class ReconcileCommandTest(unittest.TestCase):
         self.assertEqual(rows[0]["action"], "deploy")
         self.assertEqual(len(client.calls_of("SplunkIndicatorReportDeployment")), 1)
 
+    def test_deployments_mode_honours_the_disabled_write_back(self):
+        client = FakeClient()
+        context = FakeCommandContext(client, (FEATURE_DEPLOYED_ON, FEATURE_DEPLOYMENT),
+                                     collections={"opencti_indicators": FakeKV([{"_key": "k1", "id": IND}])})
+        context.settings.deployment_writeback = False
+        command = openctireconcile.OpenCTIReconcileCommand()
+        with mock.patch.object(openctireconcile, "CommandContext", return_value=context):
+            rows = list(command.generate())
+        self.assertEqual([row["action"] for row in rows], ["skipped"])
+        self.assertIn("write-back disabled", rows[0]["message"])
+        self.assertEqual(client.calls, [], "no OpenCTI query, no repair")
+
     def test_knowledge_mode(self):
         context = FakeCommandContext()
         command = openctireconcile.OpenCTIReconcileCommand()
