@@ -24,6 +24,10 @@ class FakeCommandContext:
         self.logger = FakeLogger()
         self.settings = AddonSettings({"opencti_url": "https://opencti.example", "opencti_api_key": "k"}, server_name="sh01")
         self.collections = collections if collections is not None else {}
+        self.invalidated = 0
+
+    def invalidate_platform(self):
+        self.invalidated += 1
 
     def collection(self, name):
         return self.collections.setdefault(name, FakeKV())

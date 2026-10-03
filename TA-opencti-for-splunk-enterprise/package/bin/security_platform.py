@@ -19,6 +19,10 @@ from utils import generate_identity_id
 SECURITY_PLATFORM_TYPE = "SIEM"
 DEFAULT_PLATFORM_PREFIX = "Splunk"
 CACHE_TTL_SECONDS = 3600
+# A missing platform (not found, not readable, not created) is looked up again after this delay.
+NEGATIVE_TTL_SECONDS = 300
+# Error OpenCTI returns for a platformId it does not know (indicatorReportDeployment and siblings)
+PLATFORM_MISSING_ERROR = "security platform not found"
 PLATFORM_FIELDS = "id standard_id name security_platform_type"
 
 PLATFORM_BY_ID_QUERY = """
@@ -92,6 +96,7 @@ class SecurityPlatformResolver:
         self.logger = logger or logging.getLogger(__name__)
         self.clock = clock
         self._resolved = None
+        self._resolved_at = 0.0
 
     @property
     def wanted_name(self):
@@ -179,15 +184,20 @@ class SecurityPlatformResolver:
             when the platform has no Security Platform entity or none is configured
         """
         if self._resolved is not None:
-            return self._resolved or None
+            # Long-running processes (the stream input) look the platform up again
+            # once the resolution is old, so a deleted or late-created platform is seen.
+            ttl = CACHE_TTL_SECONDS if self._resolved else NEGATIVE_TTL_SECONDS
+            if self.clock() - self._resolved_at <= ttl:
+                return self._resolved or None
+            self._resolved = None
         if not self.detector.require(FEATURE_SECURITY_PLATFORM, "Splunk Security Platform resolution"):
             # A failed detection (platform unreachable) is retried later.
             if not self.detector.snapshot().get("failed"):
-                self._resolved = {}
+                self._remember({})
             return None
         entry = self._cache_entry()
         if entry and self._fresh(entry):
-            self._resolved = entry["platform"]
+            self._remember(entry["platform"])
             return self._resolved
         platform = None
         try:
@@ -220,7 +230,11 @@ class SecurityPlatformResolver:
             return None
         if platform:
             self._to_cache(platform)
-            self._resolved = platform
+            self._remember(platform)
             return platform
-        self._resolved = {}
+        self._remember({})
         return None
+
+    def _remember(self, platform):
+        self._resolved = platform
+        self._resolved_at = self.clock()

@@ -187,6 +187,35 @@ class ReporterTest(unittest.TestCase):
         client.handlers[BATCH] = _batch_ok
         self.assertEqual(reporter.flush(force=True), 1)
 
+    def test_unknown_platform_resolves_it_again_and_retries(self):
+        clock = Clock()
+        platforms = ["platform-deleted"]
+        invalidated = []
+        client = FakeClient({ONE: graphql_error("Security platform not found or not accessible")})
+        reporter = DeploymentReporter(
+            client, FakeDetector((FEATURE_DEPLOYMENT,)), lambda: platforms[0], rate_per_minute=6000,
+            logger=FakeLogger(), clock=clock, sleep=clock.sleep, on_platform_missing=lambda: invalidated.append(1),
+        )
+        reporter.report("indicator--1", STATUS_DEPLOYED)
+        reporter.flush()
+        self.assertEqual(invalidated, [1])
+        self.assertIn("indicator--1", reporter.pending, "the report is kept for the re-resolved platform")
+        platforms[0] = "platform-new"
+        client.handlers[ONE] = {"indicatorReportDeployment": {"id": "rel"}}
+        clock.now += 16
+        self.assertEqual(reporter.flush(), 1)
+        self.assertEqual(client.calls_of(ONE)[-1]["platformId"], "platform-new")
+
+    def test_unknown_platform_in_batch_mode_invalidates(self):
+        invalidated = []
+        client = FakeClient({BATCH: graphql_error("Security platform not found or not accessible")})
+        reporter = _reporter(client)
+        reporter.on_platform_missing = lambda: invalidated.append(1)
+        reporter.report("indicator--1", STATUS_DEPLOYED)
+        reporter.flush()
+        self.assertEqual(invalidated, [1])
+        self.assertIn("indicator--1", reporter.pending)
+
     def test_rejected_reports_are_recorded_not_retried(self):
         records = []
 

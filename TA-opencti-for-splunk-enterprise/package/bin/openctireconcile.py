@@ -43,6 +43,7 @@ class OpenCTIReconcileCommand(GeneratingCommand):
             rate_per_minute=context.settings.writeback_rate_limit,
             logger=context.logger,
             state_sink=deployments.upsert,
+            on_platform_missing=context.invalidate_platform,
         )
         reconciler = Reconciler(
             context.client,

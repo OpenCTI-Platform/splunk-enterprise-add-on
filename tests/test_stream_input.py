@@ -160,6 +160,19 @@ class StreamInputTest(unittest.TestCase):
         self.assertEqual(reporter.reports[0]["status"], STATUS_REMOVED)
         self.assertTrue(reporter.reports[0]["external_id"].startswith("index:opencti/"))
 
+    def test_index_mode_delete_with_a_failed_purge_reports_failed(self):
+        kv = FakeKVData()
+        kv.docs[INTERNAL_ID] = {"_key": INTERNAL_ID}
+
+        def failing_delete(key):
+            raise Exception("KV Store is not ready")
+
+        kv.delete_by_id = failing_delete
+        _, reporter, written, _ = self._run([_message("delete", _indicator(), 1)], input_type="index", kv=kv)
+        self.assertEqual(len(written), 1)
+        self.assertEqual(reporter.reports[0]["status"], STATUS_FAILED)
+        self.assertIn("KV Store is not ready", reporter.reports[0]["error"])
+
     def test_index_mode_create_reports_the_event_id(self):
         _, reporter, written, _ = self._run([_message("create", _indicator(), 7)], input_type="index")
         self.assertEqual(json.loads(written[0]["data"])["corroboration_count"], 2)

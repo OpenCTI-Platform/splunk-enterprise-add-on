@@ -359,6 +359,7 @@ def build_deployment_reporter(settings, client_helper, service, logger):
         rate_per_minute=settings.writeback_rate_limit,
         logger=logger,
         state_sink=sink,
+        on_platform_missing=resolver.invalidate,
     )
     return detector, reporter
 
@@ -580,6 +581,7 @@ def stream_events(inputs, event_writer):
 
                     elif input_type == "index":
                         # If this is an indicator delete event, also purge it from the indicator KV
+                        purge_error = None
                         if is_indicator and msg.event == "delete":
                             try:
                                 # Lazily init the indicators KV handle via kvstore_handles
@@ -609,6 +611,8 @@ def stream_events(inputs, event_writer):
                                 logger.warning(
                                     f"Failed to delete indicator from KV store [{INDICATORS_KVSTORE_NAME}]: {e}"
                                 )
+                                # Detections still match the KV entry: not removed from Splunk.
+                                purge_error = f"KV Store {INDICATORS_KVSTORE_NAME} delete failed: {e}"
 
                         # Always write the event to the index (create/update/delete)
                         event_time = parsed_stix.get("updated_at")
@@ -645,7 +649,7 @@ def stream_events(inputs, event_writer):
                                 )
                             raise
                         if is_indicator:
-                            report_indicator_state(reporter, msg.event, parsed_stix, external_id)
+                            report_indicator_state(reporter, msg.event, parsed_stix, external_id, error=purge_error)
 
                     else:
                         logger.warning(f"Unknown input_type: {input_type}")

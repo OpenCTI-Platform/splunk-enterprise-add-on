@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from addon_state import state_key, utc_now_iso
 from app_connector_helper import OpenCTIGraphQLError
 from opencti_features import FEATURE_DEPLOYMENT, FEATURE_DEPLOYMENT_BATCH
+from security_platform import PLATFORM_MISSING_ERROR
 from utils import parse_iso, to_iso
 
 STATUS_DEPLOYED = "deployed"
@@ -179,6 +180,7 @@ class DeploymentReporter:
         state_sink=None,
         clock=time.monotonic,
         sleep=time.sleep,
+        on_platform_missing=None,
     ):
         """
         :param client: SplunkAppConnectorHelper
@@ -190,6 +192,9 @@ class DeploymentReporter:
         :param rate_per_minute: maximum write-back calls per minute
         :param state_sink: optional callable(list of KV records) keeping the
             local view of the write-back (opencti_deployments collection)
+        :param on_platform_missing: optional callable run when OpenCTI does not
+            know the platform id (SecurityPlatformResolver.invalidate); the
+            reports are retried and the next flush resolves the platform again
         """
         self.client = client
         self.detector = detector
@@ -199,6 +204,7 @@ class DeploymentReporter:
         self.limiter = RateLimiter(rate_per_minute, clock=clock, sleep=sleep)
         self.logger = logger or logging.getLogger(__name__)
         self.state_sink = state_sink
+        self.on_platform_missing = on_platform_missing
         self.clock = clock
         self.pending = OrderedDict()
         self.last_flush = clock()
@@ -303,6 +309,17 @@ class DeploymentReporter:
         backoff = RETRY_BACKOFF_SECONDS[min(attempts, len(RETRY_BACKOFF_SECONDS)) - 1] if attempts else 0
         self.retry_after = self.clock() + backoff
 
+    def _platform_missing(self, error):
+        """
+        :return: True when OpenCTI rejected the platform id itself
+        """
+        if not error.mentions(PLATFORM_MISSING_ERROR):
+            return False
+        self.logger.warning("OpenCTI does not know the Splunk Security Platform anymore: resolving it again")
+        if self.on_platform_missing is not None:
+            self.on_platform_missing()
+        return True
+
     def _record(self, records):
         if self.state_sink is None or not records:
             return
@@ -336,6 +353,7 @@ class DeploymentReporter:
             })
         except OpenCTIGraphQLError as ex:
             self.logger.warning(f"Deployment write-back batch of {len(batch)} reports failed: {ex}")
+            self._platform_missing(ex)
             self._defer(batch, ex)
             return None
         self.retry_after = 0.0
@@ -386,7 +404,7 @@ class DeploymentReporter:
             if self._expired_rejected(report, str(ex)):
                 self._downgrade_expired([report])
                 return 0
-            if is_retryable(ex):
+            if self._platform_missing(ex) or is_retryable(ex):
                 self.logger.warning(f"Deployment write-back of {report.indicator_id} failed: {ex}")
                 self._defer([report], ex)
                 return None

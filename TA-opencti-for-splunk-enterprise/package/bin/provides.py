@@ -195,12 +195,24 @@ class ProvidesPublisher:
         for record in self.state.query_all(query={"platform_id": self.platform["id"], "status": STATUS_DECLARED}):
             if (record.get("data_component") or "").lower() in current_keys:
                 continue
+            remaining, error = [], None
             for relationship_id in [r for r in (record.get("relationship_ids") or "").split(",") if r]:
                 try:
                     self.limiter.acquire()
                     self.client.graphql_query(PROVIDES_DELETE_MUTATION, {"id": relationship_id})
                 except OpenCTIGraphQLError as ex:
                     self.logger.warning(f"provides {relationship_id} not deleted: {ex}")
+                    remaining.append(relationship_id)
+                    error = ex
+            if remaining:
+                # Still declared: the next pruning run retries the relationships left.
+                states.append(dict(
+                    {k: v for k, v in record.items() if k == "_key" or not k.startswith("_")},
+                    relationship_ids=",".join(remaining),
+                ))
+                rows.append({"data_component": record.get("data_component"), "status": STATUS_ERROR,
+                             "message": f"not pruned: {str(error)[:1000]}"})
+                continue
             states.append(dict(
                 {k: v for k, v in record.items() if k == "_key" or not k.startswith("_")},
                 status=STATUS_PRUNED, reported_at=utc_now_iso(),

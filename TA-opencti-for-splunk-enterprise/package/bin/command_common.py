@@ -62,5 +62,9 @@ class CommandContext:
     def platform(self):
         return self._resolver.resolve()
 
+    def invalidate_platform(self):
+        """OpenCTI no longer knows the resolved platform: the next run resolves it again."""
+        self._resolver.invalidate()
+
     def collection(self, name):
         return KVCollection(self.service, name)

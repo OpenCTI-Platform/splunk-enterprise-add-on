@@ -130,6 +130,30 @@ class ResolverTest(unittest.TestCase):
         resolver.resolve()
         self.assertEqual(len(client.calls_of("SplunkSecurityPlatformByName")), 2)
 
+    def test_long_running_process_looks_a_missing_platform_up_again(self):
+        import security_platform
+
+        now = [1000.0]
+        client = FakeClient({"SplunkSecurityPlatform": {"securityPlatform": None}})
+        resolver = _resolver(client, PlatformSettings(platform_id="internal-1"), now=now)
+        self.assertIsNone(resolver.resolve())
+        self.assertIsNone(resolver.resolve(), "a recent negative resolution is reused")
+        self.assertEqual(len(client.calls_of("SplunkSecurityPlatform")), 1)
+        client.handlers["SplunkSecurityPlatform"] = {"securityPlatform": PLATFORM}
+        now[0] += security_platform.NEGATIVE_TTL_SECONDS + 1
+        self.assertEqual(resolver.resolve(), PLATFORM)
+
+    def test_long_running_process_verifies_the_platform_again(self):
+        import security_platform
+
+        now = [1000.0]
+        client = FakeClient({"SplunkSecurityPlatform": {"securityPlatform": PLATFORM}})
+        resolver = _resolver(client, PlatformSettings(platform_id="internal-1"), now=now)
+        resolver.resolve()
+        now[0] += security_platform.CACHE_TTL_SECONDS + 1
+        client.handlers["SplunkSecurityPlatform"] = {"securityPlatform": None}
+        self.assertIsNone(resolver.resolve(), "a deleted platform is noticed")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -192,6 +192,18 @@ class ProvidesTest(unittest.TestCase):
             self.INVENTORY[:1], prune=True, known_keys={"network traffic flow"})
         self.assertEqual(client.calls_of("SplunkProvidesDelete"), [])
 
+    def test_failed_delete_keeps_the_relationship_declared(self):
+        client = FakeClient({"SplunkDataComponents": self._dc,
+                             "SplunkProvides": {"stixCoreRelationshipAdd": {"id": "rel"}},
+                             "SplunkProvidesDelete": lambda v: graphql_error("denied") if v["id"] == "rel-b" else
+                             {"stixCoreRelationshipEdit": {"delete": v["id"]}}})
+        state = FakeKV([{"_key": "old", "platform_id": "platform-internal", "data_component": "Module Load",
+                         "relationship_ids": "rel-a,rel-b", "status": STATUS_DECLARED}])
+        rows = ProvidesPublisher(client, FakeDetector((FEATURE_PROVIDES,)), PLATFORM, state).publish(self.INVENTORY[:1], prune=True)
+        self.assertIn("not pruned", [r for r in rows if r["data_component"] == "Module Load"][0]["message"])
+        self.assertEqual(state.records["old"]["status"], STATUS_DECLARED)
+        self.assertEqual(state.records["old"]["relationship_ids"], "rel-b", "only the relationship left is retried")
+
     def test_empty_inventory_is_never_pruned(self):
         client = FakeClient({"SplunkDataComponents": self._dc})
         state = FakeKV([{"_key": "old", "platform_id": "platform-internal", "data_component": "Module Load",
