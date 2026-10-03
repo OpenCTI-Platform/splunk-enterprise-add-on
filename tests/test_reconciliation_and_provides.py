@@ -22,7 +22,8 @@ PLATFORM = {"id": "platform-internal", "standard_id": "identity--p"}
 
 
 class FakeReporter:
-    def __init__(self):
+    def __init__(self, enabled=True):
+        self.enabled = enabled
         self.reports = []
         self.stats = {"sent": 0}
         self.flushed = 0
@@ -111,6 +112,13 @@ class ReconcilerTest(unittest.TestCase):
         reporter = FakeReporter()
         self.assertEqual(Reconciler(FakeClient(), FakeDetector(), PLATFORM, FakeKV(), reporter).reconcile()[0]["action"], "skipped")
         self.assertEqual(Reconciler(FakeClient(), FakeDetector((FEATURE_DEPLOYED_ON,)), None, FakeKV(), reporter).reconcile()[0]["action"], "skipped")
+
+    def test_skipped_without_a_write_back_mutation(self):
+        client = FakeClient()
+        rows = Reconciler(client, FakeDetector((FEATURE_DEPLOYED_ON,)), PLATFORM, FakeKV([{"_key": "k1", "id": "indicator--a"}]),
+                          FakeReporter(enabled=False)).reconcile()
+        self.assertEqual(rows, [{"action": "skipped", "message": "The OpenCTI platform has no deployment write-back mutation"}])
+        self.assertEqual(client.calls_of("SplunkPlatformDeployments"), [])
 
     def test_knowledge_refresh_updates_changed_records_only(self):
         client = FakeClient({"SplunkIndicatorsKnowledge": {"indicators": {"edges": [

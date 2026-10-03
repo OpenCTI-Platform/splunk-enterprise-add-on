@@ -81,7 +81,8 @@ Compatibility with the OpenCTI autonomous threat management program
   upserted onto a platform of another type is not adopted, and a cached resolution is reused only for
   a SIEM platform while its configuration (auto mode, name) is unchanged.
 - Deployment write-back is enabled on platforms exposing only the batched
-  `indicatorReportDeployments` mutation.
+  `indicatorReportDeployments` mutation; the reconciliation is skipped on a platform exposing neither
+  write-back mutation, instead of planning repairs it cannot report.
 - IOC validation proves a detection only with a hit inside the test window (the grace period no
   longer widens it), and never declares a miss when a hit window spans the test or the hit history
   was trimmed past its start. A miss also needs proof that `OpenCTI - Report indicator hits` searched

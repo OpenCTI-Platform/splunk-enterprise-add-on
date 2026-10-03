@@ -168,6 +168,8 @@ class Reconciler:
             return [{"action": "skipped", "message": "No Splunk Security Platform (Configuration > Security Platform)"}]
         if not self.detector.require(FEATURE_DEPLOYED_ON, "Deployment reconciliation"):
             return [{"action": "skipped", "message": "The OpenCTI platform has no deployed-on relationship"}]
+        if not self.reporter.enabled:
+            return [{"action": "skipped", "message": "The OpenCTI platform has no deployment write-back mutation"}]
         splunk = self.splunk_indicators()
         opencti = self.opencti_deployments()
         if not splunk and opencti:

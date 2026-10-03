@@ -11,7 +11,7 @@ import openctireporthits
 import openctivalidation
 from addon_config import AddonSettings
 from hits import read_coverage
-from opencti_features import FEATURE_DEPLOYED_ON, FEATURE_HITS, FEATURE_PROVIDES, FEATURE_SECURITY_PLATFORM
+from opencti_features import FEATURE_DEPLOYED_ON, FEATURE_DEPLOYMENT, FEATURE_HITS, FEATURE_PROVIDES, FEATURE_SECURITY_PLATFORM
 
 PLATFORM = {"id": "platform-internal", "standard_id": "identity--5b1fb3f9-2d4e-5f2c-9c6a-1d0f1e2f3a4b"}
 IND = "indicator--51b92778-cef0-4a90-b7ec-ebd620d01ac9"
@@ -93,14 +93,16 @@ class ReconcileCommandTest(unittest.TestCase):
     def test_deployments_mode(self):
         client = FakeClient({
             "SplunkPlatformDeployments": {"stixCoreRelationships": {"pageInfo": {"hasNextPage": False}, "edges": []}},
+            "SplunkIndicatorReportDeployment": {"indicatorReportDeployment": {"id": "rel"}},
         })
         kv = FakeKV([{"_key": "k1", "id": IND}])
-        context = FakeCommandContext(client, (FEATURE_DEPLOYED_ON,), collections={"opencti_indicators": kv})
+        context = FakeCommandContext(client, (FEATURE_DEPLOYED_ON, FEATURE_DEPLOYMENT), collections={"opencti_indicators": kv})
         command = openctireconcile.OpenCTIReconcileCommand()
         with mock.patch.object(openctireconcile, "CommandContext", return_value=context):
             rows = list(command.generate())
         self.assertEqual(rows[-1]["action"], "summary")
         self.assertEqual(rows[0]["action"], "deploy")
+        self.assertEqual(len(client.calls_of("SplunkIndicatorReportDeployment")), 1)
 
     def test_knowledge_mode(self):
         context = FakeCommandContext()

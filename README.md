@@ -544,6 +544,8 @@ but absent, revoked or expired in Splunk). `| openctireconcile refresh=true` als
 already in sync, which refreshes `last_sync_at` in OpenCTI. In index mode, enable the KV Store sync
 searches first: the reconciliation reads the KV Store. A repaired deployment keeps the external id OpenCTI
 already holds for it (KV Store or index), so the stream input and the reconciliation never overwrite each other.
+The search returns a `skipped` row on a platform without the `deployed-on` relationship or without a
+deployment write-back mutation.
 
 #### Indicator hits
 
