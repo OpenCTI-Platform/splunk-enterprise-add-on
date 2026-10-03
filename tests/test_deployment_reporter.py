@@ -174,6 +174,29 @@ class ReporterTest(unittest.TestCase):
         client.handlers[BATCH] = _batch_ok
         self.assertEqual(reporter.flush(force=True), 1)
 
+    def test_drain_retries_a_transient_failure_before_exit(self):
+        clock = Clock()
+        outcomes = [transport_error(), transport_error()]
+        client = FakeClient({BATCH: lambda variables: outcomes.pop(0) if outcomes else _batch_ok(variables)})
+        reporter = _reporter(client, clock=clock)
+        reporter.report("indicator--1", STATUS_DEPLOYED)
+        self.assertEqual(reporter.drain(), 1)
+        self.assertEqual(len(client.calls_of(BATCH)), 3)
+        self.assertEqual(clock.slept, [15.0, 60.0], "the retries follow the backoff")
+        self.assertEqual((reporter.stats["sent"], reporter.stats["deferred"]), (1, 0))
+
+    def test_drain_waits_a_bounded_time_then_defers(self):
+        clock = Clock()
+        client = FakeClient({BATCH: transport_error()})
+        reporter = _reporter(client, batch_size=1, clock=clock)
+        reporter.report("indicator--1", STATUS_DEPLOYED)
+        reporter.report("indicator--2", STATUS_REMOVED)
+        self.assertEqual(reporter.drain(), 0)
+        self.assertLessEqual(sum(clock.slept), 90.0)
+        self.assertEqual(reporter.stats["errors"], 1, "the first report is abandoned after three attempts")
+        self.assertEqual(reporter.stats["deferred"], 1, "the second one is left to the next reconciliation run")
+        self.assertEqual(reporter.pending, {})
+
     def test_unknown_platform_resolves_it_again_and_retries(self):
         clock = Clock()
         platforms = ["platform-deleted"]

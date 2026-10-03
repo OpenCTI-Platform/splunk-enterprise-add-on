@@ -558,7 +558,11 @@ and repairs the drift (indicators deployed in Splunk but unknown or not live in 
 but absent, revoked or expired in Splunk). `| openctireconcile refresh=true` also re-reports indicators
 already in sync, which refreshes `last_sync_at` in OpenCTI. In index mode, enable the KV Store sync
 searches first: the reconciliation reads the KV Store. A repaired deployment takes the identity the stream
-input gives it (table above), so the stream input and the reconciliation never overwrite each other. With
+input gives it (table above), so the stream input and the reconciliation never overwrite each other. Before
+it exits, the search retries the reports a transient OpenCTI failure left queued, through the same backoff,
+for at most 90 seconds; the summary row counts the reports still unsent as `writeback_deferred`, and the
+next run plans them again. An empty `opencti_indicators` collection (not synced yet, or being rebuilt)
+never withdraws the deployments OpenCTI knows: the search leaves them unchanged and logs a warning. With
 `Deployment write-back` disabled, the search reports nothing and returns a `skipped` row.
 The search returns a `skipped` row on a platform without the `deployed-on` relationship or without a
 deployment write-back mutation.

@@ -31,6 +31,8 @@ MAX_BATCH_SIZE = 500  # server side limit of indicatorReportDeployments
 MAX_PENDING = 20000  # memory bound of the queue
 MAX_ATTEMPTS = 3
 RETRY_BACKOFF_SECONDS = (15.0, 60.0, 300.0)
+# Longest a short-lived command waits on the backoff before exiting (drain)
+DRAIN_MAX_WAIT_SECONDS = 90.0
 ERROR_MESSAGE_MAX = 5000
 EXTERNAL_ID_MAX = 1000
 
@@ -215,10 +217,11 @@ class DeploymentReporter:
         self.state_sink = state_sink
         self.on_platform_missing = on_platform_missing
         self.clock = clock
+        self.sleep = sleep
         self.pending = OrderedDict()
         self.last_flush = clock()
         self.retry_after = 0.0
-        self.stats = {"sent": 0, "created": 0, "updated": 0, "unchanged": 0, "errors": 0, "dropped": 0}
+        self.stats = {"sent": 0, "created": 0, "updated": 0, "unchanged": 0, "errors": 0, "dropped": 0, "deferred": 0}
 
     @property
     def platform_id(self):
@@ -279,6 +282,35 @@ class DeploymentReporter:
             if accepted is None:
                 break
             sent += accepted
+        return sent
+
+    def drain(self, max_wait=DRAIN_MAX_WAIT_SECONDS):
+        """
+        Final flush of a short-lived command: the reports a transient failure
+        left queued are retried through the backoff, waiting at most
+        ``max_wait`` seconds in total. The reports still queued then are
+        counted as deferred and logged; the next reconciliation run plans them
+        again.
+
+        :return: number of reports accepted by OpenCTI
+        """
+        sent = self.flush(force=True)
+        waited = 0.0
+        while self.pending:
+            wait = max(0.0, self.retry_after - self.clock())
+            if waited + wait > max_wait:
+                break
+            if wait:
+                self.sleep(wait)
+                waited += wait
+            sent += self.flush(force=True)
+        if self.pending:
+            self.stats["deferred"] += len(self.pending)
+            self.logger.warning(
+                f"Deployment write-back: {len(self.pending)} reports not accepted before exit, "
+                "the next reconciliation run reports them again"
+            )
+            self.pending.clear()
         return sent
 
     def _send(self, batch):

@@ -223,7 +223,7 @@ class Reconciler:
                 "reported_status": reported_status(status),
                 "queued": queued,
             })
-        self.reporter.flush(force=True)
+        self.reporter.drain()
         summary = {"action": "summary", "splunk_indicators": len(splunk), "opencti_deployments": len(opencti)}
         summary.update({f"count_{key}": value for key, value in counts.items()})
         summary.update({f"writeback_{key}": value for key, value in self.reporter.stats.items()})

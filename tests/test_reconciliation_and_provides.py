@@ -26,14 +26,14 @@ class FakeReporter:
         self.enabled = enabled
         self.reports = []
         self.stats = {"sent": 0}
-        self.flushed = 0
+        self.drained = 0
 
     def report(self, indicator_id, status, external_id=None, removed_at=None, **kwargs):
         self.reports.append((indicator_id, status, external_id, removed_at))
         return True
 
-    def flush(self, force=False):
-        self.flushed += 1
+    def drain(self):
+        self.drained += 1
 
 
 class PlanTest(unittest.TestCase):
@@ -89,7 +89,7 @@ class ReconcilerTest(unittest.TestCase):
         self.assertEqual(client.calls_of("SplunkPlatformDeployments")[1]["after"], "c1")
         self.assertIn(("indicator--new", STATUS_DEPLOYED, "kvstore:opencti_indicators/k1", None), reporter.reports)
         self.assertIn(("indicator--orphan", STATUS_REMOVED, None, None), reporter.reports)
-        self.assertEqual(reporter.flushed, 1)
+        self.assertEqual(reporter.drained, 1, "the final flush retries transient failures before exit")
         summary = rows[-1]
         self.assertEqual((summary["splunk_indicators"], summary["opencti_deployments"]), (2, 2))
 

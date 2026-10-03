@@ -157,6 +157,9 @@ Compatibility with the OpenCTI autonomous threat management program
 - The stream input reads Threat Pulse where OpenCTI publishes it, the `pulse_prevalence`, `pulse_trend`,
   `pulse_first_seen_network` and `pulse_preview` properties of the OpenCTI extension, so indicators keep
   their Threat Pulse values when the GraphQL enrichment of a stream event fails.
+- `| openctireconcile` retries the repairs a transient OpenCTI failure left queued (same backoff, at most
+  90 seconds of waiting) before it exits, and counts the ones still unsent as `writeback_deferred` in its
+  summary row instead of dropping them silently; the next run plans them again.
 - Dashboards and the indicator lookup searches read KV Store timestamps at second and millisecond
   precision alike (the 30-day hit chart, the indicators added chart, the last deployment sync, the
   `added_at` of an indicator first written by the KV Store mode).
