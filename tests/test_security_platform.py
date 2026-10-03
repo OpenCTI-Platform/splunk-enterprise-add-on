@@ -1,0 +1,135 @@
+"""Tests for the Splunk Security Platform identity (WS-A, #68)."""
+import unittest
+
+from program_fakes import FakeCache, FakeClient, FakeDetector, FakeLogger, transport_error
+
+from opencti_features import FEATURE_SECURITY_PLATFORM
+from security_platform import (
+    PlatformSettings,
+    SecurityPlatformResolver,
+    default_platform_name,
+    platform_stix_id,
+)
+
+PLATFORM = {"id": "internal-1", "standard_id": "identity--p1", "name": "Splunk sh01", "security_platform_type": "SIEM"}
+
+
+def _resolver(client, settings, server_name="sh01", cache=None, features=(FEATURE_SECURITY_PLATFORM,), now=None):
+    clock = (lambda: now[0]) if now else (lambda: 1000.0)
+    return SecurityPlatformResolver(
+        client, FakeDetector(features), settings, server_name=server_name, cache=cache, logger=FakeLogger(), clock=clock
+    )
+
+
+def _by_name(nodes):
+    return {"securityPlatforms": {"edges": [{"node": node} for node in nodes]}}
+
+
+class PlatformNameTest(unittest.TestCase):
+    def test_default_name_uses_the_server_name(self):
+        self.assertEqual(default_platform_name("sh01"), "Splunk sh01")
+        self.assertEqual(default_platform_name(""), "Splunk")
+
+    def test_stix_id_matches_the_splunk_saved_searches_importer(self):
+        # pycti Identity.generate_id("Splunk", "securityplatform"), used by the importer
+        self.assertEqual(platform_stix_id("Splunk"), platform_stix_id(" splunk "))
+        self.assertTrue(platform_stix_id("Splunk").startswith("identity--"))
+
+    def test_settings_from_ucc_values(self):
+        settings = PlatformSettings.from_mapping({"security_platform_auto_create": "0", "security_platform_name": " SOC "})
+        self.assertFalse(settings.auto_create)
+        self.assertEqual(settings.name, "SOC")
+        self.assertTrue(PlatformSettings.from_mapping({}).auto_create)
+
+
+class ResolverTest(unittest.TestCase):
+    def test_configured_id(self):
+        client = FakeClient({"SplunkSecurityPlatform": {"securityPlatform": PLATFORM}})
+        self.assertEqual(_resolver(client, PlatformSettings(platform_id="internal-1")).resolve(), PLATFORM)
+        self.assertEqual(client.calls_of("SplunkSecurityPlatform"), [{"id": "internal-1"}])
+
+    def test_configured_id_not_found_is_never_auto_created(self):
+        client = FakeClient({"SplunkSecurityPlatform": {"securityPlatform": None}})
+        self.assertIsNone(_resolver(client, PlatformSettings(platform_id="missing")).resolve())
+        self.assertEqual(client.calls_of("SplunkSecurityPlatformAdd"), [])
+
+    def test_auto_resolves_existing_platform_by_name(self):
+        client = FakeClient({"SplunkSecurityPlatformByName": _by_name([PLATFORM])})
+        self.assertEqual(_resolver(client, PlatformSettings()).resolve(), PLATFORM)
+        filters = client.calls_of("SplunkSecurityPlatformByName")[0]["filters"]
+        self.assertEqual(filters["filters"][0]["values"], ["Splunk sh01"])
+
+    def test_auto_creates_a_siem_platform(self):
+        client = FakeClient({
+            "SplunkSecurityPlatformByName": _by_name([]),
+            "SplunkSecurityPlatformAdd": {"securityPlatformAdd": PLATFORM},
+        })
+        self.assertEqual(_resolver(client, PlatformSettings(name="SOC Splunk")).resolve(), PLATFORM)
+        created = client.calls_of("SplunkSecurityPlatformAdd")[0]["input"]
+        self.assertEqual(created["name"], "SOC Splunk")
+        self.assertEqual(created["security_platform_type"], "SIEM")
+
+    def test_auto_creation_disabled(self):
+        client = FakeClient()
+        self.assertIsNone(_resolver(client, PlatformSettings(auto_create=False)).resolve())
+        self.assertEqual(client.calls, [])
+
+    def test_platform_without_security_platforms(self):
+        client = FakeClient()
+        self.assertIsNone(_resolver(client, PlatformSettings(), features=()).resolve())
+        self.assertEqual(client.calls, [])
+
+    def test_auto_resolution_is_shared_by_search_heads_with_other_names(self):
+        cache = FakeCache()
+        first = FakeClient({"SplunkSecurityPlatformByName": _by_name([PLATFORM])})
+        _resolver(first, PlatformSettings(), server_name="sh01", cache=cache).resolve()
+        second = FakeClient()
+        self.assertEqual(_resolver(second, PlatformSettings(), server_name="sh02", cache=cache).resolve(), PLATFORM)
+        self.assertEqual(second.calls, [])
+
+    def test_changing_the_configured_name_invalidates_the_cache(self):
+        cache = FakeCache()
+        first = FakeClient({"SplunkSecurityPlatformByName": _by_name([PLATFORM])})
+        _resolver(first, PlatformSettings(), cache=cache).resolve()
+        renamed = dict(PLATFORM, name="SOC", id="internal-2")
+        second = FakeClient({"SplunkSecurityPlatformByName": _by_name([renamed])})
+        self.assertEqual(_resolver(second, PlatformSettings(name="SOC"), cache=cache).resolve(), renamed)
+
+    def test_stale_auto_resolution_is_reverified_under_its_own_name(self):
+        cache = FakeCache()
+        now = [1000.0]
+        first = FakeClient({"SplunkSecurityPlatformByName": _by_name([PLATFORM])})
+        _resolver(first, PlatformSettings(), server_name="sh01", cache=cache, now=now).resolve()
+        now[0] += 7200
+        second = FakeClient({"SplunkSecurityPlatformByName": _by_name([PLATFORM])})
+        _resolver(second, PlatformSettings(), server_name="sh02", cache=cache, now=now).resolve()
+        self.assertEqual(second.calls_of("SplunkSecurityPlatformByName")[0]["filters"]["filters"][0]["values"], ["Splunk sh01"])
+
+    def test_transport_error_is_retried_on_next_call(self):
+        client = FakeClient({"SplunkSecurityPlatformByName": transport_error()})
+        resolver = _resolver(client, PlatformSettings())
+        self.assertIsNone(resolver.resolve())
+        client.handlers["SplunkSecurityPlatformByName"] = _by_name([PLATFORM])
+        self.assertEqual(resolver.resolve(), PLATFORM)
+
+    def test_failed_detection_is_not_a_permanent_absence(self):
+        client = FakeClient({"SplunkSecurityPlatformByName": _by_name([PLATFORM])})
+        detector = FakeDetector((), failed=True)
+        resolver = SecurityPlatformResolver(client, detector, PlatformSettings(), server_name="sh01", logger=FakeLogger())
+        self.assertIsNone(resolver.resolve())
+        detector.features.add(FEATURE_SECURITY_PLATFORM)
+        detector.failed = False
+        self.assertEqual(resolver.resolve(), PLATFORM)
+
+    def test_invalidate(self):
+        cache = FakeCache()
+        client = FakeClient({"SplunkSecurityPlatformByName": _by_name([PLATFORM])})
+        resolver = _resolver(client, PlatformSettings(), cache=cache)
+        resolver.resolve()
+        resolver.invalidate()
+        resolver.resolve()
+        self.assertEqual(len(client.calls_of("SplunkSecurityPlatformByName")), 2)
+
+
+if __name__ == "__main__":
+    unittest.main()

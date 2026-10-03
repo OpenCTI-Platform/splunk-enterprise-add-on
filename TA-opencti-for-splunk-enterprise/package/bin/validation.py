@@ -83,7 +83,7 @@ def _dt(value):
     return datetime.fromtimestamp(epoch, timezone.utc) if epoch is not None else None
 
 
-def test_window(request, grace_minutes):
+def validation_window(request, grace_minutes):
     """
     :param request: IocValidationRequest node
     :param grace_minutes: indexing / hits search lag tolerated after completion
@@ -257,7 +257,7 @@ class ValidationProver:
             return []
         rows = []
         for request in self.requests():
-            start, end, decide_after = test_window(request, self.grace_minutes)
+            start, end, decide_after = validation_window(request, self.grace_minutes)
             decided = []
             for internal_id, standard_id, ioc in self.pairs(request):
                 key = state_key(request["id"], standard_id, self.platform["id"])

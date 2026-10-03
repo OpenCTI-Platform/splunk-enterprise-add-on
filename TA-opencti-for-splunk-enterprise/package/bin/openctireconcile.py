@@ -53,7 +53,7 @@ class OpenCTIReconcileCommand(GeneratingCommand):
             logger=context.logger,
             collection_name=INDICATORS_KVSTORE_NAME,
         )
-        if self.mode == "knowledge":
+        if (self.mode or "deployments") == "knowledge":
             rows = reconciler.refresh_knowledge()
         else:
             rows = reconciler.reconcile(refresh=bool(self.refresh))

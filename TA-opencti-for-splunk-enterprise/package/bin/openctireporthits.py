@@ -39,10 +39,10 @@ class OpenCTIReportHitsCommand(EventingCommand):
             )
         context, reporter = self._context, self._reporter
         fields = {
-            "id_field": self.id_field,
-            "count_field": self.count_field,
-            "first_field": self.first_field,
-            "last_field": self.last_field,
+            "id_field": self.id_field or "indicator_id",
+            "count_field": self.count_field or "hit_count",
+            "first_field": self.first_field or "first_hit",
+            "last_field": self.last_field or "last_hit",
         }
         # Buffer the chunk: fallback sightings are sent in one bundle at the
         # end, and their status depends on that call.
