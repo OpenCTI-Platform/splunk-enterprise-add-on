@@ -51,7 +51,7 @@ MAX_SOURCE_NAMES = 20
 
 PROVENANCE_GRAPHQL_FIELDS = (
     "corroboration_count last_asserted_at single_sourced has_conflicts freshness_stale "
-    "x_opencti_assertions { source_name source_kind first_asserted_at }"
+    "x_opencti_assertions { source_name source_kind first_asserted_at assert_count }"
 )
 # PulseInformation fields the add-on reads, selected when the schema has them
 PULSE_SELECTABLE = ("preview", "prevalence", "prevalence_bucket", "trend", "first_seen_network", "platforms_bucket")
@@ -111,6 +111,13 @@ def pulse_from_extension(extensions):
     return {}
 
 
+def _assert_count(assertion):
+    try:
+        return max(1, int(assertion.get("assert_count") or 1))
+    except (TypeError, ValueError):
+        return 1
+
+
 def provenance_from_graphql(indicator):
     """
     :param indicator: Indicator node selected with PROVENANCE_GRAPHQL_FIELDS
@@ -127,14 +134,16 @@ def provenance_from_graphql(indicator):
     last = to_iso(indicator.get("last_asserted_at"))
     if last:
         fields["last_asserted_at"] = last
+    # OpenCTI returns the assertions of the sources this account may see only
     assertions = [a for a in (indicator.get("x_opencti_assertions") or []) if isinstance(a, dict)]
-    if assertions:
-        fields["assertions_count"] = len(assertions)
-        names = sorted({str(a.get("source_name")).strip() for a in assertions if a.get("source_name")})
-        if names:
-            fields["sources"] = ", ".join(names[:MAX_SOURCE_NAMES]) + (
-                f" (+{len(names) - MAX_SOURCE_NAMES})" if len(names) > MAX_SOURCE_NAMES else ""
-            )
+    names = sorted({str(a.get("source_name")).strip() for a in assertions if a.get("source_name")})
+    if names:
+        fields["sources"] = ", ".join(names[:MAX_SOURCE_NAMES]) + (
+            f" (+{len(names) - MAX_SOURCE_NAMES})" if len(names) > MAX_SOURCE_NAMES else ""
+        )
+    # Counts and dates describe every source, as in the stream extension: a partial list keeps them out
+    if assertions and len(assertions) >= fields["corroboration_count"]:
+        fields["assertions_count"] = sum(_assert_count(assertion) for assertion in assertions)
         kinds = {}
         for assertion in assertions:
             kind = assertion.get("source_kind") or "unknown"
@@ -221,8 +230,9 @@ def merge_knowledge_fields(payload, extension_fields, indicator_node, overwrite=
 def refresh_knowledge_fields(record, indicator_node, provenance=True, pulse=True):
     """
     Periodic refresh: GraphQL is authoritative for the features it was
-    queried for, so values OpenCTI no longer holds are cleared. Fields only
-    the assertion list can give are kept when the account sees no assertion.
+    queried for, so values OpenCTI no longer holds are cleared. The counts and
+    dates only the whole assertion list gives are kept when the account does
+    not see every source; ``sources`` lists the names it sees.
 
     :param record: KV record (mutated)
     :param indicator_node: Indicator node selected with enrichment_graphql_fields

@@ -701,7 +701,9 @@ When the platform supports it, the objects are attached to the hunt run (`huntRu
 carries the hit count and time of each report), so each run lists its own evidence even when it shares
 an object with another run. The bundle is ingested asynchronously by the OpenCTI workers: the action
 waits up to 15 seconds for the objects, and the ones still not ingested are attached by the next
-evidence report of the same run (within a day).
+evidence report of the same run (within a day); that deferral is not a failure. A link OpenCTI rejects
+fails the result (the alert action reports it) and is retried by the next evidence report of the run,
+as is evidence that cannot be deferred because the KV Store is unavailable.
 
 Example hunt search, run with the id of the hunt run OpenCTI created:
 

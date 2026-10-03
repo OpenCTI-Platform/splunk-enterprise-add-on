@@ -115,6 +115,26 @@ class GraphQLTest(unittest.TestCase):
         self.assertEqual(pulse_from_extension(extension),
                          {"pulse_prevalence": "rare", "pulse_trend": "stable", "pulse_preview": True})
 
+    def test_assertions_count_sums_the_assertions_like_the_extension(self):
+        node = dict(NODE, x_opencti_assertions=[dict(a, assert_count=c) for a, c in zip(NODE["x_opencti_assertions"], (3, 4))])
+        self.assertEqual(provenance_from_graphql(node)["assertions_count"], 7)
+
+    def test_partial_assertion_list_keeps_the_platform_wide_attribution(self):
+        from knowledge_fields import refresh_knowledge_fields
+
+        # 3 sources, the account sees one of them
+        node = dict(NODE, corroboration_count=3, x_opencti_assertions=NODE["x_opencti_assertions"][:1])
+        fields = provenance_from_graphql(node)
+        self.assertEqual(fields["sources"], "AlienVault")
+        for key in ("assertions_count", "sources_by_kind", "first_asserted_at"):
+            self.assertNotIn(key, fields)
+        record = {"assertions_count": 9, "sources_by_kind": "connector=1,feed=2", "first_asserted_at": "2026-08-01T00:00:00.000Z",
+                  "sources": "AlienVault, MISP, OTX"}
+        refresh_knowledge_fields(record, node, pulse=False)
+        self.assertEqual((record["assertions_count"], record["sources_by_kind"]), (9, "connector=1,feed=2"))
+        self.assertEqual(record["sources"], "AlienVault", "only the names the account sees")
+        self.assertEqual(record["corroboration_count"], 3)
+
     def test_refresh_clears_the_preview_flag_of_a_contributing_platform(self):
         from knowledge_fields import refresh_knowledge_fields
 

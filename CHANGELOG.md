@@ -111,6 +111,14 @@ Compatibility with the OpenCTI autonomous threat management program
 - Timeline milestones and Case Autopilot runs whose incident is not ingested within the 60 second wait,
   or whose call failed, are parked in the KV Store and retried by the next OpenCTI alert action runs
   (24 hours, 5 failed calls at most) instead of being dropped.
+- Report hunt evidence fails the result when the evidence cannot be linked to the run (OpenCTI rejects
+  the link, or the KV Store is unavailable to defer objects not ingested yet) instead of reporting success;
+  a rejected link is parked with its hits and retried by the next report of the run. Objects only waiting
+  for ingestion stay a deferral, not a failure.
+- The knowledge refresh keeps the platform-wide `assertions_count`, `sources_by_kind` and
+  `first_asserted_at` when the account sees only part of the sources (OpenCTI filters assertions per
+  user), and `assertions_count` sums `assert_count` like the stream extension; `sources` lists the names
+  the account sees.
 - `| openctireconcile` (deployments mode) honours a disabled "Deployment write-back" setting: it reports
   nothing and returns a skipped row.
 - A deployment created by the reconciliation takes the identity the stream input gives it: the external id
