@@ -17,7 +17,7 @@ import logging
 from datetime import datetime, timezone
 
 from addon_state import state_key
-from deployment_reporter import STATUS_DEPLOYED, STATUS_EXPIRED, STATUS_REMOVED, removal_status
+from deployment_reporter import STATUS_DEPLOYED, STATUS_EXPIRED, STATUS_REMOVED, removal_status, reported_status
 from knowledge_fields import KNOWLEDGE_FIELDS, enrichment_graphql_fields, refresh_knowledge_fields
 from opencti_features import FEATURE_DEPLOYED_ON, FEATURE_PROVENANCE, FEATURE_PULSE
 from utils import get_bool_val
@@ -220,7 +220,7 @@ class Reconciler:
                 "value": (record or {}).get("value", ""),
                 "opencti_status": opencti.get(indicator_id) or "unknown",
                 "action": action,
-                "reported_status": status,
+                "reported_status": reported_status(status),
                 "queued": queued,
             })
         self.reporter.flush(force=True)

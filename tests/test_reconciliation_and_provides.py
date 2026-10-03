@@ -130,6 +130,14 @@ class ReconcilerTest(unittest.TestCase):
             "indicator--kv": "kvstore:opencti_indicators/k3",
         })
 
+    def test_expired_row_shows_the_status_sent_to_opencti(self):
+        page = {"stixCoreRelationships": {"pageInfo": {"hasNextPage": False}, "edges": [
+            {"node": {"deployment_status": "deployed", "from": {"standard_id": "indicator--old"}}}]}}
+        kv = FakeKV([{"_key": "k1", "id": "indicator--old", "valid_until": "2020-01-01T00:00:00.000Z"}])
+        rows = Reconciler(FakeClient({"SplunkPlatformDeployments": page}), FakeDetector((FEATURE_DEPLOYED_ON,)), PLATFORM,
+                          kv, FakeReporter(), logger=FakeLogger()).reconcile()
+        self.assertEqual((rows[0]["action"], rows[0]["reported_status"]), ("expire", STATUS_REMOVED))
+
     def test_unreadable_deployment_state_falls_back_to_the_lookup(self):
         empty = {"stixCoreRelationships": {"pageInfo": {"hasNextPage": False}, "edges": []}}
         deployments = FakeKV()

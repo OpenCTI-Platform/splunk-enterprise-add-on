@@ -77,6 +77,15 @@ def removal_status(payload, now=None):
     return STATUS_REMOVED
 
 
+def reported_status(status):
+    """
+    :return: the status sent to OpenCTI. OpenCTI reserves "expired" to removals
+        no consumer confirmed: an indicator Splunk dropped at its valid_until is
+        reported removed, with removed_at = valid_until.
+    """
+    return STATUS_REMOVED if status == STATUS_EXPIRED else status
+
+
 def is_retryable(error):
     """
     :param error: OpenCTIGraphQLError
@@ -230,10 +239,7 @@ class DeploymentReporter:
         """
         if not indicator_id or not self.enabled:
             return False
-        if status == STATUS_EXPIRED:
-            # OpenCTI reserves "expired" to removals no consumer confirmed: an indicator
-            # Splunk dropped at its valid_until is a removal, removed_at = valid_until.
-            status = STATUS_REMOVED
+        status = reported_status(status)
         report = DeploymentReport(indicator_id, status, external_id, error_message, removed_at, deployed_at)
         self.pending.pop(indicator_id, None)
         self.pending[indicator_id] = report
