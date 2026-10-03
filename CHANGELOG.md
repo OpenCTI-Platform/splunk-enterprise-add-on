@@ -114,6 +114,8 @@ Compatibility with the OpenCTI autonomous threat management program
   (24 hours, 5 failed calls at most) instead of being dropped.
 - "Network traffic with an indicator IP" and "File or process matching an indicator hash" apply the
   indicator matching once per branch: a value shared by several indicators no longer multiplies the counts.
+  The hash search groups by indicator (`values(value)` lists the digests seen), so the other digests of a
+  matched hash string no longer add rows of their own.
 - `| openctivalidation` sends at most 500 results per `iocValidationReportResults` call, the limit of the
   mutation.
 - Report hunt evidence fails the result when the evidence cannot be linked to the run (OpenCTI rejects

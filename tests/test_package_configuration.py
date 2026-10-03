@@ -187,6 +187,10 @@ class CommandsTest(unittest.TestCase):
             search = " ".join(searches.get(name, "search", fallback="").replace("\\", " ").split())
             self.assertNotIn("`opencti_hits_match`] | `opencti_hits_match`", search, name)
             self.assertNotIn("`opencti_hits_match` | `opencti_hits_match`", search, name)
+        # A hash string yields several digests (multivalue value): grouping by it would add rows for
+        # the digests that matched nothing
+        hashes = searches.get("OpenCTI - File or process matching an indicator hash", "search")
+        self.assertTrue(" ".join(hashes.split()).endswith("values(value) AS value by indicator_id"))
 
     def test_knowledge_filters_keep_nothing_without_provenance(self):
         # A negated test would keep every indicator of a platform without the fields
