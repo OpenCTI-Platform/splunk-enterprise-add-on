@@ -124,6 +124,7 @@ class CommandsTest(unittest.TestCase):
         for name in commands.sections():
             self.assertEqual(commands.get(name, "chunked"), "true")
             self.assertEqual(commands.get(name, "python.version"), "python3")
+            self.assertEqual(commands.get(name, "python.required"), "3.13")
             self.assertTrue(os.path.isfile(os.path.join(BIN, commands.get(name, "filename"))))
             self.assertIn(f"{name}-command", searchbnf.sections())
 
