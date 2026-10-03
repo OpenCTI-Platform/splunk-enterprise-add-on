@@ -20,6 +20,7 @@ PROVIDES_COLLECTION = "opencti_provides"
 
 # KV Store accepts at most 1000 documents per batch_save call.
 KV_BATCH_MAX = 1000
+GET_MANY_CHUNK = 50
 
 
 def utc_now_iso():
@@ -81,7 +82,7 @@ class KVCollection:
             self._data.batch_save(*records[start:start + KV_BATCH_MAX])
         return len(records)
 
-    def query(self, query=None, limit=0, skip=0, fields=None):
+    def query(self, query=None, limit=0, skip=0, fields=None, sort=None):
         kwargs = {}
         if query:
             kwargs["query"] = json.dumps(query)
@@ -91,15 +92,33 @@ class KVCollection:
             kwargs["skip"] = skip
         if fields:
             kwargs["fields"] = ",".join(fields)
+        if sort:
+            kwargs["sort"] = sort
         return self._data.query(**kwargs)
 
-    def query_all(self, query=None, page_size=KV_BATCH_MAX, fields=None, max_records=1000000):
+    def get_many(self, keys):
         """
-        Iterate a whole collection by pages.
+        :param keys: document keys
+        :return: dict _key -> document, for the documents that exist
+        """
+        keys = sorted(set(keys))
+        documents = {}
+        # The query travels in the URL: keep each one short.
+        for start in range(0, len(keys), GET_MANY_CHUNK):
+            chunk = keys[start:start + GET_MANY_CHUNK]
+            for document in self.query(query={"$or": [{"_key": key} for key in chunk]}, limit=len(chunk)):
+                if document.get("_key"):
+                    documents[document["_key"]] = document
+        return documents
+
+    def query_all(self, query=None, page_size=KV_BATCH_MAX, fields=None, max_records=1000000, sort="_key"):
+        """
+        Iterate a whole collection by pages, sorted (by _key by default) so
+        that skip-based paging stays stable while documents are rewritten.
         """
         skip = 0
         while skip < max_records:
-            page = self.query(query=query, limit=page_size, skip=skip, fields=fields)
+            page = self.query(query=query, limit=page_size, skip=skip, fields=fields, sort=sort)
             if not page:
                 return
             for record in page:

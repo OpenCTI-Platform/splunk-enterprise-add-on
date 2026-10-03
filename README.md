@@ -358,7 +358,12 @@ You can create an incident or an incident response case in OpenCTI from a custom
 Incidents and cases created from indexed events (results carrying `_cd` / `_raw`) get an id derived from
 the event itself, so distinct events firing in the same second never merge (#47), while the same event
 returned by overlapping scheduled runs keeps upserting onto one object. Rows of transforming searches
-(`stats`, `table`...) keep the historical name + time id unless an `Incident key` is given.
+(`stats`, `table`...) keep the historical name + time id unless an `Incident key` is given; when several
+of them share that id in one run, the second and following rows get distinct ids, in row order, so give an
+`Incident key` whenever the row order of the search can change.
+
+> Upgrading from 1.1.x: indexed events get new ids in 1.2.0. An event already sent by 1.1.x and returned
+> again by an overlapping scheduled run just after the upgrade creates a second object, once.
 
 The timeline milestone (lane `custom`) and Run Case Autopilot happen once OpenCTI has ingested the created object
 (the bundle is processed asynchronously by the OpenCTI workers, the action waits up to 60 seconds); both
@@ -629,7 +634,8 @@ The lookup (`lookups/opencti_cim_data_components.csv`) is editable: one row per 
 (`datamodel:<Model>[.<Dataset>]` or `sourcetype:<sourcetype>`, wildcards allowed) and `data_component`
 (the MITRE Data Component name, as imported in OpenCTI). Data components unknown to OpenCTI are reported
 with the status `unmatched_data_component`. `| openctiprovides prune=true` also deletes the provides
-relationships the add-on declared earlier for data components absent from the inventory. With the
+relationships the add-on declared earlier for data components absent from the inventory; nothing is
+pruned when the inventory is empty or when a declaration of the run failed. With the
 default `opencti_inventory_summariesonly` (`summariesonly=true`), only accelerated data models count.
 
 ### Hunts

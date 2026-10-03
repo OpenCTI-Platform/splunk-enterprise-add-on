@@ -297,11 +297,36 @@ def _convert_observables_to_stix(observables, marking, creator):
     return stix_observables
 
 
-def convert_to_incident_response(alert_params, event, return_id=False):
+def container_id(generate, name, created, event, alert_params, used_ids=None):
+    """
+    Incident / Case-Incident id of a result (#47).
+
+    Rows without an event identity (transforming searches without an
+    incident key) keep the historical name + created id; when several of them
+    share it in one alert run, the 2nd, 3rd... get an occurrence suffix so
+    they are not merged. Row order of a transforming search is stable between
+    runs, so each row keeps upserting onto its own container.
+
+    :param generate: generate_incident_id or generate_case_incident_id
+    :param used_ids: dict shared by the results of one alert run, or None
+    """
+    key = incident_event_key(event, alert_params.get("incident_key"))
+    entity_id = generate(name, created, key)
+    if key or used_ids is None:
+        return entity_id
+    occurrence = used_ids.get(entity_id, 0) + 1
+    used_ids[entity_id] = occurrence
+    if occurrence == 1:
+        return entity_id
+    return generate(name, created, f"occurrence|{occurrence}")
+
+
+def convert_to_incident_response(alert_params, event, return_id=False, used_ids=None):
     """
     :param alert_params:
     :param event:
     :param return_id: also return the Case-Incident STIX id
+    :param used_ids: see container_id
     :return: serialized bundle, or (bundle, case id) when return_id
     """
     bundle_objects = []
@@ -351,10 +376,8 @@ def convert_to_incident_response(alert_params, event, return_id=False):
 
     # create incident response case
     stix_case_incident = CustomObjectCaseIncident(
-        id=generate_case_incident_id(
-            alert_params.get("name"),
-            created_date,
-            incident_event_key(event, alert_params.get("incident_key")),
+        id=container_id(
+            generate_case_incident_id, alert_params.get("name"), created_date, event, alert_params, used_ids,
         ),
         name=alert_params.get("name"),
         description=alert_params.get("description"),
@@ -375,11 +398,12 @@ def convert_to_incident_response(alert_params, event, return_id=False):
     return bundle.serialize()
 
 
-def convert_to_incident(alert_params, event, return_id=False):
+def convert_to_incident(alert_params, event, return_id=False, used_ids=None):
     """
     :param alert_params:
     :param event:
     :param return_id: also return the Incident STIX id
+    :param used_ids: see container_id
     :return: serialized bundle, or (bundle, incident id) when return_id
     """
     bundle_objects = []
@@ -429,10 +453,8 @@ def convert_to_incident(alert_params, event, return_id=False):
 
     # create incident
     stix_incident = stix2.Incident(
-        id=generate_incident_id(
-            alert_params.get("name"),
-            created_date,
-            incident_event_key(event, alert_params.get("incident_key")),
+        id=container_id(
+            generate_incident_id, alert_params.get("name"), created_date, event, alert_params, used_ids,
         ),
         name=alert_params.get("name"),
         created=created_date,

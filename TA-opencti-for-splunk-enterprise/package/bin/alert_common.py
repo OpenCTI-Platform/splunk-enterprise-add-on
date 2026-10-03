@@ -75,6 +75,8 @@ class AlertContext:
         self._detector = None
         self._resolver = None
         self.followups = []
+        # Container ids produced in this run (stix_converter.container_id)
+        self.container_ids = {}
 
     @property
     def payload(self):

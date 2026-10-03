@@ -112,6 +112,31 @@ class ReconcilerTest(unittest.TestCase):
         self.assertNotIn("_user", saved)
         self.assertEqual(saved["value"], "1.2.3.4", "the whole record is kept")
 
+    def test_knowledge_refresh_clears_values_opencti_no_longer_holds(self):
+        client = FakeClient({"SplunkIndicatorsKnowledge": {"indicators": {"edges": [
+            {"node": {"standard_id": "indicator--a", "corroboration_count": 2, "single_sourced": False, "pulse": None}},
+        ]}}})
+        kv = FakeKV([{"_key": "a", "id": "indicator--a", "corroboration_count": 2, "single_sourced": False,
+                      "has_conflicts": False, "freshness_stale": False, "sources": "Old feed",
+                      "assertions_count": 2, "pulse_trend": "rising", "pulse_prevalence": "rare"}])
+        Reconciler(client, FakeDetector((FEATURE_PROVENANCE, FEATURE_PULSE)), PLATFORM, kv, FakeReporter()).refresh_knowledge()
+        record = kv.records["a"]
+        for field in ("sources", "pulse_trend", "pulse_prevalence"):
+            self.assertNotIn(field, record)
+        self.assertEqual(record["assertions_count"], 2, "assertion fields stay when no assertion is visible")
+
+    def test_knowledge_refresh_writes_over_the_fresh_document(self):
+        kv = FakeKV([{"_key": "a", "id": "indicator--a", "value": "old", "corroboration_count": 1}])
+
+        def knowledge(variables):
+            # The stream input rewrites the document while the query runs.
+            kv.records["a"] = {"_key": "a", "id": "indicator--a", "value": "new", "corroboration_count": 1}
+            return {"indicators": {"edges": [{"node": {"standard_id": "indicator--a", "corroboration_count": 3}}]}}
+
+        client = FakeClient({"SplunkIndicatorsKnowledge": knowledge})
+        Reconciler(client, FakeDetector((FEATURE_PROVENANCE,)), PLATFORM, kv, FakeReporter()).refresh_knowledge()
+        self.assertEqual((kv.records["a"]["value"], kv.records["a"]["corroboration_count"]), ("new", 3))
+
     def test_knowledge_refresh_skipped_on_older_platforms(self):
         rows = Reconciler(FakeClient(), FakeDetector(), PLATFORM, FakeKV(), FakeReporter()).refresh_knowledge()
         self.assertEqual(rows[0]["action"], "skipped")
@@ -165,6 +190,24 @@ class ProvidesTest(unittest.TestCase):
                          "relationship_ids": "rel-2", "status": STATUS_DECLARED}])
         ProvidesPublisher(client, FakeDetector((FEATURE_PROVIDES,)), PLATFORM, state).publish(
             self.INVENTORY[:1], prune=True, known_keys={"network traffic flow"})
+        self.assertEqual(client.calls_of("SplunkProvidesDelete"), [])
+
+    def test_empty_inventory_is_never_pruned(self):
+        client = FakeClient({"SplunkDataComponents": self._dc})
+        state = FakeKV([{"_key": "old", "platform_id": "platform-internal", "data_component": "Module Load",
+                         "relationship_ids": "rel-old", "status": STATUS_DECLARED}])
+        ProvidesPublisher(client, FakeDetector((FEATURE_PROVIDES,)), PLATFORM, state).publish([], prune=True)
+        self.assertEqual(client.calls_of("SplunkProvidesDelete"), [])
+        self.assertEqual(state.records["old"]["status"], STATUS_DECLARED)
+
+    def test_declaration_error_in_an_earlier_chunk_blocks_pruning(self):
+        client = FakeClient({"SplunkDataComponents": self._dc, "SplunkProvides": graphql_error("denied")})
+        state = FakeKV([{"_key": "old", "platform_id": "platform-internal", "data_component": "Module Load",
+                         "relationship_ids": "rel-old", "status": STATUS_DECLARED}])
+        publisher = ProvidesPublisher(client, FakeDetector((FEATURE_PROVIDES,)), PLATFORM, state)
+        publisher.publish(self.INVENTORY[:1])
+        client.handlers["SplunkProvides"] = {"stixCoreRelationshipAdd": {"id": "rel"}}
+        publisher.publish(self.INVENTORY[1:2], prune=True, known_keys={self.INVENTORY[0]["data_component"].lower()})
         self.assertEqual(client.calls_of("SplunkProvidesDelete"), [])
 
     def test_errors_and_absent_feature(self):

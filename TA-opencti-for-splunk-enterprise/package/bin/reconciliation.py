@@ -17,7 +17,7 @@ import logging
 from datetime import datetime, timezone
 
 from deployment_reporter import STATUS_DEPLOYED, STATUS_EXPIRED, STATUS_REMOVED, removal_status
-from knowledge_fields import KNOWLEDGE_FIELDS, enrichment_graphql_fields, merge_knowledge_fields
+from knowledge_fields import KNOWLEDGE_FIELDS, enrichment_graphql_fields, refresh_knowledge_fields
 from opencti_features import FEATURE_DEPLOYED_ON, FEATURE_PROVENANCE, FEATURE_PULSE
 from utils import get_bool_val
 
@@ -190,41 +190,56 @@ class Reconciler:
             self.detector.require(FEATURE_PROVENANCE, "Provenance fields refresh")
             self.detector.require(FEATURE_PULSE, "Threat Pulse fields refresh")
             return [{"action": "skipped", "message": "The OpenCTI platform has no provenance nor pulse fields"}]
+        queried = {
+            "provenance": self.detector.has(FEATURE_PROVENANCE),
+            "pulse": self.detector.has(FEATURE_PULSE),
+        }
         total = 0
         updated = 0
-        page = []
-        # Page by page: batch_save replaces whole documents, so full records
-        # are needed, and memory stays bounded on large collections.
-        for record in self.indicators.query_all():
-            if record.get("id"):
-                page.append(record)
+        page = {}
+        # Only keys and ids are paged (sorted by _key, stable while documents
+        # are rewritten); the full documents are re-read right before writing
+        # since batch_save replaces whole documents.
+        for record in self.indicators.query_all(fields=["_key", "id"]):
+            if record.get("id") and record.get("_key"):
+                page[record["id"]] = record["_key"]
             if len(page) >= KNOWLEDGE_BATCH:
                 total += len(page)
-                updated += self._refresh_page(page, fields)
-                page = []
+                updated += self._refresh_page(page, fields, queried)
+                page = {}
         if page:
             total += len(page)
-            updated += self._refresh_page(page, fields)
+            updated += self._refresh_page(page, fields, queried)
         summary = {"action": "knowledge_refresh", "splunk_indicators": total, "updated": updated}
         self.logger.info(f"Knowledge fields refresh: {summary}")
         return [summary]
 
-    def _refresh_page(self, page, fields):
-        records = {record["id"]: record for record in page}
+    def _refresh_page(self, page, fields, queried):
+        """
+        :param page: dict indicator STIX id -> KV _key
+        :return: number of documents updated
+        """
         data = self.client.graphql_query(KNOWLEDGE_QUERY % fields, {
-            "first": len(records) * 2,
-            "filters": {"mode": "and", "filters": [{"key": ["ids"], "values": sorted(records)}], "filterGroups": []},
+            "first": len(page) * 2,
+            "filters": {"mode": "and", "filters": [{"key": ["ids"], "values": sorted(page)}], "filterGroups": []},
         })
-        changed = []
+        nodes = {}
         for edge in ((data.get("indicators") or {}).get("edges")) or []:
             node = (edge or {}).get("node") or {}
-            record = records.get(node.get("standard_id"))
-            if record is None:
+            if node.get("standard_id") in page:
+                nodes[node["standard_id"]] = node
+        if not nodes:
+            return 0
+        fresh = self.indicators.get_many([page[indicator_id] for indicator_id in nodes])
+        changed = []
+        for indicator_id, node in nodes.items():
+            record = fresh.get(page[indicator_id])
+            if record is None or record.get("id") != indicator_id:
                 continue
             clean = {key: value for key, value in record.items() if key == "_key" or not key.startswith("_")}
             before = {key: clean.get(key) for key in KNOWLEDGE_FIELDS}
-            merged = merge_knowledge_fields(clean, {}, node, overwrite=True)
-            if {key: merged.get(key) for key in KNOWLEDGE_FIELDS} != before:
-                changed.append(merged)
+            refreshed = refresh_knowledge_fields(clean, node, **queried)
+            if {key: refreshed.get(key) for key in KNOWLEDGE_FIELDS} != before:
+                changed.append(refreshed)
         self.indicators.upsert(changed)
         return len(changed)

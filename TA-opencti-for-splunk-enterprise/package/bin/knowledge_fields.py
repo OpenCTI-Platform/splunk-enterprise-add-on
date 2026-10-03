@@ -31,6 +31,15 @@ PULSE_FIELDS = (
     "pulse_platforms_bucket",
 )
 KNOWLEDGE_FIELDS = PROVENANCE_FIELDS + PULSE_FIELDS
+# Provenance fields read from the Indicator itself, not from its assertions
+PROVENANCE_GRAPHQL_OWNED = (
+    "corroboration_count",
+    "last_asserted_at",
+    "single_sourced",
+    "has_conflicts",
+    "freshness_stale",
+    "sources",
+)
 
 # Bounded: a sources summary is a label, not the assertion list.
 MAX_SOURCE_NAMES = 20
@@ -183,3 +192,28 @@ def merge_knowledge_fields(payload, extension_fields, indicator_node, overwrite=
     for key, value in pulse_from_graphql(indicator_node or {}).items():
         payload[key] = value
     return payload
+
+
+def refresh_knowledge_fields(record, indicator_node, provenance=True, pulse=True):
+    """
+    Periodic refresh: GraphQL is authoritative for the features it was
+    queried for, so values OpenCTI no longer holds are cleared. Fields only
+    the assertion list can give are kept when the account sees no assertion.
+
+    :param record: KV record (mutated)
+    :param indicator_node: Indicator node selected with enrichment_graphql_fields
+    :param provenance: the provenance fields were queried
+    :param pulse: the pulse fields were queried
+    :return: record
+    """
+    if provenance:
+        fields = provenance_from_graphql(indicator_node)
+        owned = PROVENANCE_FIELDS if not fields or "assertions_count" in fields else PROVENANCE_GRAPHQL_OWNED
+        for key in owned:
+            record.pop(key, None)
+        record.update(fields)
+    if pulse:
+        for key in PULSE_FIELDS:
+            record.pop(key, None)
+        record.update(pulse_from_graphql(indicator_node or {}))
+    return record

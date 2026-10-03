@@ -160,8 +160,11 @@ class HitReporter:
         self.author = stix2.Identity(
             id=generate_identity_id(author_name, "system"), name=author_name, identity_class="system"
         )
-        self._sightings = []
-        self._pending_records = []
+        # Latest history per indicator for this search: replays inside one
+        # search are detected before the KV Store is written.
+        self._latest = {}
+        # Fallback sightings waiting for flush(), with the history they record
+        self._pending_sightings = []
 
     def _report_mutation(self, row):
         self.limiter.acquire()
@@ -173,8 +176,17 @@ class HitReporter:
             "lastHit": to_iso(row.last_hit),
         })
 
+    def _history(self, indicator_id):
+        if indicator_id in self._latest:
+            return self._latest[indicator_id]
+        return self.history.get(state_key(indicator_id))
+
     def report(self, record, **fields):
         """
+        Report the hits of one row. Mutation reports are sent right away;
+        fallback sightings are sent by flush(), which the caller runs after
+        the rows of a chunk and which tells which of them failed.
+
         :param record: search result row
         :param fields: field names (id_field, count_field, first_field, last_field)
         :return: dict merged into the output row (opencti_hit_status, opencti_hit_message)
@@ -188,43 +200,59 @@ class HitReporter:
                 "opencti_hit_status": STATUS_NO_PLATFORM,
                 "opencti_hit_message": "No Splunk Security Platform (Configuration > Security Platform)",
             }
-        existing = self.history.get(state_key(row.indicator_id))
+        existing = self._history(row.indicator_id)
         if is_replay(existing, row):
             return {"opencti_hit_status": STATUS_DUPLICATE, "opencti_hit_message": "window already reported"}
-        try:
-            if self.detector.require(FEATURE_HITS, "Indicator hit reporting through indicatorReportHits"):
-                self._report_mutation(row)
-                status = STATUS_REPORTED
-            elif self.detector.require(FEATURE_SECURITY_PLATFORM, "Indicator hit sightings"):
-                self._sightings.append(hits_sighting(row, self.platform["standard_id"], self.author))
-                status = STATUS_REPORTED_AS_SIGHTING
-            else:
-                return {"opencti_hit_status": STATUS_NO_PLATFORM, "opencti_hit_message": "no Security Platform support"}
-        except OpenCTIGraphQLError as ex:
-            self.logger.error(f"Hit report of {row.indicator_id} failed: {ex}")
-            return {"opencti_hit_status": STATUS_ERROR, "opencti_hit_message": str(ex)[:1000]}
-        self._pending_records.append(merge_hit_history(existing, row, status, self.platform.get("id")))
-        if status == STATUS_REPORTED:
-            self._save_records()
-        elif len(self._sightings) >= SIGHTINGS_PER_BUNDLE:
-            self.flush()
-        return {"opencti_hit_status": status, "opencti_hit_message": ""}
-
-    def _save_records(self):
-        if self._pending_records:
-            records, self._pending_records = self._pending_records, []
+        if self.detector.require(FEATURE_HITS, "Indicator hit reporting through indicatorReportHits"):
             try:
-                self.history.upsert(records)
-            except Exception as ex:
-                self.logger.warning(f"Unable to store the hit history in the KV Store: {ex}")
+                self._report_mutation(row)
+            except OpenCTIGraphQLError as ex:
+                self.logger.error(f"Hit report of {row.indicator_id} failed: {ex}")
+                return {"opencti_hit_status": STATUS_ERROR, "opencti_hit_message": str(ex)[:1000]}
+            history = merge_hit_history(existing, row, STATUS_REPORTED, self.platform.get("id"))
+            self._latest[row.indicator_id] = history
+            self._save([history])
+            return {"opencti_hit_status": STATUS_REPORTED, "opencti_hit_message": ""}
+        if self.detector.require(FEATURE_SECURITY_PLATFORM, "Indicator hit sightings"):
+            history = merge_hit_history(existing, row, STATUS_REPORTED_AS_SIGHTING, self.platform.get("id"))
+            self._latest[row.indicator_id] = history
+            self._pending_sightings.append(
+                (row.indicator_id, hits_sighting(row, self.platform["standard_id"], self.author), history)
+            )
+            return {"opencti_hit_status": STATUS_REPORTED_AS_SIGHTING, "opencti_hit_message": ""}
+        return {"opencti_hit_status": STATUS_NO_PLATFORM, "opencti_hit_message": "no Security Platform support"}
+
+    def _save(self, records):
+        if not records:
+            return
+        try:
+            self.history.upsert(records)
+        except Exception as ex:
+            self.logger.warning(f"Unable to store the hit history in the KV Store: {ex}")
 
     def flush(self):
-        """Send the fallback sightings bundle, then store the history."""
-        if self._sightings:
-            sightings, self._sightings = self._sightings, []
-            bundle = stix2.Bundle(objects=[self.author] + sightings, allow_custom=True)
-            self.client.register()
-            self.limiter.acquire()
-            self.client.send_stix_bundle(bundle.serialize())
-            self.logger.info(f"{len(sightings)} hit sightings sent to OpenCTI")
-        self._save_records()
+        """
+        Send the pending fallback sightings in bundles of SIGHTINGS_PER_BUNDLE.
+        The history of a sighting is stored only once its bundle was accepted.
+
+        :return: dict indicator id -> error message, for the sightings not sent
+        """
+        failed = {}
+        pending, self._pending_sightings = self._pending_sightings, []
+        for start in range(0, len(pending), SIGHTINGS_PER_BUNDLE):
+            chunk = pending[start:start + SIGHTINGS_PER_BUNDLE]
+            bundle = stix2.Bundle(objects=[self.author] + [sighting for _, sighting, _ in chunk], allow_custom=True)
+            try:
+                self.client.register()
+                self.limiter.acquire()
+                self.client.send_stix_bundle(bundle.serialize())
+            except Exception as ex:
+                self.logger.error(f"{len(chunk)} hit sightings not sent to OpenCTI: {ex}")
+                for indicator_id, _, _ in chunk:
+                    failed[indicator_id] = str(ex)[:1000]
+                    # The window was not counted: a later report of it is not a replay.
+                    self._latest.pop(indicator_id, None)
+                continue
+            self.logger.info(f"{len(chunk)} hit sightings sent to OpenCTI")
+            self._save([history for _, _, history in chunk])
+        return failed

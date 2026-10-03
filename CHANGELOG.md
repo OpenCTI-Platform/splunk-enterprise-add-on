@@ -50,7 +50,12 @@ Compatibility with the OpenCTI autonomous threat management program
   (STIX 2.1 compliant, #57, #67); sightings are made on the Splunk Security Platform, the
   "Where Sighted" System / Organization becoming optional; new Count parameter.
 - Create Incident / Create Incident Response: optional Incident key parameter; indexed events fold
-  their identity into the object id so distinct same-second results never merge (#47).
+  their identity into the object id so distinct same-second results never merge (#47). Rows of
+  transforming searches without a key that share a name and second in one run get distinct ids.
+- Upgrade note: an indexed event already sent by 1.1.x gets a new Incident / Case-Incident id in
+  1.2.0, so an event returned again by an overlapping scheduled run right after the upgrade creates a
+  second object once. Rows of transforming searches keep their 1.1.x id (the first row of each name
+  and second).
 
 ### Fixed
 

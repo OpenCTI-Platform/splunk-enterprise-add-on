@@ -267,6 +267,24 @@ class IncidentKeyTest(unittest.TestCase):
         created = datetime.fromtimestamp(1727000000, timezone.utc)
         self.assertEqual(self._id({"_time": "1727000000", "rid": "0"}), generate_incident_id("Brute force", created))
 
+    def test_unkeyed_rows_sharing_an_id_in_one_run_stay_distinct(self):
+        def run():
+            used = {}
+            return [
+                convert_to_incident(dict(self.PARAMS), {"_time": "1727000000", "user": user}, return_id=True, used_ids=used)[1]
+                for user in ("bob", "eve", "ann")
+            ]
+
+        first = run()
+        self.assertEqual(len(set(first)), 3)
+        self.assertEqual(first, run(), "each row keeps upserting onto its own incident in the next run")
+
+    def test_keyed_rows_with_the_same_key_still_upsert(self):
+        used = {}
+        ids = {convert_to_incident(dict(self.PARAMS, incident_key="bob"), {"_time": "1727000000"},
+                                   return_id=True, used_ids=used)[1] for _ in range(2)}
+        self.assertEqual(len(ids), 1)
+
 
 class FollowupTest(unittest.TestCase):
     def test_incident_schedules_timeline_and_autopilot(self):

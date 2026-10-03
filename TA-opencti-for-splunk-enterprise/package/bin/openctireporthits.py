@@ -37,7 +37,7 @@ class OpenCTIReportHitsCommand(EventingCommand):
                 logger=self._context.logger,
                 author_name=self._context.settings.server_name or "Splunk",
             )
-        context, reporter = self._context, self._reporter
+        reporter = self._reporter
         fields = {
             "id_field": self.id_field or "indicator_id",
             "count_field": self.count_field or "hit_count",
@@ -50,14 +50,14 @@ class OpenCTIReportHitsCommand(EventingCommand):
         for record in records:
             record.update(reporter.report(record, **fields))
             output.append(record)
-        try:
-            reporter.flush()
-        except Exception as ex:
-            context.logger.error(f"Hit sightings bundle not sent: {ex}")
+        failed = reporter.flush()
+        if failed:
+            id_field = fields["id_field"]
             for record in output:
-                if record.get("opencti_hit_status") == STATUS_REPORTED_AS_SIGHTING:
+                message = failed.get(str(record.get(id_field) or "").strip())
+                if message is not None and record.get("opencti_hit_status") == STATUS_REPORTED_AS_SIGHTING:
                     record["opencti_hit_status"] = STATUS_ERROR
-                    record["opencti_hit_message"] = str(ex)[:1000]
+                    record["opencti_hit_message"] = message
         for record in output:
             yield record
 

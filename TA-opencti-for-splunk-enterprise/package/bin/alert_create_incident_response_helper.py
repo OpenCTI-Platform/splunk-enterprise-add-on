@@ -31,6 +31,7 @@ def create_incident_response(context, event):
             alert_params=params,
             event=event,
             return_id=True,
+            used_ids=getattr(context, "container_ids", None),
         )
     except Exception as ex:
         helper.log_error(

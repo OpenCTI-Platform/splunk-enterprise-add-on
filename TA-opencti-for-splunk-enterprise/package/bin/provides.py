@@ -7,7 +7,8 @@ data component (data_component, sources, event_count) into the command,
 which declares ``provides`` relationships Splunk Security Platform -> Data
 Component in OpenCTI (innovation 09). With prune=t, data components the
 add-on declared earlier and absent from the current inventory get their
-provides relationship deleted.
+provides relationship deleted, unless the inventory is empty or a
+declaration of the run failed.
 """
 
 import logging
@@ -92,6 +93,9 @@ class ProvidesPublisher:
         self.state = state
         self.logger = logger or logging.getLogger(__name__)
         self.limiter = RateLimiter(rate_per_minute)
+        # A declaration error in any chunk of the search disables pruning:
+        # the inventory of the run is then incomplete.
+        self._had_error = False
 
     def resolve_data_components(self, names):
         """
@@ -170,8 +174,16 @@ class ProvidesPublisher:
                     "status": STATUS_DECLARED,
                     "reported_at": utc_now_iso(),
                 })
+        if any(row["status"] == STATUS_ERROR for row in rows):
+            self._had_error = True
         if prune:
-            rows.extend(self._prune(set(inventory) | set(known_keys or ()), states))
+            current_keys = set(inventory) | set(known_keys or ())
+            if not current_keys:
+                self.logger.warning("Empty telemetry inventory: provides relationships are not pruned")
+            elif self._had_error:
+                self.logger.warning("Declaration errors in this run: provides relationships are not pruned")
+            else:
+                rows.extend(self._prune(current_keys, states))
         try:
             self.state.upsert(states)
         except Exception as ex:

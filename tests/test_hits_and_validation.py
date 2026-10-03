@@ -110,6 +110,43 @@ class HitReporterTest(unittest.TestCase):
         self.assertFalse(sighting["x_opencti_negative"])
         self.assertEqual(len(history.records), 1)
 
+    def test_fallback_sightings_are_batched(self):
+        import hits
+
+        client = FakeClient()
+        reporter = self._reporter(client, (FEATURE_SECURITY_PLATFORM,))
+        total = hits.SIGHTINGS_PER_BUNDLE + 1
+        for index in range(total):
+            reporter.report(dict(ROW, indicator_id=f"indicator--{index:08d}-cef0-4a90-b7ec-ebd620d01ac9"))
+        self.assertEqual(reporter.flush(), {})
+        self.assertEqual(len(client.bundles), 2)
+        sightings = [o for b in client.bundles for o in json.loads(b)["objects"] if o["type"] == "sighting"]
+        self.assertEqual(len(sightings), total)
+
+    def test_failed_bundle_is_reported_and_not_recorded(self):
+        client = FakeClient()
+
+        def fail(bundle):
+            raise RuntimeError("bundle rejected")
+
+        client.send_stix_bundle = fail
+        history = FakeKV()
+        reporter = self._reporter(client, (FEATURE_SECURITY_PLATFORM,), history=history)
+        reporter.report(dict(ROW))
+        failed = reporter.flush()
+        self.assertIn("bundle rejected", failed[IND])
+        self.assertEqual(history.records, {})
+        self.assertEqual(reporter.report(dict(ROW))["opencti_hit_status"], STATUS_REPORTED_AS_SIGHTING,
+                         "a window that was not sent is not a replay")
+
+    def test_replay_inside_one_search_before_flush(self):
+        client = FakeClient()
+        reporter = self._reporter(client, (FEATURE_SECURITY_PLATFORM,))
+        reporter.report(dict(ROW))
+        self.assertEqual(reporter.report(dict(ROW))["opencti_hit_status"], STATUS_DUPLICATE)
+        reporter.flush()
+        self.assertEqual(len(client.bundles), 1)
+
     def test_no_platform(self):
         reporter = self._reporter(FakeClient(), (FEATURE_HITS,), platform=None)
         self.assertEqual(reporter.report(dict(ROW))["opencti_hit_status"], STATUS_NO_PLATFORM)

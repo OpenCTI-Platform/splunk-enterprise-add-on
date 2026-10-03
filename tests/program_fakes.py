@@ -97,12 +97,21 @@ class FakeKV:
             self.saved.append(dict(record))
         return len(records)
 
-    def query(self, query=None, limit=0, skip=0, fields=None):
-        rows = [dict(r) for r in self.records.values() if all(r.get(k) == v for k, v in (query or {}).items())]
+    def query(self, query=None, limit=0, skip=0, fields=None, sort=None):
+        rows = [dict(r) for _, r in sorted(self.records.items()) if self._matches(r, query or {})]
         rows = rows[skip:]
         return rows[:limit] if limit else rows
 
-    def query_all(self, query=None, page_size=1000, fields=None, max_records=1000000):
+    @staticmethod
+    def _matches(record, query):
+        if "$or" in query:
+            return any(FakeKV._matches(record, branch) for branch in query["$or"])
+        return all(record.get(k) == v for k, v in query.items())
+
+    def get_many(self, keys):
+        return {key: dict(self.records[key]) for key in keys if key in self.records}
+
+    def query_all(self, query=None, page_size=1000, fields=None, max_records=1000000, sort="_key"):
         for row in self.query(query=query):
             yield row
 
