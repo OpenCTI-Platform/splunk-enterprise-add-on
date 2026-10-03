@@ -43,12 +43,15 @@ def _message(event, data, number):
 
 
 class FakeKVData:
-    def __init__(self, fail_saves=False):
+    def __init__(self, fail_saves=False, fail_lookups=False):
         self.docs = {}
         self.deleted = []
         self.fail_saves = fail_saves
+        self.fail_lookups = fail_lookups
 
     def query_by_id(self, key):
+        if self.fail_lookups:
+            raise Exception("KV Store is not ready")
         if key not in self.docs:
             raise Exception("HTTP 404 Not Found")
         return self.docs[key]
@@ -181,6 +184,16 @@ class StreamInputTest(unittest.TestCase):
         self.assertEqual(len(written), 1)
         self.assertEqual(reporter.reports[0]["status"], STATUS_FAILED)
         self.assertIn("KV Store is not ready", reporter.reports[0]["error"])
+
+    def test_delete_with_a_failed_lookup_is_never_reported_removed(self):
+        for input_type in ("kvstore", "index"):
+            with self.subTest(input_type=input_type):
+                kv = FakeKVData(fail_lookups=True)
+                kv.docs[INTERNAL_ID] = {"_key": INTERNAL_ID}
+                _, reporter, _, _ = self._run([_message("delete", _indicator(), 1)], input_type=input_type, kv=kv)
+                self.assertEqual(kv.deleted, [])
+                self.assertEqual(reporter.reports[0]["status"], STATUS_FAILED)
+                self.assertIn("KV Store is not ready", reporter.reports[0]["error"])
 
     def test_index_mode_external_id_is_stable_across_updates(self):
         _, reporter, written, _ = self._run(

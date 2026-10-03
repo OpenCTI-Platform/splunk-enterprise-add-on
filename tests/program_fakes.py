@@ -139,6 +139,9 @@ class FakeCache:
     def release(self, key):
         self.values.pop(key, None)
 
+    def items(self, prefix, limit=100):
+        return [(key, value) for key, value in self.values.items() if key.startswith(prefix) and value][:limit]
+
 
 class FakeLogger:
     def __init__(self):

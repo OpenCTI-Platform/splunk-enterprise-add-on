@@ -96,11 +96,17 @@ def validate_input(definition):
 
 
 def exist_in_kvstore(kv_store, key_id):
+    """
+    :return: True when the KV Store holds key_id, False when it does not
+    :raise: any other KV Store failure: the entry may still be there
+    """
     try:
         kv_store.query_by_id(key_id)
         return True
-    except Exception:
-        return False
+    except Exception as ex:
+        if getattr(ex, "status", None) == 404 or "404" in str(ex):
+            return False
+        raise
 
 
 def parse_stix_pattern(stix_pattern):

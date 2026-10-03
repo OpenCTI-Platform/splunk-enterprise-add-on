@@ -74,7 +74,8 @@ Compatibility with the OpenCTI autonomous threat management program
   lookup searches key it with. The incremental and nightly lookup searches read delete events too:
   the incremental search overwrites a deleted indicator with a revoked tombstone without value or
   pattern (so an entry restored by a concurrent run never stays matchable), and the nightly rebuild
-  leaves it out of `opencti_indicators`.
+  leaves it out of `opencti_indicators`. A KV Store lookup that fails for another reason than a
+  missing entry reports the delete as failed instead of removed.
 - The Security Platform must be of type SIEM: a same-name platform of another type is neither adopted
   nor shadowed by a new one, a configured id of another type is rejected, a creation that OpenCTI
   upserted onto a platform of another type is not adopted, and a cached resolution is reused only for
@@ -92,3 +93,6 @@ Compatibility with the OpenCTI autonomous threat management program
 - Run Case Autopilot reserves the container atomically in the KV Store, so concurrent alert runs
   never start two runs for the same object; a stale reservation is reclaimed atomically too (one
   reclaim key per stale reservation), so two processes never both take it over.
+- Report hunt evidence parks each report's not-yet-ingested evidence under its own KV Store entry and
+  claims an entry atomically before attaching it, so concurrent reports of one hunt run never lose
+  or double-attach deferred evidence.

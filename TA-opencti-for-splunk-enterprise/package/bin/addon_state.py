@@ -10,6 +10,7 @@ Collections (declared in default/collections.conf):
 
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 
 STATE_COLLECTION = "opencti_addon_state"
@@ -189,6 +190,19 @@ class KVStoreCache:
     def release(self, key):
         self._collection.delete(state_key(key))
 
+    def items(self, prefix, limit=100):
+        """:return: list of (key, value) of the entries whose key starts with prefix"""
+        found = []
+        query = {"name": {"$regex": "^" + re.escape(prefix)}}
+        for record in self._collection.query(query=query, limit=limit) or []:
+            try:
+                value = json.loads(record.get("value") or "{}")
+            except ValueError:
+                continue
+            if isinstance(value, dict) and value and str(record.get("name", "")).startswith(prefix):
+                found.append((record["name"], value))
+        return found
+
 
 class MemoryCache:
     """Process-local cache with the KVStoreCache interface (tests, fallbacks)."""
@@ -212,3 +226,6 @@ class MemoryCache:
 
     def release(self, key):
         self.values.pop(key, None)
+
+    def items(self, prefix, limit=100):
+        return [(key, value) for key, value in self.values.items() if key.startswith(prefix) and value][:limit]

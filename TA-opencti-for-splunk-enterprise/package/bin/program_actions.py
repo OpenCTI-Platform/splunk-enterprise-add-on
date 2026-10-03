@@ -11,6 +11,7 @@
 """
 
 import time
+import uuid
 from datetime import datetime, timezone
 
 from addon_state import state_key, utc_now_iso
@@ -396,34 +397,45 @@ def wait_for_ingestion(context, object_ids, delays=EVIDENCE_INGESTION_DELAYS_SEC
     return [object_id for object_id in object_ids if object_id not in pending], pending
 
 
-def _pending_key(hunt_run_id):
-    return f"hunt_evidence_pending|{hunt_run_id}"
+def _pending_prefix(hunt_run_id):
+    return f"hunt_evidence_pending|{hunt_run_id}|"
+
+
+def _park(context, hunt_run_id, item):
+    # One entry per parked report: concurrent reports never overwrite each other.
+    context.cache.set(f"{_pending_prefix(hunt_run_id)}{uuid.uuid4().hex}", item)
 
 
 def _attach_pending(context, hunt_run_id):
     """Attach the evidence of earlier reports of this run that is now ingested."""
-    key = _pending_key(hunt_run_id)
-    entry = context.cache.get(key) or {}
-    kept = []
-    for item in entry.get("items") or []:
+    for key, item in context.cache.items(_pending_prefix(hunt_run_id)):
+        if key.endswith("|claim"):
+            continue
         parked_at = parse_iso(item.get("parked_at"))
         if parked_at is None or time.time() - parked_at.timestamp() > EVIDENCE_PENDING_SECONDS:
             context.logger.warning(
                 f"Hunt evidence {item.get('result_ids')} never ingested by OpenCTI: not attached to run {hunt_run_id}"
             )
+            context.cache.release(key)
+            context.cache.release(f"{key}|claim")
             continue
-        present = _ingested(context, item.get("result_ids") or [])
-        if present:
-            payload = {k: v for k, v in item.items() if k != "parked_at"}
-            payload["result_ids"] = present
-            context.client.graphql_query(HUNT_EVIDENCE_MUTATION, {"id": hunt_run_id, "input": payload})
-        remaining = [object_id for object_id in item.get("result_ids") or [] if object_id not in present]
-        if remaining:
-            kept.append(dict(item, result_ids=remaining, hits_count=0 if present else item.get("hits_count", 0)))
-    if kept:
-        context.cache.set(key, {"items": kept})
-    elif entry:
-        context.cache.set(key, {})
+        # Atomic: of concurrent reports of the run, one only attaches this entry.
+        claim = f"{key}|claim"
+        if not context.cache.reserve(claim, {"claimed_at": utc_now_iso()}):
+            continue
+        try:
+            present = _ingested(context, item.get("result_ids") or [])
+            if present:
+                payload = {k: v for k, v in item.items() if k != "parked_at"}
+                payload["result_ids"] = present
+                context.client.graphql_query(HUNT_EVIDENCE_MUTATION, {"id": hunt_run_id, "input": payload})
+            remaining = [object_id for object_id in item.get("result_ids") or [] if object_id not in present]
+            if not remaining:
+                context.cache.release(key)
+            elif present:
+                context.cache.set(key, dict(item, result_ids=remaining, hits_count=0))
+        finally:
+            context.cache.release(claim)
 
 
 def report_hunt_evidence(context, hunt_run_id, result_ids, hits_count, platform_id=None, observed_at=None):
@@ -451,14 +463,11 @@ def report_hunt_evidence(context, hunt_run_id, result_ids, hits_count, platform_
         payload["observed_at"] = to_iso(observed_at)
     ingested, pending = wait_for_ingestion(context, list(result_ids))
     if pending:
-        key = _pending_key(hunt_run_id)
-        items = (context.cache.get(key) or {}).get("items") or []
         # The hits of this report are counted once, by its first attachment.
         parked = dict(payload, result_ids=pending, parked_at=utc_now_iso())
         if ingested:
             parked["hits_count"] = 0
-        items.append(parked)
-        context.cache.set(key, {"items": items})
+        _park(context, hunt_run_id, parked)
     if not ingested:
         raise ValueError(
             f"{len(pending)} evidence objects not ingested by OpenCTI yet: "

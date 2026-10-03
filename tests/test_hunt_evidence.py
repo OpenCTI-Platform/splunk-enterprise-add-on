@@ -160,7 +160,33 @@ class ActionTest(unittest.TestCase):
         self.assertEqual(evidence[0]["input"]["hits_count"], 3, "the deferred link keeps its own report")
         self.assertEqual(evidence[0]["input"]["observed_at"], "2024-09-22T10:13:20.000Z")
         self.assertNotIn("parked_at", evidence[0]["input"])
-        self.assertEqual(context.cache.get("hunt_evidence_pending|run-1"), {})
+        self.assertEqual(context.cache.items("hunt_evidence_pending|run-1|"), [])
+
+    def test_concurrent_reports_park_their_evidence_apart(self):
+        ingested = set()
+        context = self._evidence_context(ingested)
+        with mock.patch.object(program_actions.time, "sleep"):
+            for object_id in ("observed-data--1", "observed-data--2"):
+                with self.assertRaises(ValueError):
+                    program_actions.report_hunt_evidence(context, "run-1", [object_id], 1)
+            self.assertEqual(len(context.cache.items("hunt_evidence_pending|run-1|")), 2)
+            ingested.update({"observed-data--1", "observed-data--2", "sighting--3"})
+            program_actions.report_hunt_evidence(context, "run-1", ["sighting--3"], 1)
+        attached = sorted(call["input"]["result_ids"][0] for call in context.client.calls_of("SplunkHuntRunEvidence"))
+        self.assertEqual(attached, ["observed-data--1", "observed-data--2", "sighting--3"])
+        self.assertEqual(context.cache.items("hunt_evidence_pending|run-1|"), [])
+
+    def test_evidence_claimed_by_another_report_is_left_to_it(self):
+        context = self._evidence_context({"observed-data--1", "sighting--2"})
+        parked = {"result_ids": ["observed-data--1"], "hits_count": 1, "source": "splunk-alert-action",
+                  "parked_at": program_actions.utc_now_iso()}
+        context.cache.set("hunt_evidence_pending|run-1|a", parked)
+        context.cache.set("hunt_evidence_pending|run-1|a|claim", {"claimed_at": program_actions.utc_now_iso()})
+        with mock.patch.object(program_actions.time, "sleep"):
+            program_actions.report_hunt_evidence(context, "run-1", ["sighting--2"], 1)
+        self.assertEqual([call["input"]["result_ids"] for call in context.client.calls_of("SplunkHuntRunEvidence")],
+                         [["sighting--2"]])
+        self.assertEqual(context.cache.get("hunt_evidence_pending|run-1|a"), parked)
 
     def test_hits_of_a_partly_ingested_report_are_counted_once(self):
         ingested = {"observed-data--1"}
@@ -181,16 +207,16 @@ class ActionTest(unittest.TestCase):
 
     def test_evidence_never_ingested_is_dropped_after_a_day(self):
         context = self._evidence_context({"sighting--2"})
-        context.cache.set("hunt_evidence_pending|run-1", {"items": [
-            {"result_ids": ["observed-data--lost"], "hits_count": 1, "source": "splunk-alert-action",
-             "parked_at": "2020-01-01T00:00:00.000Z"},
-        ]})
+        context.cache.set("hunt_evidence_pending|run-1|old", {
+            "result_ids": ["observed-data--lost"], "hits_count": 1, "source": "splunk-alert-action",
+            "parked_at": "2020-01-01T00:00:00.000Z",
+        })
         with mock.patch.object(program_actions.time, "sleep"):
             program_actions.report_hunt_evidence(context, "run-1", ["sighting--2"], 1)
         self.assertEqual([call["input"]["result_ids"] for call in context.client.calls_of("SplunkHuntRunEvidence")],
                          [["sighting--2"]])
         self.assertTrue(context.logger.has("warning", "never ingested"))
-        self.assertEqual(context.cache.get("hunt_evidence_pending|run-1"), {})
+        self.assertEqual(context.cache.items("hunt_evidence_pending|run-1|"), [])
 
     def test_hunt_targets_without_feature(self):
         context = FakeAlertContext(FakeAlertHelper(), detector=FakeDetector())

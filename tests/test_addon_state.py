@@ -71,6 +71,21 @@ class KVCollectionTest(unittest.TestCase):
         self.assertFalse(cache.reserve("autopilot|x", {"status": "pending"}))
         self.assertEqual(cache.get("autopilot|x"), {"status": "pending"})
 
+    def test_cache_items_query_the_escaped_key_prefix(self):
+        data = FakeData([])
+        addon_state.KVStoreCache(FakeService(data), collection="c").items("hunt_evidence_pending|run.1|")
+        self.assertEqual(json.loads(data.calls[0]["query"]), {"name": {"$regex": "^hunt_evidence_pending\\|run\\.1\\|"}})
+
+    def test_cache_items_skip_cleared_and_foreign_entries(self):
+        data = FakeData([
+            {"_key": "a", "name": "pending|run|a", "value": json.dumps({"result_ids": ["x"]})},
+            {"_key": "b", "name": "pending|run|b", "value": json.dumps({})},
+            {"_key": "c", "name": "pending|run|c", "value": "not json"},
+            {"_key": "d", "name": "other|run|d", "value": json.dumps({"result_ids": ["y"]})},
+        ])
+        cache = addon_state.KVStoreCache(FakeService(data), collection="c")
+        self.assertEqual(cache.items("pending|run|"), [("pending|run|a", {"result_ids": ["x"]})])
+
 
 if __name__ == "__main__":
     unittest.main()
