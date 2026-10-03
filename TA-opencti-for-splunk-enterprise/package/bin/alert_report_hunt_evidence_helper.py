@@ -1,6 +1,6 @@
 # encoding = utf-8
 from alert_common import parse_labels, run_alert
-from program_actions import hunt_targets, report_hunt_evidence as attach_hunt_evidence
+from program_actions import HuntEvidenceDeferred, hunt_targets, report_hunt_evidence as attach_hunt_evidence
 from stix_converter import convert_to_hunt_evidence, sighting_count
 from utils import to_epoch
 from splunktaucclib.alert_actions_base import ModularAlertBase  # type: ignore
@@ -66,9 +66,12 @@ def report_hunt_evidence(context, event):
             platform_id=platform.get("id") if platform else None,
             observed_at=to_epoch(event.get("_time")),
         )
+    except HuntEvidenceDeferred as ex:
+        helper.log_info(f"Hunt evidence for run {hunt_run_id} sent, its attachment is deferred: {ex}")
     except Exception as ex:
-        # The evidence itself is in OpenCTI (bundle above), only the link to the run failed.
-        helper.log_warn(f"Hunt evidence sent but not attached to run {hunt_run_id}: {ex}")
+        # The evidence is in OpenCTI (bundle above) but not linked to the run: the result failed.
+        helper.log_error(f"Hunt evidence sent but not attached to run {hunt_run_id}: {ex}")
+        return False
     return True
 
 

@@ -109,18 +109,45 @@ class ActionTest(unittest.TestCase):
         code = alert_common.run_alert(helper, "report_hunt_evidence", action.report_hunt_evidence, context_factory=lambda h: context)
         self.assertEqual(code, 2)
 
-    def test_link_failure_does_not_fail_the_result(self):
+    def test_link_failure_fails_the_result_and_parks_the_evidence(self):
         client = FakeClient({
             "SplunkHuntRun": self._hunt_run([{"id": "t1", "standard_id": TECHNIQUE, "entity_type": "Attack-Pattern"}]),
-            "SplunkHuntRunEvidence": graphql_error("run is archived"),
+            "SplunkHuntRunEvidence": graphql_error("run is locked"),
             "SplunkEvidenceIngested": INGESTED,
+        })
+        helper = FakeAlertHelper(params={"hunt_run_id": "run-1", "tlp": "tlp_green", "count": "4"}, events=[EVENT])
+        context = FakeAlertContext(helper, client=client, detector=FakeDetector((FEATURE_HUNTS, FEATURE_HUNT_EVIDENCE)),
+                                   platform=PLATFORM)
+        code = alert_common.run_alert(helper, "report_hunt_evidence", action.report_hunt_evidence, context_factory=lambda h: context)
+        self.assertEqual(code, 2)
+        self.assertTrue(any("not attached" in message for message in helper.errors()))
+        [(_, parked)] = context.cache.items("hunt_evidence_pending|run-1|")
+        self.assertEqual(sorted(parked["result_ids"]), sorted(client.calls_of("SplunkHuntRunEvidence")[0]["input"]["result_ids"]))
+        self.assertEqual(parked["hits_count"], 4, "the retry carries the hits of this report")
+
+    def test_deferred_attachment_does_not_fail_the_result(self):
+        client = FakeClient({
+            "SplunkHuntRun": self._hunt_run([{"id": "t1", "standard_id": TECHNIQUE, "entity_type": "Attack-Pattern"}]),
+            "SplunkEvidenceIngested": NOT_INGESTED,
         })
         helper = FakeAlertHelper(params={"hunt_run_id": "run-1", "tlp": "tlp_green"}, events=[EVENT])
         context = FakeAlertContext(helper, client=client, detector=FakeDetector((FEATURE_HUNTS, FEATURE_HUNT_EVIDENCE)),
                                    platform=PLATFORM)
-        code = alert_common.run_alert(helper, "report_hunt_evidence", action.report_hunt_evidence, context_factory=lambda h: context)
+        with mock.patch.object(program_actions.time, "sleep"):
+            code = alert_common.run_alert(helper, "report_hunt_evidence", action.report_hunt_evidence,
+                                          context_factory=lambda h: context)
         self.assertEqual(code, 0)
-        self.assertTrue(any("not attached" in m for level, m in helper.logs if level == "warning"))
+        self.assertTrue(any("deferred" in m for level, m in helper.logs if level == "info"))
+        self.assertEqual(len(context.cache.items("hunt_evidence_pending|run-1|")), 1)
+
+    def test_evidence_partly_lost_without_a_persistent_cache_fails_the_report(self):
+        context = self._evidence_context({"observed-data--1"})
+        context.cache.persistent = False
+        with mock.patch.object(program_actions.time, "sleep"):
+            with self.assertRaisesRegex(ValueError, "KV Store is unavailable"):
+                program_actions.report_hunt_evidence(context, "run-1", ["observed-data--1", "sighting--2"], 1)
+        self.assertEqual([call["input"]["result_ids"] for call in context.client.calls_of("SplunkHuntRunEvidence")],
+                         [["observed-data--1"]], "the ingested part is attached first")
 
     def _evidence_context(self, ingested):
         client = FakeClient({
@@ -151,7 +178,7 @@ class ActionTest(unittest.TestCase):
         ingested = set()
         context = self._evidence_context(ingested)
         with mock.patch.object(program_actions.time, "sleep"):
-            with self.assertRaises(ValueError):
+            with self.assertRaises(program_actions.HuntEvidenceDeferred):
                 program_actions.report_hunt_evidence(context, "run-1", ["observed-data--1"], 3, observed_at=1727000000)
             self.assertEqual(context.client.calls_of("SplunkHuntRunEvidence"), [])
             ingested.update({"observed-data--1", "sighting--2"})
@@ -168,7 +195,7 @@ class ActionTest(unittest.TestCase):
         context = self._evidence_context(ingested)
         with mock.patch.object(program_actions.time, "sleep"):
             for object_id in ("observed-data--1", "observed-data--2"):
-                with self.assertRaises(ValueError):
+                with self.assertRaises(program_actions.HuntEvidenceDeferred):
                     program_actions.report_hunt_evidence(context, "run-1", [object_id], 1)
             self.assertEqual(len(context.cache.items("hunt_evidence_pending|run-1|")), 2)
             ingested.update({"observed-data--1", "observed-data--2", "sighting--3"})

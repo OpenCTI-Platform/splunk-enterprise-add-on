@@ -472,6 +472,10 @@ def wait_for_ingestion(context, object_ids, delays=EVIDENCE_INGESTION_DELAYS_SEC
     return [object_id for object_id in object_ids if object_id not in pending], pending
 
 
+class HuntEvidenceDeferred(Exception):
+    """No evidence object is ingested by OpenCTI yet: all are parked for a later report of the run."""
+
+
 def _pending_prefix(hunt_run_id):
     return f"hunt_evidence_pending|{hunt_run_id}|"
 
@@ -549,11 +553,12 @@ def _attach_pending(context, hunt_run_id):
 def report_hunt_evidence(context, hunt_run_id, result_ids, hits_count, platform_id=None, observed_at=None):
     """
     Attach the evidence objects to the hunt run when the platform supports it,
-    once OpenCTI ingested them. Objects still not ingested are attached by a
-    later report of the same run.
+    once OpenCTI ingested them. Objects still not ingested, and objects whose
+    attachment failed, are attached by a later report of the same run.
 
     :return: True when attached, False when the mutation is absent
-    :raise ValueError: when no object was ingested yet (attachment deferred)
+    :raise HuntEvidenceDeferred: no object ingested yet, all parked (not a failure)
+    :raise Exception: the evidence, or part of it, cannot be attached (a failure)
     """
     if not context.detector.require(FEATURE_HUNT_EVIDENCE, "Hunt evidence attachment to the run"):
         return False
@@ -569,19 +574,32 @@ def report_hunt_evidence(context, hunt_run_id, result_ids, hits_count, platform_
         payload["security_platform_id"] = platform_id
     if observed_at is not None:
         payload["observed_at"] = to_iso(observed_at)
+    persistent = getattr(context.cache, "persistent", False)
     ingested, pending = wait_for_ingestion(context, list(result_ids))
     deferred = "they are attached by the next evidence report of the run"
-    if pending and getattr(context.cache, "persistent", False):
+    lost = "the KV Store is unavailable to defer them, so they are not attached"
+    if pending and persistent:
         # The hits of this report are counted once, by its first attachment.
         parked = dict(payload, result_ids=pending, parked_at=utc_now_iso())
         if ingested:
             parked["hits_count"] = 0
         _park(context, hunt_run_id, parked)
-    elif pending:
-        deferred = "the KV Store is unavailable to defer them, so they are not attached"
     if not ingested:
-        raise ValueError(f"{len(pending)} evidence objects not ingested by OpenCTI yet: {deferred}")
-    context.client.graphql_query(HUNT_EVIDENCE_MUTATION, {"id": hunt_run_id, "input": dict(payload, result_ids=ingested)})
+        if persistent:
+            raise HuntEvidenceDeferred(f"{len(pending)} evidence objects not ingested by OpenCTI yet: {deferred}")
+        raise ValueError(f"{len(pending)} evidence objects not ingested by OpenCTI yet: {lost}")
+    try:
+        context.client.graphql_query(HUNT_EVIDENCE_MUTATION, {"id": hunt_run_id, "input": dict(payload, result_ids=ingested)})
+    except Exception:
+        if persistent:
+            # A later report of the run retries the link, with the hits of this report
+            try:
+                _park(context, hunt_run_id, dict(payload, result_ids=ingested, parked_at=utc_now_iso()))
+            except Exception as ex:
+                context.logger.warning(f"Hunt evidence of run {hunt_run_id} not parked for a retry: {ex}")
+        raise
+    if pending and not persistent:
+        raise ValueError(f"{len(pending)} of the evidence objects not ingested by OpenCTI yet: {lost}")
     if pending:
         context.logger.warning(f"{len(pending)} hunt evidence objects not ingested by OpenCTI yet: {deferred}")
     return True
