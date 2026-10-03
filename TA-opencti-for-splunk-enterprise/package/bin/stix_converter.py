@@ -2,10 +2,31 @@ import stix2
 from datetime import datetime, timezone
 
 from stix_constants import CustomObservableUserAgent, CustomObservableText, CustomObjectCaseIncident
-from utils import get_hash_type, is_ipv6, is_ipv4, disambiguate_created
+from utils import get_hash_type, is_ipv6, is_ipv4, disambiguate_created, incident_event_key, parse_iso, to_epoch
 from utils import generate_incident_id, generate_identity_id, generate_relation_id, generate_case_incident_id, generate_sighting_id
+from utils import generate_indicator_id, generate_observed_data_id
 
 FAKE_INDICATOR_ID = "indicator--51b92778-cef0-4a90-b7ec-ebd620d01ac8"
+
+# Sighting of Type values targeting an Indicator (#57, #67)
+SIGHTING_OF_INDICATOR_ID = "indicator_id"
+INDICATOR_SIGHTING_TYPES = {
+    "url_indicator": "url",
+    "domain_indicator": "domain",
+    "ipv4_indicator": "ipv4",
+    "ipv6_indicator": "ipv6",
+    "file_hash_indicator": "file_hash",
+    "email_indicator": "email_addr",
+}
+# observable kind -> (STIX pattern object path, OpenCTI main observable type)
+PATTERN_PATHS = {
+    "url": ("url:value", "Url"),
+    "domain": ("domain-name:value", "Domain-Name"),
+    "ipv4": ("ipv4-addr:value", "IPv4-Addr"),
+    "ipv6": ("ipv6-addr:value", "IPv6-Addr"),
+    "email_addr": ("email-addr:value", "Email-Addr"),
+}
+HASH_PATTERN_NAMES = {"md5": "MD5", "sha1": "SHA-1", "sha256": "SHA-256", "sha512": "SHA-512"}
 
 # TLP:AMBER+STRICT is not a stix2 built-in; the ID is OpenCTI's static one
 # (pycti MarkingDefinition.generate_id("TLP", "TLP:AMBER+STRICT"))
@@ -276,11 +297,12 @@ def _convert_observables_to_stix(observables, marking, creator):
     return stix_observables
 
 
-def convert_to_incident_response(alert_params, event):
+def convert_to_incident_response(alert_params, event, return_id=False):
     """
     :param alert_params:
     :param event:
-    :return:
+    :param return_id: also return the Case-Incident STIX id
+    :return: serialized bundle, or (bundle, case id) when return_id
     """
     bundle_objects = []
 
@@ -329,7 +351,11 @@ def convert_to_incident_response(alert_params, event):
 
     # create incident response case
     stix_case_incident = CustomObjectCaseIncident(
-        id=generate_case_incident_id(alert_params.get("name"), created_date),
+        id=generate_case_incident_id(
+            alert_params.get("name"),
+            created_date,
+            incident_event_key(event, alert_params.get("incident_key")),
+        ),
         name=alert_params.get("name"),
         description=alert_params.get("description"),
         severity=alert_params.get("severity"),
@@ -344,14 +370,17 @@ def convert_to_incident_response(alert_params, event):
     bundle_objects.append(stix_case_incident)
 
     bundle = stix2.Bundle(objects=bundle_objects, allow_custom=True)
+    if return_id:
+        return bundle.serialize(), stix_case_incident.id
     return bundle.serialize()
 
 
-def convert_to_incident(alert_params, event):
+def convert_to_incident(alert_params, event, return_id=False):
     """
     :param alert_params:
     :param event:
-    :return:
+    :param return_id: also return the Incident STIX id
+    :return: serialized bundle, or (bundle, incident id) when return_id
     """
     bundle_objects = []
 
@@ -400,7 +429,11 @@ def convert_to_incident(alert_params, event):
 
     # create incident
     stix_incident = stix2.Incident(
-        id=generate_incident_id(alert_params.get("name"), created_date),
+        id=generate_incident_id(
+            alert_params.get("name"),
+            created_date,
+            incident_event_key(event, alert_params.get("incident_key")),
+        ),
         name=alert_params.get("name"),
         created=created_date,
         description=alert_params.get("description"),
@@ -429,60 +462,191 @@ def convert_to_incident(alert_params, event):
         bundle_objects.append(stix_relation_account)
 
     bundle = stix2.Bundle(objects=bundle_objects, allow_custom=True)
+    if return_id:
+        return bundle.serialize(), stix_incident.id
     return bundle.serialize()
 
 
-def convert_to_sighting(alert_params, event):
-    """
-    :param alert_params:
-    :param event:
-    :return:
-    """
-    bundle_objects = []
-
-    # event date
+def _event_date(event):
     if "_time" in event and event.get("_time"):
-        event_date = datetime.fromtimestamp(float(event.get("_time")), timezone.utc)
-    else:
-        event_date = datetime.now(timezone.utc)
+        return datetime.fromtimestamp(float(event.get("_time")), timezone.utc)
+    return datetime.now(timezone.utc)
 
-    # manage marking
-    marking = alert_params.get("tlp")
-    marking_id = _get_stix_marking_id(marking)
-    bundle_objects.append(marking_id)
 
-    # manage author
-    stix_author = stix2.Identity(
+def _optional_date(value):
+    """
+    :param value: epoch (number or numeric string) or ISO 8601 string
+    :return: aware datetime, or None
+    """
+    epoch = to_epoch(value)
+    if epoch is None:
+        return None
+    return datetime.fromtimestamp(epoch, timezone.utc)
+
+
+def _sighting_window(event):
+    """first_seen / last_seen of a sighting: the result's first_seen / last_seen
+    fields (for example from `stats min(_time) max(_time)`), else _time."""
+    event_date = _event_date(event)
+    first_seen = _optional_date(event.get("first_seen")) or event_date
+    last_seen = _optional_date(event.get("last_seen")) or event_date
+    if last_seen < first_seen:
+        first_seen, last_seen = last_seen, first_seen
+    return first_seen, last_seen
+
+
+def _sighting_count(value):
+    try:
+        return max(1, int(float(str(value).strip())))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _author(event):
+    return stix2.Identity(
         id=generate_identity_id(event.get("host", "Splunk"), "system"),
         name=event.get("host", "Splunk"),
         identity_class="system"
     )
-    bundle_objects.append(stix_author)
 
-    sighting_of_value=alert_params.get("sighting_of_value")
-    sighting_of_type=alert_params.get("sighting_of_type")
-    where_sighted_value=alert_params.get("where_sighted_value")
-    where_sighted_type=alert_params.get("where_sighted_type")
 
-    if where_sighted_type.lower() == "organization":
-        where_sighted = stix2.Identity(
+def _where_sighted_identity(where_sighted_type, where_sighted_value):
+    """
+    :return: the System / Organization identity selected in the action, or
+        None when no value is given (the Security Platform alone is used)
+    """
+    if where_sighted_value is None or not str(where_sighted_value).strip():
+        return None
+    where_sighted_type = (where_sighted_type or "system").lower()
+    if where_sighted_type == "organization":
+        return stix2.Identity(
             id=generate_identity_id(str(where_sighted_value), "organization"),
             name=str(where_sighted_value),
             identity_class="organization"
         )
-    elif where_sighted_type.lower() == "system":
-        where_sighted = stix2.Identity(
+    if where_sighted_type == "system":
+        return stix2.Identity(
             id=generate_identity_id(str(where_sighted_value), "system"),
             name=str(where_sighted_value),
             identity_class="system"
         )
-    else:
-        raise Exception(f"Invalid where_sighted_type: {where_sighted_type}")
+    raise ValueError(f"Invalid where_sighted_type: {where_sighted_type}")
 
-    bundle_objects.append(where_sighted)
 
-    # sighting_of conversion
-    if "_observable" in sighting_of_type:
+def _escape_pattern_value(value):
+    return str(value).replace("\\", "\\\\").replace("'", "\\'")
+
+
+def indicator_patterns(kind, value):
+    """
+    STIX patterns matching a single observable value, the canonical one first.
+
+    :param kind: url, domain, ipv4, ipv6, email_addr or file_hash
+    :param value: observable value
+    :return: (list of equivalent patterns, OpenCTI main observable type)
+    :raise ValueError: on an unsupported kind or unrecognized hash
+    """
+    value = (value or "").strip()
+    if not value:
+        raise ValueError("Sighting of Value is empty")
+    escaped = _escape_pattern_value(value)
+    if kind == "file_hash":
+        hash_type = get_hash_type(value)
+        if hash_type is None:
+            raise ValueError(
+                f"Unrecognized hash value: {value!r} "
+                "(expected an MD5, SHA-1, SHA-256 or SHA-512 hex digest)"
+            )
+        name = HASH_PATTERN_NAMES[hash_type]
+        quoted = f"[file:hashes.'{name}' = '{escaped}']"
+        bare = f"[file:hashes.{name} = '{escaped}']"
+        # OpenCTI quotes hash names containing a dash; MD5 is written bare
+        patterns = [quoted, bare] if "-" in name else [bare, quoted]
+        return patterns, "StixFile"
+    if kind not in PATTERN_PATHS:
+        raise ValueError(f"Unsupported indicator kind: {kind}")
+    path, main_type = PATTERN_PATHS[kind]
+    return [f"[{path} = '{escaped}']", f"[{path}='{escaped}']"], main_type
+
+
+def convert_to_sighting(alert_params, event, platform_ref=None, indicator=None):
+    """
+    Build a sighting bundle.
+
+    The sighting targets an Indicator when the action resolved one
+    (``indicator``: Sighting of Type "Indicator ID" or "<type> Indicator",
+    #57 / #67), or an observable (historical "<type> Observable" types).
+    It is sighted on the Splunk Security Platform (``platform_ref``) and/or on
+    the System / Organization selected in the action.
+
+    :param alert_params: action parameters
+    :param event: the Splunk result
+    :param platform_ref: STIX id of the Splunk Security Platform, or None
+    :param indicator: dict with "id" (STIX id of the Indicator), and for an
+        indicator to create: "create": True, "pattern", "name", "main_observable_type"
+    :return: serialized bundle
+    """
+    bundle_objects = []
+    first_seen, last_seen = _sighting_window(event)
+    count = _sighting_count(alert_params.get("count"))
+
+    # manage marking
+    marking_id = _get_stix_marking_id(alert_params.get("tlp"))
+    bundle_objects.append(marking_id)
+
+    # manage author
+    stix_author = _author(event)
+    bundle_objects.append(stix_author)
+
+    where_sighted_refs = []
+    if platform_ref:
+        where_sighted_refs.append(platform_ref)
+    where_sighted = _where_sighted_identity(
+        alert_params.get("where_sighted_type"), alert_params.get("where_sighted_value")
+    )
+    if where_sighted is not None:
+        bundle_objects.append(where_sighted)
+        where_sighted_refs.append(where_sighted.id)
+    if not where_sighted_refs:
+        raise ValueError(
+            "Nothing to sight on: set Where Sighted, or configure the Splunk Security Platform "
+            "(Configuration > Security Platform) on an OpenCTI platform that supports it"
+        )
+
+    sighting_of_type = alert_params.get("sighting_of_type") or ""
+    sighting_of_value = alert_params.get("sighting_of_value")
+    labels = alert_params.get("labels")
+
+    if indicator is not None:
+        indicator_id = indicator["id"]
+        if indicator.get("create"):
+            bundle_objects.append(stix2.Indicator(
+                id=indicator_id,
+                name=indicator.get("name") or str(sighting_of_value),
+                pattern=indicator["pattern"],
+                pattern_type="stix",
+                valid_from=first_seen,
+                created_by_ref=stix_author.id,
+                object_marking_refs=[marking_id],
+                labels=labels or None,
+                allow_custom=True,
+                custom_properties={
+                    "x_opencti_main_observable_type": indicator.get("main_observable_type"),
+                },
+            ))
+        sighting = stix2.Sighting(
+            id=generate_sighting_id(indicator_id, sorted(where_sighted_refs), first_seen, last_seen),
+            created_by_ref=stix_author.id,
+            sighting_of_ref=indicator_id,
+            first_seen=first_seen,
+            last_seen=last_seen,
+            count=count,
+            where_sighted_refs=where_sighted_refs,
+            object_marking_refs=[marking_id],
+            labels=labels or None,
+        )
+        bundle_objects.append(sighting)
+    elif "_observable" in sighting_of_type:
         observable_type = sighting_of_type.split("_observable")[0]
 
         # file hash: algorithm is auto-detected from the digest length
@@ -510,28 +674,117 @@ def convert_to_sighting(alert_params, event):
         stix_observable = stix_observables[0]
         bundle_objects.append(stix_observable)
 
+        # Historical id seed (observable + one where-sighted) kept for upserts.
         sighting = stix2.Sighting(
             id=generate_sighting_id(
                 stix_observable["id"],
-                where_sighted["id"],
-                #event_date,
-                #event_date,
+                where_sighted.id if where_sighted is not None and len(where_sighted_refs) == 1 else sorted(where_sighted_refs),
             ),
             created_by_ref=stix_author.id,
             description=None,
             sighting_of_ref=FAKE_INDICATOR_ID,
-            first_seen=event_date,
-            last_seen=event_date,
-            where_sighted_refs=[where_sighted],
-            #count=1,
+            first_seen=first_seen,
+            last_seen=last_seen,
+            count=count,
+            where_sighted_refs=where_sighted_refs,
             object_marking_refs=[marking_id],
-            labels=alert_params.get("labels"),
+            labels=labels or None,
             custom_properties={
                 "x_opencti_sighting_of_ref": stix_observable["id"],
             },
         )
 
         bundle_objects.append(sighting)
+    else:
+        raise ValueError(f"Unsupported sighting_of_type: {sighting_of_type}")
 
     bundle = stix2.Bundle(objects=bundle_objects, allow_custom=True)
     return bundle.serialize()
+
+
+def _hunt_observables(alert_params, event, marking_id, author):
+    extraction = alert_params.get("observables_extraction") or "cim_model"
+    if extraction == "cim_model":
+        return _extract_observables_from_cim_model(event=event, marking=marking_id, creator=author)
+    if extraction == "field_mapping":
+        return _extract_observables_from_key_model(event=event, marking=marking_id, creator=author)
+    return []
+
+
+def convert_to_hunt_evidence(alert_params, event, hunt_run_id, platform_ref=None, targets=None):
+    """
+    Evidence of a hunt run found by a Splunk search.
+
+    - Observed-Data over the observables extracted from the result (CIM or
+      field mapping), number_observed = count;
+    - one sighting per hunt target (Indicators, Attack Patterns, threats of
+      the hunt) on the Splunk Security Platform.
+    Every object carries x_opencti_hunt_run_id.
+
+    :param alert_params: action parameters (tlp, labels, observables_extraction, count)
+    :param event: the Splunk result
+    :param hunt_run_id: id of the OpenCTI hunt run
+    :param platform_ref: STIX id of the Splunk Security Platform, or None
+    :param targets: STIX ids of the hunt targets (may be empty)
+    :return: (serialized bundle, list of STIX ids of the evidence objects)
+    :raise ValueError: when the result holds no evidence at all
+    """
+    if not hunt_run_id or not str(hunt_run_id).strip():
+        raise ValueError("Hunt run id is empty: pass it with the hunt_run_id token ($result.hunt_run_id$)")
+    hunt_run_id = str(hunt_run_id).strip()
+    first_seen, last_seen = _sighting_window(event)
+    count = _sighting_count(alert_params.get("count"))
+    labels = alert_params.get("labels") or None
+    search_name = alert_params.get("search_name") or "Splunk search"
+    description = f"Evidence of OpenCTI hunt run {hunt_run_id} found by the Splunk search '{search_name}'"
+
+    marking_id = _get_stix_marking_id(alert_params.get("tlp"))
+    author = _author(event)
+    bundle_objects = [marking_id, author]
+    hunt_properties = {"x_opencti_hunt_run_id": hunt_run_id}
+    result_ids = []
+
+    observables = _hunt_observables(alert_params, event, marking_id, author)
+    bundle_objects.extend(observables)
+    if observables:
+        object_ids = sorted({observable.id for observable in observables})
+        observed_data = stix2.ObservedData(
+            id=generate_observed_data_id(object_ids, hunt_run_id),
+            created_by_ref=author.id,
+            first_observed=first_seen,
+            last_observed=last_seen,
+            number_observed=count,
+            object_refs=object_ids,
+            object_marking_refs=[marking_id],
+            labels=labels,
+            allow_custom=True,
+            custom_properties=dict(hunt_properties, x_opencti_description=description),
+        )
+        bundle_objects.append(observed_data)
+        result_ids.append(observed_data.id)
+
+    where_sighted_refs = [platform_ref] if platform_ref else [author.id]
+    for target in sorted(set(targets or [])):
+        sighting = stix2.Sighting(
+            id=generate_sighting_id(target, sorted(where_sighted_refs), first_seen, last_seen),
+            created_by_ref=author.id,
+            description=description,
+            sighting_of_ref=target,
+            first_seen=first_seen,
+            last_seen=last_seen,
+            count=count,
+            where_sighted_refs=where_sighted_refs,
+            object_marking_refs=[marking_id],
+            labels=labels,
+            allow_custom=True,
+            custom_properties=hunt_properties,
+        )
+        bundle_objects.append(sighting)
+        result_ids.append(sighting.id)
+
+    if not result_ids:
+        raise ValueError(
+            "No evidence in this result: no observable could be extracted and the hunt has no target"
+        )
+    bundle = stix2.Bundle(objects=bundle_objects, allow_custom=True)
+    return bundle.serialize(), result_ids
