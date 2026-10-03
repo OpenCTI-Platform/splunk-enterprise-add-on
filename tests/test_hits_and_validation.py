@@ -215,9 +215,25 @@ class DecideOutcomeTest(unittest.TestCase):
         self.assertEqual(outcome, OUTCOME_DETECTED)
         self.assertEqual(observed, hit)
 
-    def test_hit_within_the_grace_period_counts(self):
-        hit = (NOW - timedelta(minutes=45)).timestamp()
-        self.assertEqual(decide_outcome(self.start, self.end, self.decide_after, [[hit, hit, 1]], 30, NOW)[0], OUTCOME_DETECTED)
+    def test_hit_after_completion_only_counts_within_the_clock_skew(self):
+        skewed = (NOW - timedelta(minutes=58)).timestamp()
+        self.assertEqual(decide_outcome(self.start, self.end, self.decide_after, [[skewed, skewed, 1]], 30, NOW)[0],
+                         OUTCOME_DETECTED)
+        after = (NOW - timedelta(minutes=45)).timestamp()
+        self.assertEqual(decide_outcome(self.start, self.end, self.decide_after, [[after, after, 1]], 30, NOW)[0],
+                         OUTCOME_MISSED)
+
+    def test_window_spanning_the_test_proves_nothing(self):
+        before = (NOW - timedelta(hours=3)).timestamp()
+        after = (NOW - timedelta(minutes=10)).timestamp()
+        self.assertEqual(decide_outcome(self.start, self.end, self.decide_after, [[before, after, 2]], 30, NOW)[0],
+                         OUTCOME_PENDING)
+
+    def test_window_ending_in_the_test_proves_its_last_hit(self):
+        before = (NOW - timedelta(hours=3)).timestamp()
+        last = (NOW - timedelta(minutes=100)).timestamp()
+        self.assertEqual(decide_outcome(self.start, self.end, self.decide_after, [[before, last, 2]], 30, NOW),
+                         (OUTCOME_DETECTED, last))
 
     def test_hit_before_dispatch_does_not_count(self):
         hit = (NOW - timedelta(hours=5)).timestamp()

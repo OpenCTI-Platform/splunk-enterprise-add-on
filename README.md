@@ -569,12 +569,15 @@ OpenCTI asks OpenAEV to run benign tests built from deployed indicators (IOC val
 the Splunk Security Platform and, for each indicator of the request still waiting for a result on this
 platform:
 
-- **detected** when a hit window of the indicator overlaps the test window (dispatch to completion of the
-  request, plus the grace period), or when the last hit OpenCTI recorded on the deployment does;
-- **missed** when the request is completed, the grace period is over and no hit overlaps; a sighting
+- **detected** when a recorded hit falls in the test window (dispatch to completion of the request,
+  give or take 5 minutes of clock skew), or when the last hit OpenCTI recorded on the deployment does.
+  Hits carry their event time: the grace period delays the decision for indexing lag, it does not widen
+  the window;
+- **missed** when the request is completed, the grace period is over and no hit falls in the window; a sighting
   with `x_opencti_negative = true` records the miss on the Security Platform;
 - **requested** otherwise: no result yet, nothing is written. This includes a later hit recorded by
-  OpenCTI that the local hit history does not hold (lost KV Store write), and a history whose oldest
+  OpenCTI that the local hit history does not hold (lost KV Store write), a hit window running from
+  before to after the test (a hit during the test can be neither proven nor ruled out), and a history whose oldest
   windows (beyond the last 50) were trimmed after the test started: a miss is never declared on an
   incomplete history.
 

@@ -72,6 +72,10 @@ def default_platform_name(server_name):
     return f"{DEFAULT_PLATFORM_PREFIX} {server_name}" if server_name else DEFAULT_PLATFORM_PREFIX
 
 
+def _is_siem(platform):
+    return (platform.get("security_platform_type") or "").upper() == SECURITY_PLATFORM_TYPE
+
+
 def platform_stix_id(name):
     """
     :return: the deterministic STIX id OpenCTI gives a Security Platform named ``name``
@@ -120,14 +124,13 @@ class SecurityPlatformResolver:
             return None
         if not isinstance(entry, dict) or not isinstance(entry.get("platform"), dict):
             return None
+        if not _is_siem(entry["platform"]):
+            return None
         if not self.settings.platform_id:
-            # Disabling auto mode or changing the configured name invalidates
-            # an auto resolution, and an auto resolution only holds a SIEM platform.
+            # Disabling auto mode or changing the configured name invalidates an auto resolution.
             if not self.settings.auto_create:
                 return None
             if (entry.get("configured_name") or "") != self.settings.name:
-                return None
-            if (entry["platform"].get("security_platform_type") or "").upper() != SECURITY_PLATFORM_TYPE:
                 return None
         return entry
 
@@ -172,7 +175,7 @@ class SecurityPlatformResolver:
             node = (edge or {}).get("node") or {}
             if (node.get("name") or "").strip().lower() != name.lower():
                 continue
-            if (node.get("security_platform_type") or "").upper() == SECURITY_PLATFORM_TYPE:
+            if _is_siem(node):
                 return node, False
             other_type = True
         return None, other_type
@@ -223,11 +226,13 @@ class SecurityPlatformResolver:
                         f"Security Platform {self.settings.platform_id} not found or not readable by the "
                         "OpenCTI account: platform-aware features are disabled until it is fixed"
                     )
-                elif (platform.get("security_platform_type") or "").upper() != SECURITY_PLATFORM_TYPE:
-                    self.logger.warning(
+                elif not _is_siem(platform):
+                    self.logger.error(
                         f"The configured Security Platform {self.settings.platform_id} is of type "
-                        f"{platform.get('security_platform_type')}, not {SECURITY_PLATFORM_TYPE}"
+                        f"{platform.get('security_platform_type')}, not {SECURITY_PLATFORM_TYPE}: "
+                        "platform-aware features are disabled until a SIEM platform is configured"
                     )
+                    platform = None
             elif self.settings.auto_create:
                 # Re-verify a stale auto resolution under its own name.
                 name = (entry["platform"].get("name") if entry else None) or self.wanted_name

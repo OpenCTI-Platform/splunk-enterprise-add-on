@@ -99,12 +99,12 @@ class ResolverTest(unittest.TestCase):
         self.assertIsNone(_resolver(client, PlatformSettings(auto_create=False), cache=cache).resolve())
         self.assertEqual(client.calls_of("SplunkSecurityPlatformByName"), [])
 
-    def test_configured_id_of_another_type_is_kept_with_a_warning(self):
+    def test_configured_id_of_another_type_is_rejected(self):
         edr = dict(PLATFORM, security_platform_type="EDR")
         client = FakeClient({"SplunkSecurityPlatform": {"securityPlatform": edr}})
         resolver = _resolver(client, PlatformSettings(platform_id="internal-1"))
-        self.assertEqual(resolver.resolve(), edr)
-        self.assertTrue(resolver.logger.has("warning", "not SIEM"))
+        self.assertIsNone(resolver.resolve())
+        self.assertTrue(resolver.logger.has("error", "not SIEM"))
 
     def test_auto_creation_disabled(self):
         client = FakeClient()

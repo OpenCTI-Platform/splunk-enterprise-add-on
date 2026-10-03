@@ -70,8 +70,12 @@ Compatibility with the OpenCTI autonomous threat management program
 - Index mode: delete events purge the KV Store entry by its `_key` (#20), and by the STIX id the
   lookup searches key it with. The incremental and nightly lookup searches read delete events too,
   so a deleted indicator is never written back to `opencti_indicators`.
-- The Security Platform found by name must be of type SIEM; a same-name platform of another type is
-  neither adopted nor shadowed by a new one.
+- The Security Platform must be of type SIEM: a same-name platform of another type is neither adopted
+  nor shadowed by a new one, a configured id of another type is rejected, and a cached resolution is
+  reused only for a SIEM platform while its configuration (auto mode, name) is unchanged.
+- IOC validation proves a detection only with a hit inside the test window (the grace period no
+  longer widens it), and never declares a miss when a hit window spans the test or the hit history
+  was trimmed past its start.
 - The modular input no longer logs the proxy password.
 - Hash detections and hit reporting reduce `Filesystem.file_hash` to its digest (CIM values such as
   `sha256=<digest>`), as already done for `Processes.process_hash`.

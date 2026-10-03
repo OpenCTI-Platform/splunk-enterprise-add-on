@@ -62,7 +62,7 @@
                             "type": "text",
                             "label": "Security Platform ID",
                             "field": "security_platform_id",
-                            "help": "Id (internal or STIX) of the OpenCTI Security Platform representing this Splunk deployment. Leave empty to resolve or create it by name.",
+                            "help": "Id (internal or STIX) of the OpenCTI Security Platform representing this Splunk deployment; it must be of type SIEM. Leave empty to resolve or create it by name.",
                             "required": false,
                             "validators": [
                                 {

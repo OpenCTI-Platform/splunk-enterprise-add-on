@@ -6,10 +6,10 @@ Splunk Security Platform, Splunk can prove the outcome from its own data: the
 "OpenCTI - Indicator hits" searches record every hit window per indicator in
 opencti_indicator_hits, and a test is
 
-- detected when a hit window of the indicator overlaps the test window
-  (dispatch -> completion, widened by the configured grace period);
-- missed when the request is completed, the grace period is over and no hit
-  window overlaps;
+- detected when a recorded hit falls in the test window (dispatch ->
+  completion, give or take the clock skew);
+- missed when the request is completed, the grace period (indexing lag) is
+  over and no hit can have happened in the window;
 - requested (no result yet) otherwise.
 
 Outcomes are written back once per request and indicator:
@@ -132,13 +132,23 @@ def decide_outcome(start, end, decide_after, hit_windows, grace_minutes, now, pl
     """
     if start is None:
         return OUTCOME_PENDING, None
-    upper = (end + timedelta(minutes=grace_minutes)) if end else now
+    # Hits carry their event time: the grace period only delays the decision
+    # (indexing lag), the test window itself only tolerates clock skew.
+    upper = (end + timedelta(seconds=DISPATCH_SKEW_SECONDS)) if end else now
     low, high = start.timestamp(), upper.timestamp()
-    matches = [w for w in hit_windows if float(w[1]) >= low and float(w[0]) <= high]
-    if matches:
-        return OUTCOME_DETECTED, min(max(float(w[0]), low) for w in matches)
+    # A window holds real hits at its two bounds only: one of them must fall
+    # in the test window to prove a hit during the test.
+    proven = [
+        float(bound) for w in hit_windows for bound in (w[0], w[1]) if low <= float(bound) <= high
+    ]
+    if proven:
+        return OUTCOME_DETECTED, min(proven)
     if platform_last_hit is not None and low <= platform_last_hit <= high:
         return OUTCOME_DETECTED, platform_last_hit
+    if any(float(w[0]) < low and float(w[1]) > high for w in hit_windows):
+        # Hits before and after the test in one window: a hit during the test
+        # can be neither proven nor ruled out.
+        return OUTCOME_PENDING, None
     if decide_after is not None and now >= decide_after:
         if platform_last_hit is not None and platform_last_hit > high and not any(
             float(w[0]) <= platform_last_hit <= float(w[1]) for w in hit_windows
