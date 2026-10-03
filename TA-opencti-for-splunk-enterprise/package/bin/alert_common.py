@@ -213,7 +213,9 @@ class AlertContext:
             return False
         params = followup.get("params") or {}
         # One entry per follow-up, triggered alert and container
-        key = self._parked_prefix() + state_key(followup["kind"], entity_id, params.get("search_name"), params.get("sid"))
+        key = self._parked_prefix() + state_key(
+            followup["kind"], entity_id, params.get("search_name"), params.get("sid")
+        )
         try:
             self.cache.set(key, dict(followup, parked_at=utc_now_iso()))
         except Exception as ex:

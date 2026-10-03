@@ -442,6 +442,31 @@ class ValidationProverTest(unittest.TestCase):
         client = _client([_request(platform=other)])
         self.assertEqual(self._prover(client).run(), [])
 
+    def test_requests_are_scoped_to_the_platform_by_the_server(self):
+        client = _client([_request()])
+        self._prover(client).run()
+        filters = client.calls_of("SplunkIocValidationRequests")[0]["filters"]
+        self.assertIn({"key": ["platform_ids"], "values": [PLATFORM["id"]]}, filters["filters"])
+        self.assertIn("running", next(f["values"] for f in filters["filters"] if f["key"] == ["status"]))
+
+    def test_platform_rejecting_the_filter_keys_is_scanned_unfiltered(self):
+        client = _client([_request()])
+        listing = client.handlers["SplunkIocValidationRequests"]
+        rejected = graphql_error("Unsupported filter keys: platform_ids")
+        client.handlers["SplunkIocValidationRequests"] = (
+            lambda variables: rejected if variables.get("filters") else listing
+        )
+        rows = self._prover(client).run()
+        self.assertEqual(rows[0]["outcome"], OUTCOME_MISSED)
+        self.assertEqual([call["filters"] is None for call in client.calls_of("SplunkIocValidationRequests")],
+                         [False, True])
+
+    def test_transport_failure_of_the_listing_is_not_retried_unfiltered(self):
+        client = _client([], SplunkIocValidationRequests=transport_error())
+        with self.assertRaises(Exception):
+            self._prover(client).run()
+        self.assertEqual(len(client.calls_of("SplunkIocValidationRequests")), 1)
+
     def test_pending_outcomes_are_not_reported(self):
         client = _client([_request(status="running")])
         rows = self._prover(client).run()

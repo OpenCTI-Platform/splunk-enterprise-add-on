@@ -25,6 +25,7 @@ from datetime import datetime, timedelta, timezone
 import stix2
 
 from addon_state import state_key, utc_now_iso
+from app_connector_helper import OpenCTIGraphQLError
 from hits import hit_history_key, load_windows, read_coverage
 from opencti_features import FEATURE_HITS, FEATURE_IOC_VALIDATION, FEATURE_IOC_VALIDATION_RESULTS
 from utils import generate_identity_id, generate_relation_id, generate_validation_sighting_id, to_epoch, to_iso
@@ -45,8 +46,8 @@ LOOKBACK_DAYS = 30
 DISPATCH_SKEW_SECONDS = 300
 
 REQUESTS_QUERY = """
-query SplunkIocValidationRequests($first: Int, $after: ID) {
-  iocValidationRequests(first: $first, after: $after, orderBy: updated_at, orderMode: desc) {
+query SplunkIocValidationRequests($first: Int, $after: ID, $filters: FilterGroup) {
+  iocValidationRequests(first: $first, after: $after, filters: $filters, orderBy: updated_at, orderMode: desc) {
     pageInfo { hasNextPage endCursor }
     edges {
       node {
@@ -201,13 +202,40 @@ class ValidationProver:
             id=generate_identity_id(author_name, "system"), name=author_name, identity_class="system"
         )
 
+    def _request_filters(self):
+        """:return: FilterGroup scoping the requests to this platform (filter keys of IocValidation-Request)"""
+        if not self.platform.get("id"):
+            return None
+        return {
+            "mode": "and",
+            "filters": [
+                # platform_ids holds internal ids
+                {"key": ["platform_ids"], "values": [self.platform["id"]]},
+                {"key": ["status"], "values": list(ACTIVE_STATUSES)},
+            ],
+            "filterGroups": [],
+        }
+
     def requests(self):
         """Active requests targeting this platform, newest first, bounded."""
         horizon = self.now - timedelta(days=LOOKBACK_DAYS)
         after = None
-        for _ in range(MAX_PAGES):
+        filters = self._request_filters()
+        pages = 0
+        while pages < MAX_PAGES:
             hit_fields = "last_hit_at" if self.detector.has(FEATURE_HITS) else ""
-            data = self.client.graphql_query(REQUESTS_QUERY % hit_fields, {"first": PAGE_SIZE, "after": after})
+            try:
+                data = self.client.graphql_query(
+                    REQUESTS_QUERY % hit_fields, {"first": PAGE_SIZE, "after": after, "filters": filters}
+                )
+            except OpenCTIGraphQLError as ex:
+                # Only a platform rejecting the filter keys is retried, unfiltered, from the first page.
+                if filters is None or after is not None or not ex.errors:
+                    raise
+                self.logger.info(f"IOC validation requests not filterable by platform, filtering them here: {ex}")
+                filters = None
+                continue
+            pages += 1
             connection = data.get("iocValidationRequests") or {}
             for edge in connection.get("edges") or []:
                 node = (edge or {}).get("node") or {}

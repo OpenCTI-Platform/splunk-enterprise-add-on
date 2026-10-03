@@ -111,6 +111,9 @@ Compatibility with the OpenCTI autonomous threat management program
 - Timeline milestones and Case Autopilot runs whose incident is not ingested within the 60 second wait,
   or whose call failed, are parked in the KV Store and retried by the next OpenCTI alert action runs
   (24 hours, 5 failed calls at most) instead of being dropped.
+- `| openctivalidation` asks OpenCTI only for the active IOC validation requests of its Security Platform
+  (`platform_ids` and `status` filter keys), so requests of other platforms no longer push the Splunk ones
+  out of the 5 scanned pages; platforms without these filter keys are scanned and filtered locally as before.
 - The `provides` relationship (telemetry inventory) is detected under the `SecurityPlatform_Data-Component`
   key OpenCTI's relationship mapping actually returns, so the inventory is no longer skipped on platforms
   that support it.
