@@ -512,7 +512,7 @@ capabilities are skipped with one log line such as
 | Timeline milestone                                           | `timelineEventAdd`                                               | skipped                              |
 | Run Case Autopilot                                           | `investigationRunAdd` and an Enterprise Edition license          | skipped                              |
 | Provenance fields                                            | provenance stream extension, `Indicator.corroboration_count`     | fields absent                        |
-| Threat Pulse fields                                          | `Indicator.pulse`                                                | fields absent                        |
+| Threat Pulse fields                                          | `pulse_*` stream extension properties, `Indicator.pulse`         | fields absent                        |
 
 | Add-on version | OpenCTI version | Program features                                                                                 |
 |----------------|-----------------|--------------------------------------------------------------------------------------------------|
