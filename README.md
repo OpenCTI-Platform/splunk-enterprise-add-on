@@ -541,9 +541,9 @@ indicator it writes, on the Splunk Security Platform:
 | Indicator written to `opencti_indicators` (KV Store mode)       | `deployed`      | `kvstore:opencti_indicators/<_key>`         |
 | Indicator event written to the index (index mode)              | `deployed`      | `index:<index>/<indicator STIX id>`         |
 | Delete event, or update of a revoked indicator                 | `removed` (index mode also deletes the `opencti_indicators` entry, keyed by the STIX id by the lookup searches) | same |
-| Same, with `valid_until` in the past                            | `expired` (reported as `removed` with `removed_at = valid_until` when the platform reserves `expired`) | same |
+| Same, with `valid_until` in the past                            | `removed` with `removed_at = valid_until` (OpenCTI reserves `expired` to removals no consumer confirmed) | same |
 | KV Store or index write failure                                | `failed` with the error message | same                         |
-| Drift repaired by `openctireconcile`                           | `deployed`, `removed` or `expired` | the external id OpenCTI holds, else the one the stream input reported (`opencti_deployments`), else `index:<index>/<indicator STIX id>` for index-mode lookup entries, else `kvstore:opencti_indicators/<_key>` |
+| Drift repaired by `openctireconcile`                           | `deployed` or `removed` | the external id OpenCTI holds, else the one the stream input reported (`opencti_deployments`), else `index:<index>/<indicator STIX id>` for index-mode lookup entries, else `kvstore:opencti_indicators/<_key>` |
 
 Reports are queued, deduplicated per indicator (the last state wins), sent in batches of
 `Write-back batch size` under the `Write-back rate limit`, and retried with a backoff (15 s, 60 s) before

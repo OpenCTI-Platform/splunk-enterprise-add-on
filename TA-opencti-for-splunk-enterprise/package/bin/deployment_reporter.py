@@ -209,8 +209,6 @@ class DeploymentReporter:
         self.pending = OrderedDict()
         self.last_flush = clock()
         self.retry_after = 0.0
-        # None: unknown yet; False: the platform rejected "expired" from connectors.
-        self.expired_accepted = None
         self.stats = {"sent": 0, "created": 0, "updated": 0, "unchanged": 0, "errors": 0, "dropped": 0}
 
     @property
@@ -232,7 +230,9 @@ class DeploymentReporter:
         """
         if not indicator_id or not self.enabled:
             return False
-        if status == STATUS_EXPIRED and self.expired_accepted is False:
+        if status == STATUS_EXPIRED:
+            # OpenCTI reserves "expired" to removals no consumer confirmed: an indicator
+            # Splunk dropped at its valid_until is a removal, removed_at = valid_until.
             status = STATUS_REMOVED
         report = DeploymentReport(indicator_id, status, external_id, error_message, removed_at, deployed_at)
         self.pending.pop(indicator_id, None)
@@ -330,22 +330,6 @@ class DeploymentReporter:
         except Exception as ex:
             self.logger.warning(f"Unable to store the deployment write-back state in the KV Store: {ex}")
 
-    @staticmethod
-    def _expired_rejected(report, message):
-        return report.status == STATUS_EXPIRED and "reserved" in (message or "").lower()
-
-    def _downgrade_expired(self, reports):
-        """Re-queue rejected expiries as removals and stop sending expired."""
-        if self.expired_accepted is not False:
-            self.logger.info(
-                "The OpenCTI platform does not accept the expired status from connectors: "
-                "expiries are reported as removed (with removed_at = valid_until)"
-            )
-        self.expired_accepted = False
-        for report in reports:
-            report.status = STATUS_REMOVED
-            self._requeue(report)
-
     def _send_batch(self, batch):
         self.limiter.acquire()
         try:
@@ -363,15 +347,11 @@ class DeploymentReporter:
         errors = {}
         for error in result.get("errors") or []:
             errors[error.get("indicatorId")] = error.get("message") or "unknown error"
-        downgraded, records = [], []
+        records = []
         for report in batch:
             message = errors.get(report.indicator_id)
             if message is None:
                 records.append(report.as_record("ok"))
-                if report.status == STATUS_EXPIRED:
-                    self.expired_accepted = True
-            elif self._expired_rejected(report, message):
-                downgraded.append(report)
             else:
                 self.stats["errors"] += 1
                 self.logger.error(f"Deployment write-back of {report.indicator_id} rejected by OpenCTI: {message}")
@@ -381,13 +361,10 @@ class DeploymentReporter:
         accepted = len(batch) - len(errors)
         self.stats["sent"] += accepted
         self._record(records)
-        if downgraded:
-            self._downgrade_expired(downgraded)
         self.logger.info(
             f"Deployment write-back: {len(batch)} reports sent to OpenCTI "
             f"(created={result.get('created', 0)} updated={result.get('updated', 0)} "
-            f"unchanged={result.get('unchanged', 0)} rejected={len(errors) - len(downgraded)} "
-            f"expired_as_removed={len(downgraded)})"
+            f"unchanged={result.get('unchanged', 0)} rejected={len(errors)})"
         )
         return accepted
 
@@ -403,9 +380,6 @@ class DeploymentReporter:
         try:
             self.client.graphql_query(REPORT_ONE_MUTATION, variables)
         except OpenCTIGraphQLError as ex:
-            if self._expired_rejected(report, str(ex)):
-                self._downgrade_expired([report])
-                return 0
             if self._platform_missing(ex) or is_retryable(ex):
                 self.logger.warning(f"Deployment write-back of {report.indicator_id} failed: {ex}")
                 self._defer([report], ex)
@@ -415,8 +389,6 @@ class DeploymentReporter:
             self._record([report.as_record("error", str(ex))])
             return 0
         self.retry_after = 0.0
-        if report.status == STATUS_EXPIRED:
-            self.expired_accepted = True
         self.stats["sent"] += 1
         self._record([report.as_record("ok")])
         return 1

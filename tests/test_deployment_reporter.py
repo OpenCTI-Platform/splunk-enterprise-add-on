@@ -129,42 +129,22 @@ class ReporterTest(unittest.TestCase):
         reporter = _reporter(FakeClient(), platform=lambda: None)
         self.assertFalse(reporter.report("indicator--1", STATUS_DEPLOYED))
 
-    def test_expired_rejected_in_batch_is_resent_as_removed(self):
-        def batch(variables):
-            errors = [{"indicatorId": r["indicatorId"], "message": "Deployment status is invalid or reserved to the platform"}
-                      for r in variables["reports"] if r["status"] == STATUS_EXPIRED]
-            return {"indicatorReportDeployments": {"processed": 1, "created": 0, "updated": 1, "unchanged": 0, "errors": errors}}
-
-        client = FakeClient({BATCH: batch})
+    def test_expiry_is_reported_as_a_removal_at_valid_until(self):
+        # OpenCTI reserves "expired" to removals no consumer confirmed
+        client = FakeClient({BATCH: _batch_ok})
         reporter = _reporter(client)
         reporter.report("indicator--1", STATUS_EXPIRED, removed_at="2026-10-01T00:00:00.000Z")
         reporter.flush()
-        sent = [r for call in client.calls_of(BATCH) for r in call["reports"]]
-        self.assertEqual([r["status"] for r in sent], [STATUS_EXPIRED, STATUS_REMOVED])
-        self.assertEqual(sent[1]["metadata"]["removed_at"], "2026-10-01T00:00:00.000Z")
-        self.assertIs(reporter.expired_accepted, False)
-        reporter.report("indicator--2", STATUS_EXPIRED)
-        reporter.flush()
-        self.assertEqual(client.calls_of(BATCH)[-1]["reports"][0]["status"], STATUS_REMOVED)
+        [sent] = client.calls_of(BATCH)[0]["reports"]
+        self.assertEqual(sent["status"], STATUS_REMOVED)
+        self.assertEqual(sent["metadata"]["removed_at"], "2026-10-01T00:00:00.000Z")
 
-    def test_expired_accepted_is_kept(self):
-        client = FakeClient({BATCH: _batch_ok})
-        reporter = _reporter(client)
-        reporter.report("indicator--1", STATUS_EXPIRED)
-        reporter.flush()
-        self.assertIs(reporter.expired_accepted, True)
-
-    def test_expired_rejected_by_single_mutation(self):
-        def one(variables):
-            if variables["status"] == STATUS_EXPIRED:
-                return graphql_error("Deployment status is invalid or reserved to the platform")
-            return {"indicatorReportDeployment": {"id": "rel"}}
-
-        client = FakeClient({ONE: one})
+    def test_expiry_through_the_single_mutation(self):
+        client = FakeClient({ONE: {"indicatorReportDeployment": {"id": "rel"}}})
         reporter = _reporter(client, features=(FEATURE_DEPLOYMENT,))
         reporter.report("indicator--1", STATUS_EXPIRED)
         reporter.flush()
-        self.assertEqual([c["status"] for c in client.calls_of(ONE)], [STATUS_EXPIRED, STATUS_REMOVED])
+        self.assertEqual([c["status"] for c in client.calls_of(ONE)], [STATUS_REMOVED])
 
     def test_transport_failure_backs_off_then_drops_after_three_attempts(self):
         clock = Clock()

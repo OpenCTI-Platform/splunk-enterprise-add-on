@@ -17,7 +17,8 @@ Compatibility with the OpenCTI autonomous threat management program
   every search head of a cluster.
 - Schema feature detection (`OpenCTIFeatureDetector`): one cached introspection per platform gates
   every new call; absent features are logged once and skipped.
-- Indicator deployment write-back: the modular input reports `deployed`, `removed`, `expired` and
+- Indicator deployment write-back: the modular input reports `deployed`, `removed` (`removed_at` =
+  `valid_until` for an expired indicator: OpenCTI reserves `expired` to removals no consumer confirmed) and
   `failed` per indicator (`indicatorReportDeployment(s)`, external id = KV key, or index and indicator STIX id),
   batched, deduplicated, rate limited and retried with backoff; local state in `opencti_deployments`.
 - `OpenCTI - Reconcile indicator deployments` (`| openctireconcile`): repairs the drift between the
@@ -111,6 +112,8 @@ Compatibility with the OpenCTI autonomous threat management program
 - Timeline milestones and Case Autopilot runs whose incident is not ingested within the 60 second wait,
   or whose call failed, are parked in the KV Store and retried by the next OpenCTI alert action runs
   (24 hours, 5 failed calls at most) instead of being dropped.
+- `| openctivalidation` sends at most 500 results per `iocValidationReportResults` call, the limit of the
+  mutation.
 - Report hunt evidence fails the result when the evidence cannot be linked to the run (OpenCTI rejects
   the link, or the KV Store is unavailable to defer objects not ingested yet) instead of reporting success;
   a rejected link is parked with its hits and retried by the next report of the run. Objects only waiting
