@@ -109,6 +109,9 @@ Compatibility with the OpenCTI autonomous threat management program
 - Timeline milestones and Case Autopilot runs whose incident is not ingested within the 60 second wait,
   or whose call failed, are parked in the KV Store and retried by the next OpenCTI alert action runs
   (24 hours, 5 failed calls at most) instead of being dropped.
+- Threat Pulse preview mode: the add-on selects only the `PulseInformation` fields the platform exposes
+  (introspected), reads `prevalence_bucket` as well as `prevalence`, stores `pulse_preview`, and the
+  Threat Pulse dashboard tab labels preview-based values; the network fields are never assumed.
 - Dashboards and the indicator lookup searches read KV Store timestamps at second and millisecond
   precision alike (the 30-day hit chart, the indicators added chart, the last deployment sync, the
   `added_at` of an indicator first written by the KV Store mode).

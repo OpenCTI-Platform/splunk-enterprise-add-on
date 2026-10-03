@@ -59,10 +59,14 @@ class FakeClient:
 
 
 class FakeDetector:
-    def __init__(self, features=(), failed=False):
+    def __init__(self, features=(), failed=False, pulse_fields=None):
         self.features = set(features)
         self.failed = failed
         self.required = []
+        self._pulse_fields = None if pulse_fields is None else set(pulse_fields)
+
+    def pulse_fields(self):
+        return self._pulse_fields
 
     def snapshot(self, refresh=False):
         return {"features": sorted(self.features), "version": "test", "failed": self.failed}

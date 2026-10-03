@@ -94,6 +94,24 @@ class DetectorTest(unittest.TestCase):
         detector.has(features.FEATURE_TIMELINE)
         self.assertEqual(len(client.calls_of("OpenCTIFeatureDetection")), 1)
 
+    def test_pulse_fields_are_introspected(self):
+        schema = dict(_schema(indicator=("pulse",)), pulseType={"fields": [
+            {"name": n} for n in ("preview", "prevalence", "trend", "updated_at")]})
+        cache = FakeCache()
+        self.assertEqual(self._detector(_client(schema), cache=cache).pulse_fields(),
+                         {"preview", "prevalence", "trend", "updated_at"})
+        OpenCTIFeatureDetector.clear_memory()  # new process
+        self.assertEqual(self._detector(_client(_schema()), cache=cache).pulse_fields(),
+                         {"preview", "prevalence", "trend", "updated_at"}, "read from the shared cache")
+
+    def test_pulse_fields_without_the_type_or_from_an_older_cache(self):
+        self.assertEqual(self._detector(_client(_schema(indicator=("pulse",)))).pulse_fields(), set())
+        OpenCTIFeatureDetector.clear_memory()
+        cache = FakeCache()
+        detector = self._detector(_client(_schema()), cache=cache)
+        cache.set(detector.cache_key, {"features": '["pulse"]', "detected_at": self.now[0]})
+        self.assertIsNone(detector.pulse_fields(), "unknown: the legacy selection applies")
+
     def test_persistent_cache_is_shared_between_processes(self):
         cache = FakeCache()
         first = _client(_schema(("indicatorReportHits",)))

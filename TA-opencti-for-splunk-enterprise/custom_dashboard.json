@@ -755,7 +755,7 @@
     "ds_kn_prevalence": {
       "name": "Prevalence",
       "options": {
-        "query": "| inputlookup opencti_indicators | where isnotnull(pulse_prevalence) | stats count by pulse_prevalence",
+        "query": "| inputlookup opencti_indicators | where isnotnull(pulse_prevalence) | eval pulse_prevalence=if(match(lower(tostring(pulse_preview)), \"^(1|true)$\"), pulse_prevalence.\" (preview)\", pulse_prevalence) | stats count by pulse_prevalence",
         "queryParameters": {}
       },
       "type": "ds.search"
@@ -763,7 +763,7 @@
     "ds_kn_trend": {
       "name": "Trend",
       "options": {
-        "query": "| inputlookup opencti_indicators | where isnotnull(pulse_trend) | stats count by pulse_trend",
+        "query": "| inputlookup opencti_indicators | where isnotnull(pulse_trend) | eval pulse_trend=if(match(lower(tostring(pulse_preview)), \"^(1|true)$\"), pulse_trend.\" (preview)\", pulse_trend) | stats count by pulse_trend",
         "queryParameters": {}
       },
       "type": "ds.search"
@@ -771,7 +771,7 @@
     "ds_kn_rising": {
       "name": "Rising indicators",
       "options": {
-        "query": "| inputlookup opencti_indicators | where pulse_trend=\"rising\" | sort - score | head 50 | table value type score pulse_prevalence pulse_trend pulse_first_seen_network pulse_platforms_bucket",
+        "query": "| inputlookup opencti_indicators | where pulse_trend=\"rising\" | sort - score | head 50 | eval pulse_data=if(match(lower(tostring(pulse_preview)), \"^(1|true)$\"), \"preview\", \"full\") | table value type score pulse_prevalence pulse_trend pulse_data pulse_first_seen_network pulse_platforms_bucket",
         "queryParameters": {}
       },
       "type": "ds.search"

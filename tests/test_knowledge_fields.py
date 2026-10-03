@@ -86,7 +86,42 @@ class GraphQLTest(unittest.TestCase):
         self.assertEqual(enrichment_graphql_fields(FakeDetector()), "")
         both = enrichment_graphql_fields(FakeDetector((FEATURE_PROVENANCE, FEATURE_PULSE)))
         self.assertIn("corroboration_count", both)
-        self.assertIn("pulse {", both)
+        self.assertEqual(both.split("pulse ", 1)[1], "{ prevalence trend first_seen_network platforms_bucket }",
+                         "detection without the PulseInformation fields keeps the 04 selection")
+
+    def test_pulse_selection_follows_the_schema(self):
+        full = {"published", "prevalence", "platforms_bucket", "first_seen_network", "trend", "updated_at"}
+        self.assertEqual(enrichment_graphql_fields(FakeDetector((FEATURE_PULSE,), pulse_fields=full)),
+                         "pulse { prevalence trend first_seen_network platforms_bucket }")
+        preview = {"preview", "prevalence_bucket", "trend", "updated_at"}
+        self.assertEqual(enrichment_graphql_fields(FakeDetector((FEATURE_PULSE,), pulse_fields=preview)),
+                         "pulse { preview prevalence_bucket trend }")
+        self.assertEqual(enrichment_graphql_fields(FakeDetector((FEATURE_PULSE,), pulse_fields={"updated_at"})), "")
+
+    def test_preview_pulse(self):
+        # Threat Pulse preview mode (CEO decision on OpenCTI-Platform/opencti#18674): coarse fields only
+        node = {"pulse": {"preview": True, "prevalence_bucket": "widespread", "trend": "rising"}}
+        self.assertEqual(pulse_from_graphql(node), {
+            "pulse_prevalence": "widespread",
+            "pulse_trend": "rising",
+            "pulse_preview": True,
+        })
+        full = dict(NODE["pulse"], preview=False)
+        self.assertFalse(pulse_from_graphql(full)["pulse_preview"])
+        self.assertEqual(pulse_from_graphql({"pulse": {"preview": True}}), {}, "no flag without a pulse value")
+        extension = {"extension-definition--opencti-pulse": {
+            "preview": True, "prevalence_bucket": "rare", "trend": "stable",
+        }}
+        self.assertEqual(pulse_from_extension(extension),
+                         {"pulse_prevalence": "rare", "pulse_trend": "stable", "pulse_preview": True})
+
+    def test_refresh_clears_the_preview_flag_of_a_contributing_platform(self):
+        from knowledge_fields import refresh_knowledge_fields
+
+        record = {"pulse_prevalence": "rare", "pulse_trend": "stable", "pulse_preview": True}
+        refresh_knowledge_fields(record, {"pulse": NODE["pulse"]}, provenance=False)
+        self.assertNotIn("pulse_preview", record)
+        self.assertEqual(record["pulse_platforms_bucket"], "10-50")
 
     def test_merge_keeps_the_stream_values_and_adds_names(self):
         payload = {"value": "1.2.3.4"}

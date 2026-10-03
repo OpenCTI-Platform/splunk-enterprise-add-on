@@ -60,6 +60,7 @@ query OpenCTIFeatureDetection {
   mutationType: __type(name: "Mutation") { fields { name } }
   queryType: __type(name: "Query") { fields { name } }
   indicatorType: __type(name: "Indicator") { fields { name } }
+  pulseType: __type(name: "PulseInformation") { fields { name } }
 }
 """
 
@@ -244,6 +245,8 @@ class OpenCTIFeatureDetector:
             "version": version,
             "detected_at": self.clock(),
             "ttl": FAILURE_TTL_SECONDS if transient else self.ttl,
+            # Threat Pulse fields differ between the preview and full modes
+            "pulse_fields": sorted(_field_names(data.get("pulseType"))),
         }
 
     def snapshot(self, refresh=False):
@@ -285,6 +288,19 @@ class OpenCTIFeatureDetector:
         :return: True when the platform supports it
         """
         return feature in (self.snapshot().get("features") or [])
+
+    def pulse_fields(self):
+        """
+        :return: set of the PulseInformation field names, or None when the
+            detection predates their introspection (cache of an older add-on)
+        """
+        fields = self.snapshot().get("pulse_fields")
+        if isinstance(fields, str):
+            try:
+                fields = json.loads(fields)
+            except ValueError:
+                return None
+        return set(fields) if isinstance(fields, list) else None
 
     def require(self, feature, action):
         """

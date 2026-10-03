@@ -6,6 +6,10 @@ never source names) and is also readable through GraphQL, where the source
 names the account may see are available. Threat Pulse (innovation 04) is
 only readable through GraphQL today. Every field is optional: on platforms
 without these features the fields are simply absent.
+
+Threat Pulse has a preview mode (the default of a platform registered with
+XTM Hub that does not contribute): only the coarse prevalence and trend are
+set, flagged ``pulse_preview``, and the network fields stay absent.
 """
 
 from opencti_features import FEATURE_PROVENANCE, FEATURE_PULSE
@@ -29,6 +33,7 @@ PULSE_FIELDS = (
     "pulse_trend",
     "pulse_first_seen_network",
     "pulse_platforms_bucket",
+    "pulse_preview",
 )
 KNOWLEDGE_FIELDS = PROVENANCE_FIELDS + PULSE_FIELDS
 # Provenance fields read from the Indicator itself, not from its assertions
@@ -48,7 +53,10 @@ PROVENANCE_GRAPHQL_FIELDS = (
     "corroboration_count last_asserted_at single_sourced has_conflicts freshness_stale "
     "x_opencti_assertions { source_name source_kind first_asserted_at }"
 )
-PULSE_GRAPHQL_FIELDS = "pulse { prevalence trend first_seen_network platforms_bucket }"
+# PulseInformation fields the add-on reads, selected when the schema has them
+PULSE_SELECTABLE = ("preview", "prevalence", "prevalence_bucket", "trend", "first_seen_network", "platforms_bucket")
+# Selection used when the detection did not list the PulseInformation fields
+PULSE_LEGACY_SELECTION = ("prevalence", "trend", "first_seen_network", "platforms_bucket")
 
 
 def _kinds_summary(sources_by_kind):
@@ -96,7 +104,9 @@ def pulse_from_extension(extensions):
     if not isinstance(extensions, dict):
         return {}
     for extension in extensions.values():
-        if isinstance(extension, dict) and "prevalence" in extension and "trend" in extension:
+        if not isinstance(extension, dict) or "trend" not in extension:
+            continue
+        if "prevalence" in extension or "prevalence_bucket" in extension:
             return pulse_from_graphql(extension)
     return {}
 
@@ -139,7 +149,7 @@ def provenance_from_graphql(indicator):
 def pulse_from_graphql(pulse_or_indicator):
     """
     :param pulse_or_indicator: PulseInformation node, or an Indicator node
-        selected with PULSE_GRAPHQL_FIELDS
+        selected with pulse_graphql_fields
     :return: dict of pulse fields (empty when the platform has none)
     """
     if not isinstance(pulse_or_indicator, dict):
@@ -148,8 +158,9 @@ def pulse_from_graphql(pulse_or_indicator):
     if not isinstance(pulse, dict):
         return {}
     fields = {}
-    if pulse.get("prevalence"):
-        fields["pulse_prevalence"] = str(pulse["prevalence"])
+    prevalence = pulse.get("prevalence") or pulse.get("prevalence_bucket")
+    if prevalence:
+        fields["pulse_prevalence"] = str(prevalence)
     if pulse.get("trend"):
         fields["pulse_trend"] = str(pulse["trend"])
     first_seen = to_iso(pulse.get("first_seen_network"))
@@ -157,7 +168,20 @@ def pulse_from_graphql(pulse_or_indicator):
         fields["pulse_first_seen_network"] = first_seen
     if pulse.get("platforms_bucket"):
         fields["pulse_platforms_bucket"] = str(pulse["platforms_bucket"])
+    if fields and pulse.get("preview") is not None:
+        fields["pulse_preview"] = bool(pulse["preview"])
     return fields
+
+
+def pulse_graphql_fields(detector):
+    """
+    :param detector: OpenCTIFeatureDetector of a platform with FEATURE_PULSE
+    :return: the Indicator ``pulse`` selection for this platform ("" when it
+        exposes none of the fields the add-on reads)
+    """
+    available = detector.pulse_fields()
+    selected = PULSE_LEGACY_SELECTION if available is None else [f for f in PULSE_SELECTABLE if f in available]
+    return f"pulse {{ {' '.join(selected)} }}" if selected else ""
 
 
 def enrichment_graphql_fields(detector):
@@ -169,8 +193,8 @@ def enrichment_graphql_fields(detector):
     if detector is not None and detector.has(FEATURE_PROVENANCE):
         fields.append(PROVENANCE_GRAPHQL_FIELDS)
     if detector is not None and detector.has(FEATURE_PULSE):
-        fields.append(PULSE_GRAPHQL_FIELDS)
-    return " ".join(fields)
+        fields.append(pulse_graphql_fields(detector))
+    return " ".join(field for field in fields if field)
 
 
 def merge_knowledge_fields(payload, extension_fields, indicator_node, overwrite=False):
