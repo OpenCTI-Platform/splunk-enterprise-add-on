@@ -180,6 +180,14 @@ class CommandsTest(unittest.TestCase):
         self.assertEqual(steps[-1], "where `opencti_usable_indicator`")
         self.assertIn("mvfind(revoked", _conf("macros.conf").get("opencti_usable_indicator", "definition"))
 
+    def test_hits_match_applies_once_per_row(self):
+        # The macro yields one row per matching indicator: a second pass squares the rows of shared values
+        searches = _conf("savedsearches.conf")
+        for name in searches.sections():
+            search = " ".join(searches.get(name, "search", fallback="").replace("\\", " ").split())
+            self.assertNotIn("`opencti_hits_match`] | `opencti_hits_match`", search, name)
+            self.assertNotIn("`opencti_hits_match` | `opencti_hits_match`", search, name)
+
     def test_knowledge_filters_keep_nothing_without_provenance(self):
         # A negated test would keep every indicator of a platform without the fields
         macros = _conf("macros.conf")

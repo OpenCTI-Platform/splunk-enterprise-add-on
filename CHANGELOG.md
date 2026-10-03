@@ -112,6 +112,8 @@ Compatibility with the OpenCTI autonomous threat management program
 - Timeline milestones and Case Autopilot runs whose incident is not ingested within the 60 second wait,
   or whose call failed, are parked in the KV Store and retried by the next OpenCTI alert action runs
   (24 hours, 5 failed calls at most) instead of being dropped.
+- "Network traffic with an indicator IP" and "File or process matching an indicator hash" apply the
+  indicator matching once per branch: a value shared by several indicators no longer multiplies the counts.
 - `| openctivalidation` sends at most 500 results per `iocValidationReportResults` call, the limit of the
   mutation.
 - Report hunt evidence fails the result when the evidence cannot be linked to the run (OpenCTI rejects
