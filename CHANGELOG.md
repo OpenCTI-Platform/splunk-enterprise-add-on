@@ -160,6 +160,9 @@ Compatibility with the OpenCTI autonomous threat management program
 - `| openctireconcile` retries the repairs a transient OpenCTI failure left queued (same backoff, at most
   90 seconds of waiting) before it exits, and counts the ones still unsent as `writeback_deferred` in its
   summary row instead of dropping them silently; the next run plans them again.
+- An indexed event whose search dropped `_cd` is identified by its raw text together with its `index`,
+  `host`, `source` and `sourcetype`, so identical text logged by two hosts in the same second creates two
+  incidents instead of one.
 - Dashboards and the indicator lookup searches read KV Store timestamps at second and millisecond
   precision alike (the 30-day hit chart, the indicators added chart, the last deployment sync, the
   `added_at` of an indicator first written by the KV Store mode).

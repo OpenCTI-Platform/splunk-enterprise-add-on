@@ -358,7 +358,8 @@ You can create an incident or an incident response case in OpenCTI from a custom
 | `Case Autopilot policy ID` | Optional investigation policy, the platform default applies when empty | Incident & Incident response case |
 
 Incidents and cases created from indexed events (results carrying `_cd` / `_raw`) get an id derived from
-the event itself, so distinct events firing in the same second never merge (#47), while the same event
+the event itself (its Splunk address, or its raw text with its `index`, `host`, `source` and `sourcetype`
+when the search dropped `_cd`), so distinct events firing in the same second never merge (#47), while the same event
 returned by overlapping scheduled runs keeps upserting onto one object. Rows of transforming searches
 (`stats`, `table`...) should name their split-by fields in `Incident key`. Without it they keep the
 historical name + time id; when several of them share that id in one run, the second and following rows

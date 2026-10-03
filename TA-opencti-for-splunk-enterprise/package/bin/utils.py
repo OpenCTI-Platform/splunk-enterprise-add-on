@@ -287,7 +287,7 @@ def incident_event_key(event, explicit_key=None):
          $result.<field>$ tokens against the first result only, so a value
          naming no field of the row is used as is (the same for every row).
       2. event_identity_key(): the address of the indexed event (_bkt/_cd) or
-         its _raw text, stable across overlapping scheduled runs
+         its _raw text and origin, stable across overlapping scheduled runs
 
     Rows of transforming searches without an incident key keep the historical
     name + created id on purpose: their row index and field values change
@@ -444,7 +444,8 @@ def event_identity_key(event):
 
     Resolution order:
       1. _bkt (or index + splunk_server) + _cd  Splunk's address of an indexed event
-      2. _raw                         raw event text when _cd was dropped
+      2. index + host + source + sourcetype + _raw  when _cd was dropped: the
+         same text indexed from two hosts or sources is two events
 
     Rows from transforming searches (stats, table, ...) carry neither, and are
     deliberately not keyed: their field values (counts, etc.) can change between
@@ -465,7 +466,9 @@ def event_identity_key(event):
         return "cd|{}|{}|{}".format(event.get("index", ""), event.get("splunk_server", ""), cd)
     raw = event.get("_raw")
     if raw:
-        return "raw|{}".format(raw)
+        # splunk_server is left out: replicated buckets are served by any peer
+        origin = "|".join(str(event.get(field) or "") for field in ("index", "host", "source", "sourcetype"))
+        return "raw|{}|{}".format(origin, raw)
     return ""
 
 

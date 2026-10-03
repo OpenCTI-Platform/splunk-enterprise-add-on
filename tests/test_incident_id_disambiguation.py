@@ -84,7 +84,25 @@ class EventIdentityKeyTest(unittest.TestCase):
 
     def test_falls_back_to_raw(self):
         ev = {"_time": WHOLE_SECOND, "_raw": "hello"}
-        self.assertEqual(event_identity_key(ev), "raw|hello")
+        self.assertEqual(event_identity_key(ev), "raw|||||hello")
+        ev.update({"index": "main", "host": "fw01", "source": "/var/log/fw.log", "sourcetype": "pan:traffic"})
+        self.assertEqual(event_identity_key(ev), "raw|main|fw01|/var/log/fw.log|pan:traffic|hello")
+
+    def test_same_raw_text_from_two_hosts_is_two_events(self):
+        a = _raw_event(1, host="fw01")
+        b = _raw_event(1, host="fw02")
+        for ev in (a, b):
+            del ev["_cd"]
+        self.assertNotEqual(event_identity_key(a), event_identity_key(b))
+        ids = {_object(convert_to_incident(ALERT_PARAMS, ev), "incident")["id"] for ev in (a, b)}
+        self.assertEqual(len(ids), 2)
+
+    def test_raw_key_is_stable_across_runs_and_peers(self):
+        ev = _raw_event(1)
+        del ev["_cd"]
+        later = _run_view(dict(ev, splunk_server="idx02"), "scheduler__a_at_1727000400", 3)
+        self.assertEqual(event_identity_key(ev), event_identity_key(_run_view(ev, "scheduler__a_at_1727000100", 0)))
+        self.assertEqual(event_identity_key(ev), event_identity_key(later))
 
     def test_transforming_search_row_has_no_identity(self):
         row = {"_time": WHOLE_SECOND, "user": "bob", "count": "12"}
