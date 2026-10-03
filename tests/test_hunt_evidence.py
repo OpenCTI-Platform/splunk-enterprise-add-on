@@ -236,6 +236,25 @@ class ActionTest(unittest.TestCase):
         self.assertEqual([call["input"]["result_ids"] for call in context.client.calls_of("SplunkHuntRunEvidence")],
                          [["sighting--2"]])
 
+    def test_malformed_or_failing_deferred_evidence_never_blocks_the_others(self):
+        context = self._evidence_context({"observed-data--1", "observed-data--2", "sighting--3"})
+        parked_at = program_actions.utc_now_iso()
+        context.cache.set("hunt_evidence_pending|run-1|a", {"result_ids": "observed-data--1", "parked_at": parked_at})
+        context.cache.set("hunt_evidence_pending|run-1|b", {"result_ids": ["observed-data--1"], "hits_count": 1,
+                                                            "bad": True, "parked_at": parked_at})
+        context.cache.set("hunt_evidence_pending|run-1|c", {"result_ids": ["observed-data--2"], "hits_count": 1,
+                                                            "parked_at": parked_at})
+        accept = context.client.handlers["SplunkHuntRunEvidence"]
+        context.client.handlers["SplunkHuntRunEvidence"] = (
+            lambda variables: graphql_error("unknown field bad") if "bad" in variables["input"] else accept
+        )
+        with mock.patch.object(program_actions.time, "sleep"):
+            program_actions.report_hunt_evidence(context, "run-1", ["sighting--3"], 1)
+        self.assertIsNone(context.cache.get("hunt_evidence_pending|run-1|a"), "malformed entry dropped")
+        self.assertIsNotNone(context.cache.get("hunt_evidence_pending|run-1|b"), "failing entry kept for a later report")
+        self.assertIsNone(context.cache.get("hunt_evidence_pending|run-1|c"), "attached despite the failing one")
+        self.assertIsNone(context.cache.get("hunt_evidence_pending|run-1|b|claim"), "claim released")
+
     def test_evidence_is_not_parked_without_a_persistent_cache(self):
         context = self._evidence_context(set())
         context.cache.persistent = False

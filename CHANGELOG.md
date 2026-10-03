@@ -111,6 +111,16 @@ Compatibility with the OpenCTI autonomous threat management program
 - Timeline milestones and Case Autopilot runs whose incident is not ingested within the 60 second wait,
   or whose call failed, are parked in the KV Store and retried by the next OpenCTI alert action runs
   (24 hours, 5 failed calls at most) instead of being dropped.
+- `opencti_multi_sourced_indicator` and `opencti_fresh_indicator` keep nothing when the provenance fields
+  are absent, like the other knowledge filters (they used to keep every indicator).
+- An Incident or Case-Incident built from a result without `_time` takes the time the alert was
+  dispatched (from its search id) instead of the current time, so retries of one triggered alert upsert
+  the same object.
+- The OpenCTI pattern fallback of Create Sighting also matches the case variants of case-insensitive
+  values (domains, IP addresses, emails, hashes), and an unknown one is created in lower case, so an
+  uppercase hash from Splunk no longer creates a duplicate indicator.
+- One malformed or failing parked follow-up or deferred hunt evidence entry no longer stops the others
+  from being retried.
 - `| openctivalidation` asks OpenCTI only for the active IOC validation requests of its Security Platform
   (`platform_ids` and `status` filter keys), so requests of other platforms no longer push the Splunk ones
   out of the 5 scanned pages; platforms without these filter keys are scanned and filtered locally as before.

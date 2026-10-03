@@ -403,6 +403,11 @@ def resolve_sighted_indicator(context, sighting_of_type, value, kind):
             raise ValueError(f"Indicator {value} not found in OpenCTI or not readable by the add-on account")
         return {"id": found}
     patterns, main_type = indicator_patterns(kind, value)
+    case_insensitive = kind in CASE_INSENSITIVE_KINDS
+    if case_insensitive:
+        # OpenCTI pattern filters are case sensitive too
+        for variant in (value.lower(), value.upper()):
+            patterns += [p for p in indicator_patterns(kind, variant)[0] if p not in patterns]
     try:
         from addon_state import KVCollection
 
@@ -414,8 +419,8 @@ def resolve_sighted_indicator(context, sighting_of_type, value, kind):
     found = find_indicator_by_pattern(context.client, patterns)
     if found:
         return {"id": found}
-    # Unknown to OpenCTI: create it from this single value (#57)
-    return pattern_indicator(kind, value)
+    # Unknown to OpenCTI: create it from this single value (#57), one indicator whatever the case
+    return pattern_indicator(kind, value.lower() if case_insensitive else value)
 # endregion
 
 
@@ -517,16 +522,24 @@ def _attach_pending(context, hunt_run_id):
             item = context.cache.get(key)
             if not item:
                 continue
-            present = _ingested(context, item.get("result_ids") or [])
+            result_ids = item.get("result_ids")
+            if not isinstance(result_ids, list) or not all(isinstance(object_id, str) for object_id in result_ids):
+                context.logger.warning(f"Malformed deferred hunt evidence {key} of run {hunt_run_id} dropped")
+                context.cache.release(key)
+                continue
+            present = _ingested(context, result_ids)
             if present:
                 payload = {k: v for k, v in item.items() if k != "parked_at"}
                 payload["result_ids"] = present
                 context.client.graphql_query(HUNT_EVIDENCE_MUTATION, {"id": hunt_run_id, "input": payload})
-            remaining = [object_id for object_id in item.get("result_ids") or [] if object_id not in present]
+            remaining = [object_id for object_id in result_ids if object_id not in present]
             if not remaining:
                 context.cache.release(key)
             elif present:
                 context.cache.set(key, dict(item, result_ids=remaining, hits_count=0))
+        except Exception as ex:
+            # One entry failing never keeps the others of the run waiting
+            context.logger.warning(f"Deferred hunt evidence {key} of run {hunt_run_id} not attached yet: {ex}")
         finally:
             context.cache.release(claim)
             for takeover in takeovers:

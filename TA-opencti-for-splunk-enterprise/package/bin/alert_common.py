@@ -224,41 +224,60 @@ class AlertContext:
         self.logger.warning(f"{description} for {entity_id} deferred: {reason}; the next alert runs retry it")
         return True
 
+    @staticmethod
+    def _parked_problem(followup):
+        """:return: why a parked record cannot be retried, "" when it can"""
+        if not followup.get("entity_id") or not followup.get("kind"):
+            return "malformed record"
+        if not isinstance(followup.get("params") or {}, dict) or not str(followup.get("failures") or 0).isdigit():
+            return "malformed record"
+        parked_at = parse_iso(followup.get("parked_at"))
+        if parked_at is None or time.time() - parked_at.timestamp() > FOLLOWUP_PARKED_SECONDS:
+            return f"not ingested by OpenCTI within {FOLLOWUP_PARKED_SECONDS // 3600}h"
+        return ""
+
+    def _retry_one(self, key, followup, found):
+        if followup["entity_id"] not in found:
+            return
+        if self._run_followup(followup):
+            self.cache.release(key)
+            return
+        failures = int(followup.get("failures") or 0) + 1
+        if failures < FOLLOWUP_MAX_FAILURES:
+            self.cache.set(key, dict(followup, failures=failures))
+            return
+        self.logger.error(
+            f"{followup.get('description')} for {followup['entity_id']} dropped after {failures} failed attempts"
+        )
+        self.cache.release(key)
+
     def _retry_parked(self):
         """Run the follow-ups parked by earlier alert runs whose objects now exist."""
         if not getattr(self.cache, "persistent", False):
             return
         try:
             parked = self.cache.items(self._parked_prefix(), limit=FOLLOWUP_RETRIED_PER_RUN)
-            live = []
-            for key, followup in parked:
-                parked_at = parse_iso(followup.get("parked_at"))
-                if parked_at is not None and time.time() - parked_at.timestamp() <= FOLLOWUP_PARKED_SECONDS:
-                    live.append((key, followup))
-                    continue
-                self.logger.error(
-                    f"{followup.get('description')} for {followup.get('entity_id')} dropped: not ingested by "
-                    f"OpenCTI within {FOLLOWUP_PARKED_SECONDS // 3600}h"
-                )
-                self.cache.release(key)
-            found = self._found([followup.get("entity_id") for _, followup in live]) if live else set()
-            for key, followup in live:
-                if followup.get("entity_id") not in found:
-                    continue
-                if self._run_followup(followup):
-                    self.cache.release(key)
-                    continue
-                failures = int(followup.get("failures") or 0) + 1
-                if failures < FOLLOWUP_MAX_FAILURES:
-                    self.cache.set(key, dict(followup, failures=failures))
-                    continue
-                self.logger.error(
-                    f"{followup.get('description')} for {followup.get('entity_id')} dropped after {failures} "
-                    "failed attempts"
-                )
-                self.cache.release(key)
         except Exception as ex:
             self.logger.warning(f"Parked follow-ups not retried: {ex}")
+            return
+        live = []
+        for key, followup in parked:
+            problem = self._parked_problem(followup)
+            if not problem:
+                live.append((key, followup))
+                continue
+            self.logger.error(f"{followup.get('description')} for {followup.get('entity_id')} dropped: {problem}")
+            try:
+                self.cache.release(key)
+            except Exception as ex:
+                self.logger.warning(f"Parked follow-up {key} not released: {ex}")
+        found = self._found([followup["entity_id"] for _, followup in live]) if live else set()
+        # One entry failing never keeps the others waiting
+        for key, followup in live:
+            try:
+                self._retry_one(key, followup, found)
+            except Exception as ex:
+                self.logger.warning(f"Parked follow-up {key} not retried: {ex}")
 
     def run_followups(self, sleep=time.sleep, budget=FOLLOWUP_WAIT_SECONDS):
         """

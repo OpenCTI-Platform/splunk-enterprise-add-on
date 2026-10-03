@@ -361,7 +361,9 @@ returned by overlapping scheduled runs keeps upserting onto one object. Rows of 
 (`stats`, `table`...) should name their split-by fields in `Incident key`. Without it they keep the
 historical name + time id; when several of them share that id in one run, the second and following rows
 get distinct ids in row order, which only stays stable while the row order does (the action logs a
-warning when this happens).
+warning when this happens). A result without `_time` takes the time its alert was dispatched, read from
+the alert's search id, so every retry of one triggered alert upserts the same object and a later run of
+the alert creates a new one.
 
 > Upgrading from 1.1.x: indexed events get new ids in 1.2.0. An event already sent by 1.1.x and returned
 > again by an overlapping scheduled run just after the upgrade creates a second object, once.
@@ -760,7 +762,7 @@ OpenCTI updates these fields without stream events, so `OpenCTI - Refresh indica
 |---------------------------------------------|----------------------------------------------------------|
 | `` `opencti_corroborated_indicator(2)` ``   | indicators asserted by at least 2 sources                |
 | `` `opencti_multi_sourced_indicator` ``     | indicators with more than one source                     |
-| `` `opencti_fresh_indicator` ``             | indicators not flagged stale                             |
+| `` `opencti_fresh_indicator` ``             | indicators explicitly not flagged stale                  |
 | `` `opencti_prevalent_indicator` ``         | indicators common or widespread across the network       |
 | `` `opencti_trending_indicator` ``          | indicators with a rising pulse trend                     |
 

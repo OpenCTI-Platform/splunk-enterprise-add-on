@@ -291,6 +291,19 @@ class IndicatorResolutionTest(unittest.TestCase):
         values = client.calls_of("SplunkIndicatorsByPattern")[0]["filters"]["filters"][0]["values"]
         self.assertIn("[domain-name:value = 'evil.example']", values)
 
+    def test_opencti_pattern_fallback_folds_the_case_of_case_insensitive_kinds(self):
+        client = FakeClient({"SplunkIndicatorsByPattern": {"indicators": {"edges": []}}})
+        digest = "D41D8CD98F00B204E9800998ECF8427E"
+        result = program_actions.resolve_sighted_indicator(self._context(client), "file_hash_indicator", digest, "file_hash")
+        values = client.calls_of("SplunkIndicatorsByPattern")[0]["filters"]["filters"][0]["values"]
+        self.assertIn(f"[file:hashes.MD5 = '{digest.lower()}']", values)
+        self.assertIn(f"[file:hashes.MD5 = '{digest}']", values)
+        self.assertEqual(result["pattern"], f"[file:hashes.MD5 = '{digest.lower()}']", "one indicator whatever the case")
+        client = FakeClient({"SplunkIndicatorsByPattern": {"indicators": {"edges": []}}})
+        program_actions.resolve_sighted_indicator(self._context(client), "url_indicator", "https://e.example/A", "url")
+        values = client.calls_of("SplunkIndicatorsByPattern")[0]["filters"]["filters"][0]["values"]
+        self.assertNotIn("[url:value = 'https://e.example/a']", values, "URL paths are case sensitive")
+
     def test_unknown_value_creates_the_indicator(self):
         client = FakeClient({"SplunkIndicatorsByPattern": {"indicators": {"edges": []}}})
         result = program_actions.resolve_sighted_indicator(self._context(client), "ipv4_indicator", "1.2.3.4", "ipv4")
@@ -592,6 +605,34 @@ class FollowupTest(unittest.TestCase):
         self.assertEqual(context.run_followups(), 0)
         self.assertIsNone(cache.get(key))
         self.assertEqual(context.client.calls_of("SplunkTimelineMilestone"), [])
+
+    def test_malformed_parked_followups_never_block_the_others(self):
+        cache = FakeCache()
+        context = self._followup_context(cache=cache, ingested=lambda ids: set(ids))
+        prefix = context._parked_prefix()
+        valid = {"entity_id": "incident--1", "description": "Timeline milestone", "kind": program_actions.FOLLOWUP_TIMELINE,
+                 "params": {"search_name": "Brute force"}, "parked_at": program_actions.utc_now_iso()}
+        cache.set(prefix + "a-bad-params", dict(valid, params="not a dict"))
+        cache.set(prefix + "b-bad-failures", dict(valid, failures="many"))
+        cache.set(prefix + "c-no-entity", dict(valid, entity_id=None))
+        cache.set(prefix + "d-raises", dict(valid, entity_id="incident--2"))
+        cache.set(prefix + "e-valid", valid)
+        real_set = cache.set
+
+        def flaky_set(key, value):
+            if key.endswith("d-raises"):
+                raise RuntimeError("KV down")
+            real_set(key, value)
+
+        cache.set = flaky_set
+        client = context.client
+        client.handlers["SplunkTimelineMilestone"] = lambda variables: (
+            graphql_error("boom") if variables["input"]["container_id"] == "incident--2"
+            else {"timelineEventAdd": {"id": "event-1"}})
+        context.run_followups()
+        self.assertEqual([key[len(prefix):] for key, _ in self._parked(cache)], ["d-raises"])
+        self.assertEqual([call["input"]["container_id"] for call in client.calls_of("SplunkTimelineMilestone")],
+                         ["incident--2", "incident--1"])
 
     def test_parked_followups_of_another_platform_are_left_alone(self):
         cache = FakeCache()
