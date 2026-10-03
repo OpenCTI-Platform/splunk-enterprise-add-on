@@ -1,3 +1,4 @@
+import re
 import stix2
 from datetime import datetime, timezone
 
@@ -6,6 +7,10 @@ from utils import get_hash_type, is_ipv6, is_ipv4, disambiguate_created
 from utils import generate_incident_id, generate_identity_id, generate_relation_id, generate_case_incident_id, generate_sighting_id
 
 FAKE_INDICATOR_ID = "indicator--51b92778-cef0-4a90-b7ec-ebd620d01ac8"
+INDICATOR_ID_REGEX = re.compile(
+    r"^indicator--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
 
 # TLP:AMBER+STRICT is not a stix2 built-in; the ID is OpenCTI's static one
 # (pycti MarkingDefinition.generate_id("TLP", "TLP:AMBER+STRICT"))
@@ -510,28 +515,44 @@ def convert_to_sighting(alert_params, event):
         stix_observable = stix_observables[0]
         bundle_objects.append(stix_observable)
 
-        sighting = stix2.Sighting(
-            id=generate_sighting_id(
-                stix_observable["id"],
-                where_sighted["id"],
-                #event_date,
-                #event_date,
-            ),
-            created_by_ref=stix_author.id,
-            description=None,
-            sighting_of_ref=FAKE_INDICATOR_ID,
-            first_seen=event_date,
-            last_seen=event_date,
-            where_sighted_refs=[where_sighted],
-            #count=1,
-            object_marking_refs=[marking_id],
-            labels=alert_params.get("labels"),
-            custom_properties={
-                "x_opencti_sighting_of_ref": stix_observable["id"],
-            },
-        )
+        sighted_id = stix_observable["id"]
+        sighting_of_ref = FAKE_INDICATOR_ID
+        custom_properties = {"x_opencti_sighting_of_ref": sighted_id}
 
-        bundle_objects.append(sighting)
+    # existing OpenCTI indicator: referenced directly, not added to the bundle
+    elif sighting_of_type == "indicator_stix_id":
+        sighted_id = (sighting_of_value or "").strip()
+        if not INDICATOR_ID_REGEX.match(sighted_id):
+            raise ValueError(
+                f"Invalid indicator ID: {sighting_of_value!r} "
+                "(expected a STIX ID such as indicator--<uuid>)"
+            )
+        sighting_of_ref = sighted_id
+        custom_properties = {}
+
+    else:
+        raise ValueError(f"Unsupported sighting_of_type: {sighting_of_type}")
+
+    sighting = stix2.Sighting(
+        id=generate_sighting_id(
+            sighted_id,
+            where_sighted["id"],
+            #event_date,
+            #event_date,
+        ),
+        created_by_ref=stix_author.id,
+        description=None,
+        sighting_of_ref=sighting_of_ref,
+        first_seen=event_date,
+        last_seen=event_date,
+        where_sighted_refs=[where_sighted],
+        #count=1,
+        object_marking_refs=[marking_id],
+        labels=alert_params.get("labels"),
+        custom_properties=custom_properties,
+    )
+
+    bundle_objects.append(sighting)
 
     bundle = stix2.Bundle(objects=bundle_objects, allow_custom=True)
     return bundle.serialize()

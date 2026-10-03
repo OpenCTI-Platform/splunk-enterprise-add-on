@@ -320,14 +320,24 @@ You can create an incident or an incident response case in OpenCTI from a custom
 
 7. To create a sighting, complete the form with the following settings:
 
-| Parameter                | Description                                                   | Scope      |
-|--------------------------|---------------------------------------------------------------|------------|
-| `Sighting Of (value)`    | Value of what was sighted                                     | Sighting   |
-| `Sighting Of (type)`     | Type of what was sighted (URL, Domain, IPV4, IPV6, File Hash) | Sighting   |                              
-| `Where Sighted (value)`  | Value of the 'System' or 'Organization' that saw the sighting | Sighting   |                              
-| `Where Sighted (type)`   | 'System' or 'Organization' that saw the sighting              | Sighting   | 
-| `Labels`                 | Labels (separated by a comma) to be applied                   | Sighting   | 
-| `TLP`                    | Markings to be applied                                        | Sighting   | 
+| Parameter               | Description                                                                      | Scope    |
+|-------------------------|----------------------------------------------------------------------------------|----------|
+| `Sighting Of (value)`   | Value of what was sighted                                                        | Sighting |
+| `Sighting Of (type)`    | Type of what was sighted (URL, Domain, IPV4, IPV6, File Hash, Indicator STIX ID) | Sighting |
+| `Where Sighted (value)` | Value of the 'System' or 'Organization' that saw the sighting                    | Sighting |
+| `Where Sighted (type)`  | 'System' or 'Organization' that saw the sighting                                 | Sighting |
+| `Labels`                | Labels (separated by a comma) to be applied                                      | Sighting |
+| `TLP`                   | Markings to be applied                                                           | Sighting |
+
+To sight an indicator that already exists in OpenCTI (instead of an observable), select the `Indicator STIX ID` type and pass the STIX ID of the indicator (`indicator--<uuid>`) as value. The sighting then directly references the indicator, so OpenCTI rules such as "Raise incident based on sighting" apply. Indicators imported by the app are stored in the `opencti_indicators` KV Store, for example:
+
+```
+... | lookup opencti_indicators value OUTPUT id AS indicator_id
+    | where isnotnull(indicator_id)
+    | mvexpand indicator_id
+```
+
+Then set `Sighting Of (value)` to `$result.indicator_id$`. Only one indicator ID per result is accepted. If the indicator does not exist in OpenCTI, the sighting is rejected by OpenCTI when the bundle is ingested.
 
 You can use [Splunk "tokens"](https://docs.splunk.com/Documentation/Splunk/9.2.2/Alert/EmailNotificationTokens#Result_tokens) as variables in the form to contextualize the data imported into OpenCTI.
 Tokens represent data that a search generates. They work as placeholders or variables for data values that populate when the search completes.
