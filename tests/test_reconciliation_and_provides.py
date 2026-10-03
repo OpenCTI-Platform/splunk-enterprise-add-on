@@ -1,6 +1,6 @@
 """Tests for the deployment reconciliation, knowledge refresh and provides inventory (WS-B, WS-D, WS-E, #68)."""
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from program_fakes import FakeClient, FakeDetector, FakeKV, FakeLogger, graphql_error
 
@@ -13,8 +13,10 @@ from reconciliation import (
     ACTION_NONE,
     ACTION_REFRESH,
     ACTION_REMOVE,
+    ACTION_WAIT,
     Reconciler,
     plan_reconciliation,
+    recently_confirmed,
 )
 
 NOW = datetime(2026, 10, 3, 12, 0, tzinfo=timezone.utc)
@@ -64,6 +66,23 @@ class PlanTest(unittest.TestCase):
     def test_empty_splunk_collection_never_withdraws_every_deployment(self):
         self.assertEqual(plan_reconciliation({}, {"indicator--a": "deployed", "indicator--b": "active"}, now=NOW), [])
 
+    def test_recently_confirmed_orphan_waits_for_the_lookup(self):
+        splunk = {"indicator--held": {"_key": "k1"}}
+        opencti = {"indicator--new": "deployed", "indicator--old": "deployed"}
+        plan = {(i, a, s) for i, a, s, _ in plan_reconciliation(splunk, opencti, now=NOW, recent={"indicator--new"})}
+        self.assertIn(("indicator--new", ACTION_WAIT, None), plan)
+        self.assertIn(("indicator--old", ACTION_REMOVE, STATUS_REMOVED), plan)
+
+    def test_recently_confirmed(self):
+        confirmed = {
+            "indicator--5m": "2026-10-03T11:55:00.000Z",
+            "indicator--2h": "2026-10-03T10:00:00.000Z",
+            "indicator--skew": "2026-10-03T12:02:00.000Z",
+            "indicator--future": "2026-10-04T12:00:00.000Z",
+            "indicator--corrupt": "soon",
+        }
+        self.assertEqual(recently_confirmed(confirmed, NOW), {"indicator--5m", "indicator--skew"})
+
     def test_refresh(self):
         plan = plan_reconciliation({"indicator--sync": {}}, {"indicator--sync": "active"}, refresh=True, now=NOW)
         self.assertEqual(plan[0][1:3], (ACTION_REFRESH, STATUS_DEPLOYED))
@@ -92,6 +111,22 @@ class ReconcilerTest(unittest.TestCase):
         self.assertEqual(reporter.drained, 1, "the final flush retries transient failures before exit")
         summary = rows[-1]
         self.assertEqual((summary["splunk_indicators"], summary["opencti_deployments"]), (2, 2))
+
+    def test_reconcile_waits_for_the_lookup_of_a_recently_confirmed_deployment(self):
+        """Index mode: an indicator indexed minutes ago is not in opencti_indicators yet."""
+        now = datetime.now(timezone.utc)
+        page = {"stixCoreRelationships": {"pageInfo": {"hasNextPage": False}, "edges": [
+            {"node": {"deployment_status": "deployed", "last_sync_at": (now - timedelta(minutes=5)).isoformat(),
+                      "from": {"standard_id": "indicator--indexed"}}},
+            {"node": {"deployment_status": "deployed", "last_sync_at": (now - timedelta(hours=2)).isoformat(),
+                      "from": {"standard_id": "indicator--gone"}}}]}}
+        client = FakeClient({"SplunkPlatformDeployments": page})
+        kv = FakeKV([{"_key": "k1", "id": "indicator--held"}])
+        reporter = FakeReporter()
+        rows = Reconciler(client, FakeDetector((FEATURE_DEPLOYED_ON,)), PLATFORM, kv, reporter, logger=FakeLogger()).reconcile()
+        self.assertEqual([r[0] for r in reporter.reports if r[1] == STATUS_REMOVED], ["indicator--gone"])
+        self.assertNotIn("indicator--indexed", {r[0] for r in reporter.reports})
+        self.assertEqual(rows[-1]["count_wait"], 1)
 
     def test_reconcile_keeps_the_external_id_opencti_holds(self):
         """An index-mode deployment keeps its index external id instead of flapping to the KV key."""

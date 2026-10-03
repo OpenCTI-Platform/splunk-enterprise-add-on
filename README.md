@@ -562,7 +562,10 @@ searches first: the reconciliation reads the KV Store. A repaired deployment tak
 input gives it (table above), so the stream input and the reconciliation never overwrite each other. Before
 it exits, the search retries the reports a transient OpenCTI failure left queued, through the same backoff,
 for at most 90 seconds; the summary row counts the reports still unsent as `writeback_deferred`, and the
-next run plans them again. An empty `opencti_indicators` collection (not synced yet, or being rebuilt)
+next run plans them again. A deployment Splunk confirmed less than an hour ago (its `last_sync_at` in
+OpenCTI) is not withdrawn because `opencti_indicators` lacks it, since in index mode the lookup follows the
+index every 5 minutes: the summary row counts it in `count_wait`, and a later run withdraws it if it is
+still absent. An empty `opencti_indicators` collection (not synced yet, or being rebuilt)
 never withdraws the deployments OpenCTI knows: the search leaves them unchanged and logs a warning. With
 `Deployment write-back` disabled, the search reports nothing and returns a `skipped` row.
 The search returns a `skipped` row on a platform without the `deployed-on` relationship or without a

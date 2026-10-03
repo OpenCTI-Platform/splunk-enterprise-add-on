@@ -160,6 +160,10 @@ Compatibility with the OpenCTI autonomous threat management program
 - `| openctireconcile` retries the repairs a transient OpenCTI failure left queued (same backoff, at most
   90 seconds of waiting) before it exits, and counts the ones still unsent as `writeback_deferred` in its
   summary row instead of dropping them silently; the next run plans them again.
+- `| openctireconcile` no longer withdraws a deployment Splunk confirmed less than an hour ago only
+  because `opencti_indicators` lacks it (index mode: the lookup follows the index every 5 minutes); it is
+  counted as `count_wait` and withdrawn by a later run if still absent, so newly indexed indicators no
+  longer flap between removed and deployed.
 - An indexed event whose search dropped `_cd` is identified by its raw text together with its `index`,
   `host`, `source` and `sourcetype`, so identical text logged by two hosts in the same second creates two
   incidents instead of one.

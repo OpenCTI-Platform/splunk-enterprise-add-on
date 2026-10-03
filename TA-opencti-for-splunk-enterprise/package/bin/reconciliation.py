@@ -20,12 +20,17 @@ from addon_state import state_key
 from deployment_reporter import STATUS_DEPLOYED, STATUS_EXPIRED, STATUS_REMOVED, removal_status, reported_status
 from knowledge_fields import KNOWLEDGE_FIELDS, enrichment_graphql_fields, refresh_knowledge_fields
 from opencti_features import FEATURE_DEPLOYED_ON, FEATURE_PROVENANCE, FEATURE_PULSE
-from utils import get_bool_val
+from utils import get_bool_val, to_epoch
 
 LIVE_STATUSES = ("deployed", "active")
 PAGE_SIZE = 500
 MAX_DEPLOYMENTS = 500000
 KNOWLEDGE_BATCH = 200
+# A deployment Splunk confirmed this recently is not withdrawn for missing from
+# opencti_indicators: in index mode the lookup follows the index every 5 minutes.
+ORPHAN_GRACE_SECONDS = 3600
+# Clock difference tolerated between Splunk and OpenCTI
+CLOCK_SKEW_SECONDS = 300
 
 DEPLOYMENTS_QUERY = """
 query SplunkPlatformDeployments($toId: StixRef, $first: Int, $after: ID) {
@@ -36,6 +41,7 @@ query SplunkPlatformDeployments($toId: StixRef, $first: Int, $after: ID) {
         id
         deployment_status
         external_id
+        last_sync_at
         from { ... on Indicator { id standard_id } }
       }
     }
@@ -55,6 +61,7 @@ ACTION_DEPLOY = "deploy"
 ACTION_REMOVE = "remove"
 ACTION_EXPIRE = "expire"
 ACTION_REFRESH = "refresh"
+ACTION_WAIT = "wait"
 ACTION_NONE = "none"
 
 
@@ -71,13 +78,31 @@ def splunk_state(record, now=None):
     return "usable"
 
 
-def plan_reconciliation(splunk_indicators, opencti_deployments, refresh=False, now=None):
+def recently_confirmed(confirmed_at, now):
+    """
+    :param confirmed_at: dict STIX id -> last_sync_at of the deployment in OpenCTI
+    :param now: aware datetime
+    :return: set of the STIX ids Splunk confirmed within ORPHAN_GRACE_SECONDS
+        (a time further in the future than the clock skew is not recent)
+    """
+    recent = set()
+    for indicator_id, value in confirmed_at.items():
+        epoch = to_epoch(value)
+        if epoch is not None and -CLOCK_SKEW_SECONDS <= now.timestamp() - epoch <= ORPHAN_GRACE_SECONDS:
+            recent.add(indicator_id)
+    return recent
+
+
+def plan_reconciliation(splunk_indicators, opencti_deployments, refresh=False, now=None, recent=()):
     """
     Pure drift computation (unit tested).
 
     :param splunk_indicators: dict STIX id -> opencti_indicators record
     :param opencti_deployments: dict STIX id -> deployment_status in OpenCTI
     :param refresh: re-report indicators already in sync
+    :param recent: STIX ids Splunk confirmed recently (see recently_confirmed):
+        absent from opencti_indicators, they wait for the lookup instead of
+        being withdrawn
     :return: list of (indicator STIX id, action, status to report or None, record or None)
     """
     plan = []
@@ -102,7 +127,10 @@ def plan_reconciliation(splunk_indicators, opencti_deployments, refresh=False, n
     if splunk_indicators:
         for indicator_id, current in opencti_deployments.items():
             if indicator_id not in splunk_indicators and current in LIVE_STATUSES:
-                plan.append((indicator_id, ACTION_REMOVE, STATUS_REMOVED, None))
+                if indicator_id in recent:
+                    plan.append((indicator_id, ACTION_WAIT, None, None))
+                else:
+                    plan.append((indicator_id, ACTION_REMOVE, STATUS_REMOVED, None))
     return plan
 
 
@@ -128,6 +156,7 @@ class Reconciler:
         self.deployments = deployments
         self.external_ids = {}
         self.reported_external_ids = {}
+        self.confirmed_at = {}
 
     def external_id(self, indicator_id, record):
         """
@@ -182,6 +211,8 @@ class Reconciler:
                     deployments[source["standard_id"]] = node.get("deployment_status")
                     if node.get("external_id"):
                         self.external_ids[source["standard_id"]] = node["external_id"]
+                    if node.get("last_sync_at"):
+                        self.confirmed_at[source["standard_id"]] = node["last_sync_at"]
             page = connection.get("pageInfo") or {}
             if not page.get("hasNextPage"):
                 break
@@ -204,13 +235,16 @@ class Reconciler:
             self.logger.warning(
                 f"{self.collection_name} is empty: the {len(opencti)} deployments OpenCTI knows are left unchanged"
             )
-        plan = plan_reconciliation(splunk, opencti, refresh=refresh, now=datetime.now(timezone.utc))
-        self.load_reported_external_ids([indicator_id for indicator_id, action, _, _ in plan if action != ACTION_NONE])
+        now = datetime.now(timezone.utc)
+        plan = plan_reconciliation(splunk, opencti, refresh=refresh, now=now,
+                                   recent=recently_confirmed(self.confirmed_at, now))
+        idle = (ACTION_NONE, ACTION_WAIT)
+        self.load_reported_external_ids([indicator_id for indicator_id, action, _, _ in plan if action not in idle])
         rows = []
         counts = {}
         for indicator_id, action, status, record in plan:
             counts[action] = counts.get(action, 0) + 1
-            if action == ACTION_NONE:
+            if action in idle:
                 continue
             external_id = self.external_id(indicator_id, record)
             removed_at = record.get("valid_until") if record and status == STATUS_EXPIRED else None
