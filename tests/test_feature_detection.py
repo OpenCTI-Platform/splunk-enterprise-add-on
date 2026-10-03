@@ -50,7 +50,7 @@ class ComputeFeaturesTest(unittest.TestCase):
     def test_program_branches_enable_every_feature(self):
         result = compute_features(
             set(PROGRAM_MUTATIONS), set(PROGRAM_QUERIES), {"corroboration_count", "pulse"},
-            {"SecurityPlatform_DataComponent": ["provides"], "Indicator_SecurityPlatform": ["deployed-on"]}, True,
+            {"SecurityPlatform_Data-Component": ["provides"], "Indicator_SecurityPlatform": ["deployed-on"]}, True,
         )
         for feature in (
             features.FEATURE_SECURITY_PLATFORM, features.FEATURE_DEPLOYED_ON, features.FEATURE_DEPLOYMENT,
@@ -73,8 +73,11 @@ class ComputeFeaturesTest(unittest.TestCase):
 
     def test_provides_comes_from_the_relationship_mapping(self):
         self.assertNotIn(features.FEATURE_PROVIDES, compute_features(set(), set(), set(), {}, False))
+        # schemaRelationsTypesMapping keys use the entity type names (OpenCTI stixRelationship.js)
         self.assertIn(features.FEATURE_PROVIDES, compute_features(
-            set(), set(), set(), {"SecurityPlatform_DataComponent": ["provides"]}, False))
+            set(), set(), set(), {"SecurityPlatform_Data-Component": ["provides"]}, False))
+        self.assertNotIn(features.FEATURE_PROVIDES, compute_features(
+            set(), set(), set(), {"System_Data-Component": ["provides"]}, False), "System is not a Security Platform")
 
 
 class DetectorTest(unittest.TestCase):

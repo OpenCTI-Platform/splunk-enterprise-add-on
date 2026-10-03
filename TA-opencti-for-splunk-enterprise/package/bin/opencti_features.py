@@ -128,7 +128,8 @@ def compute_features(mutations, queries, indicator_fields, relations, enterprise
         features.add(FEATURE_HUNTS)
     if "huntRunEvidenceAdd" in mutations:
         features.add(FEATURE_HUNT_EVIDENCE)
-    if "provides" in (relations.get("SecurityPlatform_DataComponent") or []):
+    # Keys are "<from entity type>_<to entity type>": Data Components are "Data-Component"
+    if "provides" in (relations.get("SecurityPlatform_Data-Component") or []):
         features.add(FEATURE_PROVIDES)
     if "corroboration_count" in indicator_fields:
         features.add(FEATURE_PROVENANCE)
