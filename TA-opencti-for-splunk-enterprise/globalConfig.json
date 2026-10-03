@@ -632,10 +632,10 @@
                 },
                 {
                     "type": "checkbox",
-                    "label": "Launch Case Autopilot",
-                    "field": "launch_case_autopilot",
+                    "label": "Run Case Autopilot",
+                    "field": "run_case_autopilot",
                     "defaultValue": 0,
-                    "help": "Start a Case Autopilot investigation once per created object (OpenCTI Enterprise Edition with Case Autopilot)."
+                    "help": "Run Case Autopilot once per created object (OpenCTI Enterprise Edition with Case Autopilot)."
                 },
                 {
                     "type": "text",
@@ -783,10 +783,10 @@
                 },
                 {
                     "type": "checkbox",
-                    "label": "Launch Case Autopilot",
-                    "field": "launch_case_autopilot",
+                    "label": "Run Case Autopilot",
+                    "field": "run_case_autopilot",
                     "defaultValue": 0,
-                    "help": "Start a Case Autopilot investigation once per created object (OpenCTI Enterprise Edition with Case Autopilot)."
+                    "help": "Run Case Autopilot once per created object (OpenCTI Enterprise Edition with Case Autopilot)."
                 },
                 {
                     "type": "text",

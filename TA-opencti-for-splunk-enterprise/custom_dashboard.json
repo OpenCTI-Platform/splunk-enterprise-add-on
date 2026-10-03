@@ -251,7 +251,7 @@
       },
       "showLastUpdated": false,
       "showProgressBar": false,
-      "title": "Deployment write-back by status",
+      "title": "Deployments by status",
       "type": "splunk.pie"
     },
     "viz_dep_failures_count": {
@@ -261,7 +261,7 @@
       "options": {},
       "showLastUpdated": false,
       "showProgressBar": false,
-      "title": "Deployment failures",
+      "title": "Failed deployments",
       "type": "splunk.singlevalue"
     },
     "viz_dep_last_sync": {
@@ -271,7 +271,7 @@
       "options": {},
       "showLastUpdated": false,
       "showProgressBar": false,
-      "title": "Last deployment sync",
+      "title": "Last sync",
       "type": "splunk.singlevalue"
     },
     "viz_val_outcomes": {
@@ -293,7 +293,7 @@
       },
       "showLastUpdated": false,
       "showProgressBar": false,
-      "title": "IOC validation outcomes",
+      "title": "Validation statuses",
       "type": "splunk.pie"
     },
     "viz_dep_failures": {
@@ -303,7 +303,7 @@
       "options": {},
       "showLastUpdated": false,
       "showProgressBar": false,
-      "title": "Deployment failures (latest)",
+      "title": "Failed deployments (latest)",
       "type": "splunk.table"
     },
     "viz_hits_top": {
@@ -345,7 +345,7 @@
       "options": {},
       "showLastUpdated": false,
       "showProgressBar": false,
-      "title": "IOC validation proofs (latest)",
+      "title": "Latest validations",
       "type": "splunk.table"
     },
     "viz_writeback_errors": {
@@ -355,7 +355,7 @@
       "options": {},
       "showLastUpdated": false,
       "showProgressBar": false,
-      "title": "Write-back errors and warnings (add-on logs)",
+      "title": "Write-back errors and warnings",
       "type": "splunk.table"
     },
     "viz_kn_corroboration": {
@@ -399,7 +399,7 @@
       },
       "showLastUpdated": false,
       "showProgressBar": false,
-      "title": "Single-sourced vs corroborated",
+      "title": "Single-sourced indicators",
       "type": "splunk.pie"
     },
     "viz_kn_stale": {
@@ -421,8 +421,18 @@
       },
       "showLastUpdated": false,
       "showProgressBar": false,
-      "title": "Freshness",
+      "title": "Stale indicators",
       "type": "splunk.pie"
+    },
+    "viz_kn_top": {
+      "dataSources": {
+        "primary": "ds_kn_top"
+      },
+      "options": {},
+      "showLastUpdated": false,
+      "showProgressBar": false,
+      "title": "Most corroborated indicators",
+      "type": "splunk.table"
     },
     "viz_kn_prevalence": {
       "dataSources": {
@@ -443,7 +453,7 @@
       },
       "showLastUpdated": false,
       "showProgressBar": false,
-      "title": "Threat Pulse prevalence",
+      "title": "Prevalence",
       "type": "splunk.pie"
     },
     "viz_kn_trend": {
@@ -465,17 +475,17 @@
       },
       "showLastUpdated": false,
       "showProgressBar": false,
-      "title": "Threat Pulse trend",
+      "title": "Trend",
       "type": "splunk.pie"
     },
-    "viz_kn_top": {
+    "viz_kn_rising": {
       "dataSources": {
-        "primary": "ds_kn_top"
+        "primary": "ds_kn_rising"
       },
       "options": {},
       "showLastUpdated": false,
       "showProgressBar": false,
-      "title": "Most corroborated indicators",
+      "title": "Rising indicators",
       "type": "splunk.table"
     },
     "viz_df_declared": {
@@ -485,7 +495,7 @@
       "options": {},
       "showLastUpdated": false,
       "showProgressBar": false,
-      "title": "Data components declared to OpenCTI",
+      "title": "Data components declared (provides)",
       "type": "splunk.singlevalue"
     },
     "viz_df_inventory": {
@@ -495,7 +505,47 @@
       "options": {},
       "showLastUpdated": false,
       "showProgressBar": false,
-      "title": "Telemetry inventory (provides)",
+      "title": "Telemetry inventory",
+      "type": "splunk.table"
+    },
+    "viz_hunt_evidence": {
+      "dataSources": {
+        "primary": "ds_hunt_evidence"
+      },
+      "options": {},
+      "showLastUpdated": false,
+      "showProgressBar": false,
+      "title": "Hunt evidence",
+      "type": "splunk.table"
+    },
+    "viz_hunt_errors": {
+      "dataSources": {
+        "primary": "ds_hunt_errors"
+      },
+      "options": {},
+      "showLastUpdated": false,
+      "showProgressBar": false,
+      "title": "Hunt evidence errors",
+      "type": "splunk.table"
+    },
+    "viz_tl_milestones": {
+      "dataSources": {
+        "primary": "ds_tl_milestones"
+      },
+      "options": {},
+      "showLastUpdated": false,
+      "showProgressBar": false,
+      "title": "Timeline milestones",
+      "type": "splunk.table"
+    },
+    "viz_tl_autopilot": {
+      "dataSources": {
+        "primary": "ds_tl_autopilot"
+      },
+      "options": {},
+      "showLastUpdated": false,
+      "showProgressBar": false,
+      "title": "Case Autopilot runs",
       "type": "splunk.table"
     }
   },
@@ -600,15 +650,15 @@
       "type": "ds.search"
     },
     "ds_dep_status": {
-      "name": "Deployment write-back by status",
+      "name": "Deployments by status",
       "options": {
-        "query": "| inputlookup opencti_deployments | stats count by status",
+        "query": "| inputlookup opencti_deployments | stats count by status | rename status AS deployment_status",
         "queryParameters": {}
       },
       "type": "ds.search"
     },
     "ds_dep_failures_count": {
-      "name": "Deployment failures",
+      "name": "Failed deployments",
       "options": {
         "query": "| inputlookup opencti_deployments | where result=\"error\" OR status=\"failed\" | stats count",
         "queryParameters": {}
@@ -616,7 +666,7 @@
       "type": "ds.search"
     },
     "ds_dep_last_sync": {
-      "name": "Last deployment sync",
+      "name": "Last sync",
       "options": {
         "query": "| inputlookup opencti_deployments | eval t=strptime(reported_at, \"%Y-%m-%dT%H:%M:%SZ\") | stats max(t) AS last | eval last_sync=strftime(last, \"%Y-%m-%d %H:%M:%S UTC\") | fields last_sync",
         "queryParameters": {}
@@ -624,17 +674,17 @@
       "type": "ds.search"
     },
     "ds_val_outcomes": {
-      "name": "IOC validation outcomes",
+      "name": "Validation statuses",
       "options": {
-        "query": "| inputlookup opencti_validation_results | stats count by outcome",
+        "query": "| inputlookup opencti_validation_results | stats count by outcome | rename outcome AS validation_status",
         "queryParameters": {}
       },
       "type": "ds.search"
     },
     "ds_dep_failures": {
-      "name": "Deployment failures (latest)",
+      "name": "Failed deployments (latest)",
       "options": {
-        "query": "| inputlookup opencti_deployments | where result=\"error\" OR status=\"failed\" | lookup opencti_indicators id AS indicator_id OUTPUT value type | sort - reported_at | head 100 | table reported_at indicator_id value type status error",
+        "query": "| inputlookup opencti_deployments | where result=\"error\" OR status=\"failed\" | lookup opencti_indicators id AS indicator_id OUTPUT value type | sort - reported_at | head 100 | rename status AS deployment_status | table reported_at indicator_id value type deployment_status error",
         "queryParameters": {}
       },
       "type": "ds.search"
@@ -656,15 +706,15 @@
       "type": "ds.search"
     },
     "ds_val_latest": {
-      "name": "IOC validation proofs (latest)",
+      "name": "Latest validations",
       "options": {
-        "query": "| inputlookup opencti_validation_results | sort - decided_at | head 100 | table decided_at request_name value test_kind outcome first_matching_hit channel",
+        "query": "| inputlookup opencti_validation_results | sort - decided_at | head 100 | rename outcome AS validation_status | table decided_at request_name value test_kind validation_status first_matching_hit channel",
         "queryParameters": {}
       },
       "type": "ds.search"
     },
     "ds_writeback_errors": {
-      "name": "Write-back errors and warnings (add-on logs)",
+      "name": "Write-back errors and warnings",
       "options": {
         "query": "index=_internal sourcetype=\"taopenctiforsplunkenterprise:log\" (\"Deployment write-back\" OR \"Hit report\" OR \"IOC validation\" OR \"provides\" OR \"Security Platform\") (ERROR OR WARNING) | head 100 | table _time source _raw"
       },
@@ -679,33 +729,17 @@
       "type": "ds.search"
     },
     "ds_kn_sourcing": {
-      "name": "Single-sourced vs corroborated",
+      "name": "Single-sourced indicators",
       "options": {
-        "query": "| inputlookup opencti_indicators | where isnotnull(corroboration_count) | eval sourcing=if(match(lower(tostring(single_sourced)), \"^(1|true)$\"), \"single source\", \"corroborated\") | stats count by sourcing",
+        "query": "| inputlookup opencti_indicators | where isnotnull(corroboration_count) | eval single_sourced=if(match(lower(tostring(single_sourced)), \"^(1|true)$\"), \"true\", \"false\") | stats count by single_sourced",
         "queryParameters": {}
       },
       "type": "ds.search"
     },
     "ds_kn_stale": {
-      "name": "Freshness",
+      "name": "Stale indicators",
       "options": {
-        "query": "| inputlookup opencti_indicators | where isnotnull(corroboration_count) | eval freshness=if(match(lower(tostring(freshness_stale)), \"^(1|true)$\"), \"stale\", \"fresh\") | stats count by freshness",
-        "queryParameters": {}
-      },
-      "type": "ds.search"
-    },
-    "ds_kn_prevalence": {
-      "name": "Threat Pulse prevalence",
-      "options": {
-        "query": "| inputlookup opencti_indicators | where isnotnull(pulse_prevalence) | stats count by pulse_prevalence",
-        "queryParameters": {}
-      },
-      "type": "ds.search"
-    },
-    "ds_kn_trend": {
-      "name": "Threat Pulse trend",
-      "options": {
-        "query": "| inputlookup opencti_indicators | where isnotnull(pulse_trend) | stats count by pulse_trend",
+        "query": "| inputlookup opencti_indicators | where isnotnull(corroboration_count) | eval freshness_stale=if(match(lower(tostring(freshness_stale)), \"^(1|true)$\"), \"true\", \"false\") | stats count by freshness_stale",
         "queryParameters": {}
       },
       "type": "ds.search"
@@ -713,13 +747,37 @@
     "ds_kn_top": {
       "name": "Most corroborated indicators",
       "options": {
-        "query": "| inputlookup opencti_indicators | where isnotnull(corroboration_count) | sort - corroboration_count | head 50 | table value type corroboration_count sources sources_by_kind last_asserted_at pulse_prevalence pulse_trend",
+        "query": "| inputlookup opencti_indicators | where isnotnull(corroboration_count) | sort - corroboration_count | head 50 | table value type corroboration_count sources sources_by_kind last_asserted_at single_sourced",
+        "queryParameters": {}
+      },
+      "type": "ds.search"
+    },
+    "ds_kn_prevalence": {
+      "name": "Prevalence",
+      "options": {
+        "query": "| inputlookup opencti_indicators | where isnotnull(pulse_prevalence) | stats count by pulse_prevalence",
+        "queryParameters": {}
+      },
+      "type": "ds.search"
+    },
+    "ds_kn_trend": {
+      "name": "Trend",
+      "options": {
+        "query": "| inputlookup opencti_indicators | where isnotnull(pulse_trend) | stats count by pulse_trend",
+        "queryParameters": {}
+      },
+      "type": "ds.search"
+    },
+    "ds_kn_rising": {
+      "name": "Rising indicators",
+      "options": {
+        "query": "| inputlookup opencti_indicators | where pulse_trend=\"rising\" | sort - score | head 50 | table value type score pulse_prevalence pulse_trend pulse_first_seen_network pulse_platforms_bucket",
         "queryParameters": {}
       },
       "type": "ds.search"
     },
     "ds_df_declared": {
-      "name": "Data components declared to OpenCTI",
+      "name": "Data components declared (provides)",
       "options": {
         "query": "| inputlookup opencti_provides | where status=\"declared\" | stats dc(data_component) AS declared",
         "queryParameters": {}
@@ -727,10 +785,38 @@
       "type": "ds.search"
     },
     "ds_df_inventory": {
-      "name": "Telemetry inventory (provides)",
+      "name": "Telemetry inventory",
       "options": {
         "query": "| inputlookup opencti_provides | sort data_component | table data_component status event_count sources reported_at",
         "queryParameters": {}
+      },
+      "type": "ds.search"
+    },
+    "ds_hunt_evidence": {
+      "name": "Hunt evidence",
+      "options": {
+        "query": "index=_internal sourcetype=\"taopenctiforsplunkenterprise:log\" source=\"*opencti_report_hunt_evidence_modalert.log*\" \"Hunt evidence for run\" | rex \"Hunt evidence for run (?<hunt_run_id>\\S+) \\((?<hunt>.*?)\\) sent: (?<objects>\\d+) objects, (?<targets>\\d+) hunt targets\" | table _time hunt_run_id hunt objects targets"
+      },
+      "type": "ds.search"
+    },
+    "ds_hunt_errors": {
+      "name": "Hunt evidence errors",
+      "options": {
+        "query": "index=_internal sourcetype=\"taopenctiforsplunkenterprise:log\" source=\"*opencti_report_hunt_evidence_modalert.log*\" (ERROR OR WARNING) | head 100 | table _time _raw"
+      },
+      "type": "ds.search"
+    },
+    "ds_tl_milestones": {
+      "name": "Timeline milestones",
+      "options": {
+        "query": "index=_internal sourcetype=\"taopenctiforsplunkenterprise:log\" \"Timeline milestone added on\" | rex \"Timeline milestone added on (?<container_id>\\S+)\" | table _time source container_id"
+      },
+      "type": "ds.search"
+    },
+    "ds_tl_autopilot": {
+      "name": "Case Autopilot runs",
+      "options": {
+        "query": "index=_internal sourcetype=\"taopenctiforsplunkenterprise:log\" \"Case Autopilot run\" \"started for\" | rex \"Case Autopilot run (?<run_id>\\S+) started for (?<container_id>\\S+)\" | table _time source run_id container_id"
       },
       "type": "ds.search"
     }
@@ -940,10 +1026,10 @@
         ],
         "type": "absolute"
       },
-      "layout_knowledge": {
+      "layout_sources": {
         "options": {
           "display": "fit-to-width",
-          "height": 950,
+          "height": 640,
           "width": 1440
         },
         "structure": [
@@ -978,12 +1064,32 @@
             "type": "block"
           },
           {
+            "item": "viz_kn_top",
+            "position": {
+              "h": 320,
+              "w": 1420,
+              "x": 10,
+              "y": 310
+            },
+            "type": "block"
+          }
+        ],
+        "type": "absolute"
+      },
+      "layout_pulse": {
+        "options": {
+          "display": "fit-to-width",
+          "height": 640,
+          "width": 1440
+        },
+        "structure": [
+          {
             "item": "viz_kn_prevalence",
             "position": {
               "h": 300,
               "w": 700,
               "x": 10,
-              "y": 310
+              "y": 0
             },
             "type": "block"
           },
@@ -993,17 +1099,17 @@
               "h": 300,
               "w": 710,
               "x": 720,
-              "y": 310
+              "y": 0
             },
             "type": "block"
           },
           {
-            "item": "viz_kn_top",
+            "item": "viz_kn_rising",
             "position": {
               "h": 320,
               "w": 1420,
               "x": 10,
-              "y": 620
+              "y": 310
             },
             "type": "block"
           }
@@ -1039,6 +1145,66 @@
           }
         ],
         "type": "absolute"
+      },
+      "layout_hunts": {
+        "options": {
+          "display": "fit-to-width",
+          "height": 720,
+          "width": 1440
+        },
+        "structure": [
+          {
+            "item": "viz_hunt_evidence",
+            "position": {
+              "h": 400,
+              "w": 1420,
+              "x": 10,
+              "y": 0
+            },
+            "type": "block"
+          },
+          {
+            "item": "viz_hunt_errors",
+            "position": {
+              "h": 300,
+              "w": 1420,
+              "x": 10,
+              "y": 410
+            },
+            "type": "block"
+          }
+        ],
+        "type": "absolute"
+      },
+      "layout_timeline": {
+        "options": {
+          "display": "fit-to-width",
+          "height": 720,
+          "width": 1440
+        },
+        "structure": [
+          {
+            "item": "viz_tl_milestones",
+            "position": {
+              "h": 350,
+              "w": 1420,
+              "x": 10,
+              "y": 0
+            },
+            "type": "block"
+          },
+          {
+            "item": "viz_tl_autopilot",
+            "position": {
+              "h": 350,
+              "w": 1420,
+              "x": 10,
+              "y": 360
+            },
+            "type": "block"
+          }
+        ],
+        "type": "absolute"
       }
     },
     "options": {},
@@ -1053,12 +1219,24 @@
           "layoutId": "layout_assurance"
         },
         {
-          "label": "Knowledge fields",
-          "layoutId": "layout_knowledge"
+          "label": "Sources",
+          "layoutId": "layout_sources"
         },
         {
-          "label": "Defense matrix telemetry",
+          "label": "Threat Pulse",
+          "layoutId": "layout_pulse"
+        },
+        {
+          "label": "Defense matrix",
           "layoutId": "layout_defense"
+        },
+        {
+          "label": "Hunts",
+          "layoutId": "layout_hunts"
+        },
+        {
+          "label": "Timeline",
+          "layoutId": "layout_timeline"
         }
       ]
     }

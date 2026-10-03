@@ -10,7 +10,7 @@ opencti_indicator_hits, and a test is
   (dispatch -> completion, widened by the configured grace period);
 - missed when the request is completed, the grace period is over and no hit
   window overlaps;
-- pending otherwise.
+- requested (no result yet) otherwise.
 
 Outcomes are written back once per request and indicator:
 ``iocValidationReportResults`` when the platform has it (requested on
@@ -31,7 +31,8 @@ from utils import generate_identity_id, generate_relation_id, generate_validatio
 
 OUTCOME_DETECTED = "detected"
 OUTCOME_MISSED = "missed"
-OUTCOME_PENDING = "pending"
+# Still waiting for a result: the OpenCTI validation status of the pair
+OUTCOME_PENDING = "requested"
 
 # Requests whose tests may be running or done
 ACTIVE_STATUSES = ("sent", "awaiting_approval", "running", "completed", "partial")

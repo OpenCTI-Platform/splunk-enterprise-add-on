@@ -2,7 +2,7 @@
 
 - Timeline milestone on the Incident / Case-Incident created by an alert
   (innovation 11, timelineEventAdd, idempotent through external_id).
-- Case Autopilot launch on that container (innovation 02, investigationRunAdd,
+- Run Case Autopilot on that container (innovation 02, investigationRunAdd,
   Enterprise Edition), at most once per container.
 - Indicator resolution for sightings (#57, #67): by STIX id, or by value
   through the opencti_indicators KV Store and OpenCTI's exact pattern.
@@ -96,7 +96,7 @@ def build_milestone_input(container_id, search_name, trigger_time, event_time=No
         "container_id": container_id,
         "event_time": to_iso(trigger_time),
         "precision": "exact",
-        "lane": "detection",
+        "lane": "custom",
         "kind": "milestone",
         "title": title,
         "description": "\n".join(lines)[:TIMELINE_DESCRIPTION_MAX],
@@ -134,7 +134,7 @@ def _event_time(event):
 
 def schedule_container_followups(context, container_id, event):
     """
-    Defer the timeline milestone and the Case Autopilot launch of a container
+    Defer the timeline milestone and the Case Autopilot run of a container
     created by an alert until OpenCTI has ingested it (alert_common).
 
     :param context: alert_common.AlertContext
@@ -149,31 +149,31 @@ def schedule_container_followups(context, container_id, event):
             "Timeline milestone",
             lambda: add_timeline_milestone(context, container_id, event_time, trigger_time),
         )
-    if context.flag("launch_case_autopilot", False) and context.detector.require(
-        FEATURE_CASE_AUTOPILOT, "Case Autopilot launch"
+    if context.flag("run_case_autopilot", False) and context.detector.require(
+        FEATURE_CASE_AUTOPILOT, "Run Case Autopilot"
     ):
         policy_id = context.param("autopilot_policy_id", "")
         context.defer(
             container_id,
-            "Case Autopilot launch",
-            lambda: launch_case_autopilot(context, container_id, policy_id),
+            "Run Case Autopilot",
+            lambda: run_case_autopilot(context, container_id, policy_id),
         )
 
 
 # region Case Autopilot
-def launch_case_autopilot(context, container_id, policy_id=None):
+def run_case_autopilot(context, container_id, policy_id=None):
     """
-    Launch one Case Autopilot run per container (repeated alerts on the same
+    Run Case Autopilot once per container (repeated alerts on the same
     incident do not start new runs).
 
     :param context: alert_common.AlertContext
     :return: id of the run, or None when skipped
     """
-    if not context.detector.require(FEATURE_CASE_AUTOPILOT, "Case Autopilot launch"):
+    if not context.detector.require(FEATURE_CASE_AUTOPILOT, "Run Case Autopilot"):
         return None
     marker = f"autopilot|{context.client.opencti_url}|{container_id}"
     if context.cache.get(marker):
-        context.logger.info(f"Case Autopilot already launched for {container_id}")
+        context.logger.info(f"Case Autopilot already run for {container_id}")
         return None
     data = context.client.graphql_query(AUTOPILOT_ADD_MUTATION, {
         "subjectId": container_id,
@@ -181,7 +181,7 @@ def launch_case_autopilot(context, container_id, policy_id=None):
     })
     run = data.get("investigationRunAdd") or {}
     context.cache.set(marker, {"run_id": run.get("id"), "launched_at": utc_now_iso()})
-    context.logger.info(f"Case Autopilot run {run.get('id')} launched for {container_id}")
+    context.logger.info(f"Case Autopilot run {run.get('id')} started for {container_id}")
     return run.get("id")
 # endregion
 

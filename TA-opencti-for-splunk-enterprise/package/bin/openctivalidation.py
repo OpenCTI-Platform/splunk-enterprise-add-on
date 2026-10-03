@@ -40,7 +40,7 @@ class OpenCTIValidationCommand(GeneratingCommand):
         )
         rows = prover.run()
         if not rows:
-            yield {"outcome": "none", "message": "No IOC validation request targets this Security Platform"}
+            yield {"message": "No IOC validation request targets this Security Platform"}
         for row in rows:
             yield row
 

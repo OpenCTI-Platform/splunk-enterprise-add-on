@@ -145,8 +145,8 @@ class GlobalConfigTest(unittest.TestCase):
 
     def test_alert_parameters_read_by_the_helpers_exist(self):
         expected = {
-            "opencti_create_incident": {"incident_key", "timeline_milestone", "launch_case_autopilot", "autopilot_policy_id"},
-            "opencti_create_incident_response": {"incident_key", "timeline_milestone", "launch_case_autopilot", "autopilot_policy_id"},
+            "opencti_create_incident": {"incident_key", "timeline_milestone", "run_case_autopilot", "autopilot_policy_id"},
+            "opencti_create_incident_response": {"incident_key", "timeline_milestone", "run_case_autopilot", "autopilot_policy_id"},
             "opencti_create_sighting": {"sighted_on_platform", "count", "sighting_of_type", "where_sighted_value"},
             "opencti_report_hunt_evidence": {"hunt_run_id", "count", "observables_extraction", "tlp", "labels"},
         }
@@ -196,7 +196,9 @@ class DashboardTest(unittest.TestCase):
         with open(os.path.join(TA, "custom_dashboard.json"), encoding="utf-8") as handle:
             dashboard = json.load(handle)
         labels = [tab["label"] for tab in dashboard["layout"]["tabs"]["items"]]
-        self.assertEqual(labels, ["Indicators", "Dissemination assurance", "Knowledge fields", "Defense matrix telemetry"])
+        # Names of the OpenCTI features (innovation 13 naming directive)
+        self.assertEqual(labels, ["Indicators", "Dissemination assurance", "Sources", "Threat Pulse",
+                                  "Defense matrix", "Hunts", "Timeline"])
         for layout in dashboard["layout"]["layoutDefinitions"].values():
             for item in layout["structure"]:
                 visualization = dashboard["visualizations"][item["item"]]

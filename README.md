@@ -102,7 +102,7 @@ search head of a cluster, so members with different server names keep one Securi
 
 **OpenCTI account permissions.** The account of the add-on needs the capabilities of a connector service
 account (bundle push and connector registration) plus "Knowledge: create / update" for the write-back
-mutations and the Security Platform creation; launching Case Autopilot also needs "Knowledge: ask for
+mutations and the Security Platform creation; Run Case Autopilot also needs "Knowledge: ask for
 enrichment" and an Enterprise Edition license.
 
 ## OpenCTI Data Inputs Configuration
@@ -352,7 +352,7 @@ You can create an incident or an incident response case in OpenCTI from a custom
 | `Observables extraction` | Method for extracting observables                     | Incident & Incident response case | 
 | `Incident key`           | Optional token identifying the result (for example `$result.event_id$` of an ES notable, or `$result.user$` for a `stats ... by user` search). Distinct keys always create distinct objects, the same key upserts | Incident & Incident response case |
 | `Add a timeline milestone` | Adds the alert (name, trigger time, link to the Splunk results) as a milestone of the timeline of the created object (OpenCTI with incident and case timelines) | Incident & Incident response case |
-| `Launch Case Autopilot`  | Starts one Case Autopilot investigation per created object (OpenCTI Enterprise Edition with Case Autopilot) | Incident & Incident response case |
+| `Run Case Autopilot`     | Runs Case Autopilot once per created object (OpenCTI Enterprise Edition with Case Autopilot) | Incident & Incident response case |
 | `Case Autopilot policy ID` | Optional investigation policy, the platform default applies when empty | Incident & Incident response case |
 
 Incidents and cases created from indexed events (results carrying `_cd` / `_raw`) get an id derived from
@@ -360,7 +360,7 @@ the event itself, so distinct events firing in the same second never merge (#47)
 returned by overlapping scheduled runs keeps upserting onto one object. Rows of transforming searches
 (`stats`, `table`...) keep the historical name + time id unless an `Incident key` is given.
 
-The timeline milestone and the Case Autopilot launch run once OpenCTI has ingested the created object
+The timeline milestone (lane `custom`) and Run Case Autopilot happen once OpenCTI has ingested the created object
 (the bundle is processed asynchronously by the OpenCTI workers, the action waits up to 60 seconds); both
 are idempotent, so a skipped milestone is added by the next run of the alert.
 
@@ -491,7 +491,7 @@ capabilities are skipped with one log line such as
 | Telemetry inventory (`provides`)                             | `provides` relationship (Security Platform -> Data Component)    | skipped                              |
 | Hunt evidence linked to the run                              | `huntRun` (+ `huntRunEvidenceAdd`)                               | evidence sent without the run link   |
 | Timeline milestone                                           | `timelineEventAdd`                                               | skipped                              |
-| Case Autopilot launch                                        | `investigationRunAdd` and an Enterprise Edition license          | skipped                              |
+| Run Case Autopilot                                           | `investigationRunAdd` and an Enterprise Edition license          | skipped                              |
 | Provenance fields                                            | provenance stream extension, `Indicator.corroboration_count`     | fields absent                        |
 | Threat Pulse fields                                          | `Indicator.pulse`                                                | fields absent                        |
 
@@ -562,7 +562,7 @@ platform:
   request, plus the grace period);
 - **missed** when the request is completed, the grace period is over and no hit overlaps; a sighting
   with `x_opencti_negative = true` records the miss on the Security Platform;
-- **pending** otherwise (nothing is written).
+- **requested** otherwise: no result yet, nothing is written.
 
 Outcomes are written once per request and indicator (`opencti_validation_results`): through
 `iocValidationReportResults` when the platform has it, otherwise through a STIX bundle carrying the
@@ -734,13 +734,15 @@ Their logs are in `$SPLUNK_HOME/var/log/splunk/ta-opencti-for-splunk-enterprise_
 
 ### Monitoring
 
-The Monitoring dashboard has three new tabs:
+The Monitoring dashboard has six new tabs, named after the OpenCTI features:
 
-- **Dissemination assurance**: deployment write-back by status, failures and last sync, most hit
-  indicators, indicators hit per day, IOC validation outcomes and proofs, write-back errors from the logs;
-- **Knowledge fields**: indicators by number of sources, single-sourced share, freshness, Threat Pulse
-  prevalence and trend, most corroborated indicators;
-- **Defense matrix telemetry**: data components declared to OpenCTI and the telemetry inventory.
+- **Dissemination assurance**: deployments by status, failed deployments and last sync, most hit
+  indicators, indicators hit per day, validation statuses and latest validations, write-back errors;
+- **Sources**: indicators by number of sources, single-sourced share, freshness, most corroborated indicators;
+- **Threat Pulse**: prevalence and trend of the indicators;
+- **Defense matrix**: data components declared to OpenCTI (provides) and the telemetry inventory;
+- **Hunts**: hunt evidence reported by the "OpenCTI - Report hunt evidence" alert action;
+- **Timeline**: timeline milestones added and Case Autopilot runs started by the incident alert actions.
 
 ### Program saved searches (all shipped disabled)
 

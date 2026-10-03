@@ -59,7 +59,7 @@ class ValidationCommandTest(unittest.TestCase):
         command = openctivalidation.OpenCTIValidationCommand()
         with mock.patch.object(openctivalidation, "CommandContext", return_value=context):
             rows = list(command.generate())
-        self.assertEqual(rows[0]["outcome"], "none")
+        self.assertNotIn("outcome", rows[0])
 
 
 class ReconcileCommandTest(unittest.TestCase):

@@ -271,7 +271,7 @@ class IncidentKeyTest(unittest.TestCase):
 class FollowupTest(unittest.TestCase):
     def test_incident_schedules_timeline_and_autopilot(self):
         helper = FakeAlertHelper(params={"name": "Brute force", "tlp": "tlp_clear", "observables_extraction": "disable",
-                                         "timeline_milestone": "1", "launch_case_autopilot": "1", "autopilot_policy_id": "policy-1"},
+                                         "timeline_milestone": "1", "run_case_autopilot": "1", "autopilot_policy_id": "policy-1"},
                                  events=[EVENT])
         client = FakeClient({
             "SplunkTimelineMilestone": {"timelineEventAdd": {"id": "event-1"}},
@@ -282,15 +282,15 @@ class FollowupTest(unittest.TestCase):
         milestone = client.calls_of("SplunkTimelineMilestone")[0]["input"]
         incident_id = _objects(client.bundles[0], "incident")[0]["id"]
         self.assertEqual(milestone["container_id"], incident_id)
-        self.assertEqual((milestone["lane"], milestone["kind"]), ("detection", "milestone"))
+        self.assertEqual((milestone["lane"], milestone["kind"]), ("custom", "milestone"))
         self.assertEqual(milestone["title"], "Splunk alert: Brute force")
         self.assertIn("https://splunk/results", milestone["description"])
         self.assertTrue(milestone["external_id"].startswith("splunk-alert:"))
         self.assertEqual(client.calls_of("SplunkCaseAutopilot")[0], {"subjectId": incident_id, "policyId": "policy-1"})
 
-    def test_case_autopilot_launched_once_per_container(self):
+    def test_case_autopilot_runs_once_per_container(self):
         helper = FakeAlertHelper(params={"name": "Brute force", "tlp": "tlp_clear", "observables_extraction": "disable",
-                                         "timeline_milestone": "0", "launch_case_autopilot": "1"},
+                                         "timeline_milestone": "0", "run_case_autopilot": "1"},
                                  events=[EVENT, EVENT])
         client = FakeClient({"SplunkCaseAutopilot": {"investigationRunAdd": {"id": "run-1"}}})
         context = FakeAlertContext(helper, client=client, detector=FakeDetector((FEATURE_CASE_AUTOPILOT,)))
@@ -299,7 +299,7 @@ class FollowupTest(unittest.TestCase):
 
     def test_nothing_scheduled_on_older_platforms(self):
         helper = FakeAlertHelper(params={"name": "Brute force", "tlp": "tlp_clear", "observables_extraction": "disable",
-                                         "timeline_milestone": "1", "launch_case_autopilot": "1"},
+                                         "timeline_milestone": "1", "run_case_autopilot": "1"},
                                  events=[EVENT])
         context = FakeAlertContext(helper, detector=FakeDetector())
         self.assertEqual(_run(alert_create_incident_helper.create_incident, helper, context), 0)

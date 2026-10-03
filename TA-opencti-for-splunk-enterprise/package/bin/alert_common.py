@@ -4,7 +4,7 @@
   alert run, cached in the KV Store across runs.
 - Per-result error accounting: process_event returns 2 when at least one
   result failed, so Splunk reports the alert action failure (#18).
-- Follow-ups (timeline milestones, Case Autopilot launches) that need the
+- Follow-ups (timeline milestones, Case Autopilot runs) that need the
   container created by the bundle: bundles are ingested asynchronously by
   the OpenCTI workers, so follow-ups run after every result was sent, once
   the containers exist (bounded wait).
