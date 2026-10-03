@@ -90,4 +90,5 @@ Compatibility with the OpenCTI autonomous threat management program
 - Hash detections and hit reporting reduce `Filesystem.file_hash` to its digest (CIM values such as
   `sha256=<digest>`), as already done for `Processes.process_hash`.
 - Run Case Autopilot reserves the container atomically in the KV Store, so concurrent alert runs
-  never start two runs for the same object.
+  never start two runs for the same object; a stale reservation is reclaimed atomically too (one
+  reclaim key per stale reservation), so two processes never both take it over.

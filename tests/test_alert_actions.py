@@ -428,6 +428,18 @@ class FollowupTest(unittest.TestCase):
         self.assertEqual(program_actions.run_case_autopilot(context, "incident--x"), "run-1")
         self.assertEqual(context.cache.get(marker)["run_id"], "run-1")
 
+    def test_case_autopilot_stale_reservation_is_reclaimed_once(self):
+        context, client, marker = self._autopilot_context()
+        stale = {"status": "pending", "reserved_at": "2020-01-01T00:00:00Z"}
+        context.cache.set(marker, stale)
+        real_get = context.cache.get
+        # Both processes read the stale reservation before either reclaims it.
+        context.cache.get = lambda key: stale if key == marker else real_get(key)
+        self.assertEqual(program_actions.run_case_autopilot(context, "incident--x"), "run-1")
+        self.assertIsNone(program_actions.run_case_autopilot(context, "incident--x"))
+        self.assertEqual(len(client.calls_of("SplunkCaseAutopilot")), 1)
+        self.assertEqual(real_get(marker)["run_id"], "run-1", "the loser never touches the winner's marker")
+
     def test_case_autopilot_failure_releases_the_reservation(self):
         context, client, marker = self._autopilot_context(graphql_error("policy not found"))
         with self.assertRaises(Exception):

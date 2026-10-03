@@ -217,11 +217,18 @@ def run_case_autopilot(context, container_id, policy_id=None):
     if existing and not _stale_reservation(existing):
         context.logger.info(f"Case Autopilot already run for {container_id}")
         return None
+    reservation = {"status": "pending", "reserved_at": utc_now_iso()}
     if existing:
+        # Reclaim atomically: of the processes that read this stale reservation,
+        # only the one inserting its reclaim key may replace it.
+        reclaim = f"{marker}|reclaim|{existing.get('reserved_at') or ''}"
+        if not context.cache.reserve(reclaim, reservation):
+            context.logger.info(f"Case Autopilot already being started for {container_id}")
+            return None
         context.logger.warning(f"Case Autopilot reservation for {container_id} never completed, retrying")
-        context.cache.release(marker)
+        context.cache.set(marker, reservation)
     # Atomic: of concurrent alert runs on one container, one only starts a run
-    if not context.cache.reserve(marker, {"status": "pending", "reserved_at": utc_now_iso()}):
+    elif not context.cache.reserve(marker, reservation):
         context.logger.info(f"Case Autopilot already being started for {container_id}")
         return None
     try:
