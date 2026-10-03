@@ -756,12 +756,15 @@ mode) carry:
 Threat Pulse has a preview mode, the default of an OpenCTI platform registered with XTM Hub that does not
 contribute: OpenCTI matches its indicators locally against a community digest and only the coarse
 `pulse_prevalence` and `pulse_trend` are set, with `pulse_preview` true; `pulse_first_seen_network` and
-`pulse_platforms_bucket` stay empty until the platform contributes. The add-on reads the Threat Pulse fields
-the platform exposes (detected by introspection), the prevalence and trend macros keep working in preview,
-and the Threat Pulse dashboard tab labels preview-based values "(preview)".
+`pulse_platforms_bucket` stay empty until the platform contributes. Stream events carry `pulse_prevalence`,
+`pulse_trend`, `pulse_first_seen_network` and `pulse_preview` in the OpenCTI extension of the indicator; the
+add-on also reads the Threat Pulse fields the platform exposes in GraphQL (detected by introspection), which
+add `pulse_platforms_bucket`. The prevalence and trend macros keep working in preview, and the Threat Pulse
+dashboard tab labels preview-based values "(preview)".
 
-OpenCTI updates these fields without stream events, so `OpenCTI - Refresh indicator knowledge fields`
-(`| openctireconcile mode=knowledge`, daily) refreshes them. Filter macros:
+OpenCTI refreshes Threat Pulse and provenance values without stream events, so the new values reach the
+stream only with the next update of the indicator; `OpenCTI - Refresh indicator knowledge fields`
+(`| openctireconcile mode=knowledge`, daily) refreshes them in between. Filter macros:
 
 | Macro                                       | Keeps                                                    |
 |---------------------------------------------|----------------------------------------------------------|

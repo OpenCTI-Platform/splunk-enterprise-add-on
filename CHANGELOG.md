@@ -154,6 +154,9 @@ Compatibility with the OpenCTI autonomous threat management program
 - Threat Pulse preview mode: the add-on selects only the `PulseInformation` fields the platform exposes
   (introspected), reads `prevalence_bucket` as well as `prevalence`, stores `pulse_preview`, and the
   Threat Pulse dashboard tab labels preview-based values; the network fields are never assumed.
+- The stream input reads Threat Pulse where OpenCTI publishes it, the `pulse_prevalence`, `pulse_trend`,
+  `pulse_first_seen_network` and `pulse_preview` properties of the OpenCTI extension, so indicators keep
+  their Threat Pulse values when the GraphQL enrichment of a stream event fails.
 - Dashboards and the indicator lookup searches read KV Store timestamps at second and millisecond
   precision alike (the 30-day hit chart, the indicators added chart, the last deployment sync, the
   `added_at` of an indicator first written by the KV Store mode).

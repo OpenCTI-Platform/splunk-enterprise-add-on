@@ -5,6 +5,7 @@ from program_fakes import FakeDetector
 
 from knowledge_fields import (
     KNOWLEDGE_FIELDS,
+    OPENCTI_EXTENSION_ID,
     PROVENANCE_EXTENSION_ID,
     enrichment_graphql_fields,
     merge_knowledge_fields,
@@ -59,9 +60,22 @@ class ExtensionTest(unittest.TestCase):
         self.assertEqual(provenance_from_extension(None), {})
         self.assertEqual(pulse_from_extension({}), {})
 
-    def test_forward_compatible_pulse_extension(self):
-        fields = pulse_from_extension({"extension-definition--opencti-pulse": {"prevalence": "rare", "trend": "stable"}})
-        self.assertEqual(fields, {"pulse_prevalence": "rare", "pulse_trend": "stable"})
+    def test_pulse_in_the_opencti_extension(self):
+        extension = {"id": "x", "score": 50, "pulse_prevalence": "common", "pulse_trend": "rising",
+                     "pulse_sector_trend": "rising", "pulse_first_seen_network": "2026-08-14T00:00:00.000Z",
+                     "pulse_community_uniqueness": 25}
+        self.assertEqual(pulse_from_extension({OPENCTI_EXTENSION_ID: extension}), {
+            "pulse_prevalence": "common",
+            "pulse_trend": "rising",
+            "pulse_first_seen_network": "2026-08-14T00:00:00.000Z",
+            "pulse_preview": False,
+        })
+
+    def test_pulse_needs_its_prevalence(self):
+        self.assertEqual(pulse_from_extension({OPENCTI_EXTENSION_ID: {"id": "x", "score": 50}}), {})
+        self.assertEqual(pulse_from_extension({OPENCTI_EXTENSION_ID: {"pulse_trend": "rising"}}), {})
+        self.assertEqual(pulse_from_extension({"extension-definition--other": {"pulse_prevalence": "rare"}}), {},
+                         "only the OpenCTI extension carries Threat Pulse")
 
 
 class GraphQLTest(unittest.TestCase):
@@ -109,9 +123,7 @@ class GraphQLTest(unittest.TestCase):
         full = dict(NODE["pulse"], preview=False)
         self.assertFalse(pulse_from_graphql(full)["pulse_preview"])
         self.assertEqual(pulse_from_graphql({"pulse": {"preview": True}}), {}, "no flag without a pulse value")
-        extension = {"extension-definition--opencti-pulse": {
-            "preview": True, "prevalence_bucket": "rare", "trend": "stable",
-        }}
+        extension = {OPENCTI_EXTENSION_ID: {"pulse_prevalence": "rare", "pulse_trend": "stable", "pulse_preview": True}}
         self.assertEqual(pulse_from_extension(extension),
                          {"pulse_prevalence": "rare", "pulse_trend": "stable", "pulse_preview": True})
 

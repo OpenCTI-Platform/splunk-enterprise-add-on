@@ -140,6 +140,15 @@ class StreamInputTest(unittest.TestCase):
         self.assertEqual(doc["attack_patterns"], ["T1071"])
         self.assertNotIn("extensions", doc)
 
+    def test_pulse_fields_come_from_the_stream_extension(self):
+        indicator = _indicator()
+        indicator["extensions"][OCTI_EXTENSION].update(
+            {"pulse_prevalence": "widespread", "pulse_trend": "rising", "pulse_preview": True})
+        kv, _, _, _ = self._run([_message("create", indicator, 1)])
+        doc = kv.docs[INTERNAL_ID]
+        self.assertEqual((doc["pulse_prevalence"], doc["pulse_trend"], doc["pulse_preview"]), ("widespread", "rising", True))
+        self.assertNotIn("pulse_first_seen_network", doc, "the preview carries no network date")
+
     def test_delete_reports_removed_or_expired(self):
         kv = FakeKVData()
         expired = _indicator(valid_until="2020-01-01T00:00:00.000Z")

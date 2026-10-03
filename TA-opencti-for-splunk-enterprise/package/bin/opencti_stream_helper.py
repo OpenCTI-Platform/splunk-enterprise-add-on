@@ -186,8 +186,8 @@ def enrich_payload(stream_id, input_name, payload, msg_event):
     payload["type"] = parsed_stix["type"]
     payload["value"] = parsed_stix["value"]
 
-    # Provenance (and, once carried, Threat Pulse) summaries travel as STIX
-    # extensions; keep them before the extensions are dropped.
+    # Provenance and Threat Pulse summaries travel as STIX extensions; keep
+    # them before the extensions are dropped.
     knowledge = provenance_from_extension(payload.get("extensions"))
     knowledge.update(pulse_from_extension(payload.get("extensions")))
     payload.update(knowledge)

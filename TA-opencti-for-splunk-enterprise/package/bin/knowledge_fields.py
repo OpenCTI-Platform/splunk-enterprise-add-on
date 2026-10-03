@@ -3,9 +3,10 @@
 Provenance (OpenCTI innovation 06) travels in the stream payload through the
 ``extension-definition--283daa2f-...`` extension (counts, dates and flags,
 never source names) and is also readable through GraphQL, where the source
-names the account may see are available. Threat Pulse (innovation 04) is
-only readable through GraphQL today. Every field is optional: on platforms
-without these features the fields are simply absent.
+names the account may see are available. Threat Pulse (innovation 04)
+travels as ``pulse_*`` properties of the OpenCTI extension and is also
+readable through GraphQL, which adds the platforms bucket. Every field is
+optional: on platforms without these features the fields are simply absent.
 
 Threat Pulse has a preview mode (the default of a platform registered with
 XTM Hub that does not contribute): only the coarse prevalence and trend are
@@ -16,6 +17,7 @@ from opencti_features import FEATURE_PROVENANCE, FEATURE_PULSE
 from utils import to_iso
 
 PROVENANCE_EXTENSION_ID = "extension-definition--283daa2f-7739-5345-a110-19d73676f670"
+OPENCTI_EXTENSION_ID = "extension-definition--ea279b3e-5c71-4632-ac08-831c66a786ba"
 
 PROVENANCE_FIELDS = (
     "corroboration_count",
@@ -95,20 +97,26 @@ def provenance_from_extension(extensions):
 
 def pulse_from_extension(extensions):
     """
-    Forward compatible reader of a Threat Pulse summary extension
-    (requested on OpenCTI-Platform/opencti#18674): any property extension
-    carrying ``prevalence`` and ``trend``.
+    Threat Pulse summary of the OpenCTI extension (field contract of
+    OpenCTI-Platform/opencti#18674): ``pulse_prevalence`` marks its presence,
+    ``pulse_first_seen_network`` is only set for a contributing platform and
+    ``pulse_preview`` is true for the coarse preview values, absent otherwise.
 
     :return: dict of pulse fields (empty when absent)
     """
     if not isinstance(extensions, dict):
         return {}
-    for extension in extensions.values():
-        if not isinstance(extension, dict) or "trend" not in extension:
-            continue
-        if "prevalence" in extension or "prevalence_bucket" in extension:
-            return pulse_from_graphql(extension)
-    return {}
+    extension = extensions.get(OPENCTI_EXTENSION_ID)
+    if not isinstance(extension, dict) or not extension.get("pulse_prevalence"):
+        return {}
+    fields = {"pulse_prevalence": str(extension["pulse_prevalence"])}
+    if extension.get("pulse_trend"):
+        fields["pulse_trend"] = str(extension["pulse_trend"])
+    first_seen = to_iso(extension.get("pulse_first_seen_network"))
+    if first_seen:
+        fields["pulse_first_seen_network"] = first_seen
+    fields["pulse_preview"] = extension.get("pulse_preview") is True
+    return fields
 
 
 def _assert_count(assertion):
