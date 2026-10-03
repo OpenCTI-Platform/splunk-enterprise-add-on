@@ -162,6 +162,23 @@ class ActionTest(unittest.TestCase):
         self.assertNotIn("parked_at", evidence[0]["input"])
         self.assertEqual(context.cache.get("hunt_evidence_pending|run-1"), {})
 
+    def test_hits_of_a_partly_ingested_report_are_counted_once(self):
+        ingested = {"observed-data--1"}
+        context = self._evidence_context(ingested)
+        with mock.patch.object(program_actions.time, "sleep"):
+            program_actions.report_hunt_evidence(context, "run-1", ["observed-data--1", "sighting--1", "sighting--2"], 3)
+            ingested.add("sighting--1")
+            program_actions.report_hunt_evidence(context, "run-1", ["observed-data--1"], 2)
+            ingested.add("sighting--2")
+            program_actions.report_hunt_evidence(context, "run-1", ["observed-data--1"], 1)
+        evidence = [(call["input"]["result_ids"], call["input"]["hits_count"])
+                    for call in context.client.calls_of("SplunkHuntRunEvidence")]
+        self.assertEqual(evidence, [
+            (["observed-data--1"], 3),
+            (["sighting--1"], 0), (["observed-data--1"], 2),
+            (["sighting--2"], 0), (["observed-data--1"], 1),
+        ])
+
     def test_evidence_never_ingested_is_dropped_after_a_day(self):
         context = self._evidence_context({"sighting--2"})
         context.cache.set("hunt_evidence_pending|run-1", {"items": [

@@ -219,9 +219,11 @@ class DeploymentReporter:
 
     @property
     def enabled(self):
-        return self.detector.require(
+        # Either mutation carries the reports (_send picks the batch one when present).
+        available = self.detector.has(FEATURE_DEPLOYMENT_BATCH) or self.detector.require(
             FEATURE_DEPLOYMENT, "Indicator deployment write-back"
-        ) and bool(self.platform_id)
+        )
+        return available and bool(self.platform_id)
 
     def report(self, indicator_id, status, external_id=None, error_message=None, removed_at=None, deployed_at=None):
         """Queue a deployment state. The most recent state of an indicator wins.

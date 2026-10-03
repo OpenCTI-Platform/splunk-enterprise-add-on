@@ -103,7 +103,9 @@ def compute_features(mutations, queries, indicator_fields, relations, enterprise
     features = set()
     if "securityPlatformAdd" in mutations and "securityPlatforms" in queries:
         features.add(FEATURE_SECURITY_PLATFORM)
-    if "deployed-on" in (relations.get("Indicator_SecurityPlatform") or []) or "indicatorReportDeployment" in mutations:
+    if "deployed-on" in (relations.get("Indicator_SecurityPlatform") or []) or any(
+        name in mutations for name in ("indicatorReportDeployment", "indicatorReportDeployments")
+    ):
         features.add(FEATURE_DEPLOYED_ON)
     if "indicatorReportDeployment" in mutations:
         features.add(FEATURE_DEPLOYMENT)

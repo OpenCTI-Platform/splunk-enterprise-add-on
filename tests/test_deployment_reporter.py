@@ -111,6 +111,13 @@ class ReporterTest(unittest.TestCase):
         self.assertEqual(call["status"], STATUS_FAILED)
         self.assertEqual(call["metadata"]["error_message"], "KV Store down")
 
+    def test_batch_mutation_alone_enables_the_write_back(self):
+        client = FakeClient({BATCH: {"indicatorReportDeployments": {"created": 1, "errors": []}}})
+        reporter = _reporter(client, features=(FEATURE_DEPLOYMENT_BATCH,))
+        self.assertTrue(reporter.report("indicator--1", STATUS_DEPLOYED))
+        self.assertEqual(reporter.flush(), 1)
+        self.assertEqual(len(client.calls_of(BATCH)), 1)
+
     def test_disabled_on_platforms_without_write_back(self):
         client = FakeClient()
         reporter = _reporter(client, features=())

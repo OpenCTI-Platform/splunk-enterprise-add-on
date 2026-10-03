@@ -38,7 +38,7 @@ Compatibility with the OpenCTI autonomous threat management program
   Security Platform, carrying `x_opencti_hunt_run_id`, attached to the hunt run when supported. Their
   ids are OpenCTI's standard ids (the same observation is one object linked to each run), and they
   are attached once the OpenCTI workers ingested them; objects still not ingested after 15 seconds
-  are attached by the next evidence report of the run.
+  are attached by the next evidence report of the run, without counting the hits of their report twice.
 - Provenance (`corroboration_count`, `last_asserted_at`, `single_sourced`, sources...) and Threat Pulse
   (`pulse_prevalence`, `pulse_trend`, `pulse_first_seen_network`) fields on `opencti_indicators` and
   index events, refreshed daily (`| openctireconcile mode=knowledge`), with filter macros.
@@ -76,8 +76,11 @@ Compatibility with the OpenCTI autonomous threat management program
   pattern (so an entry restored by a concurrent run never stays matchable), and the nightly rebuild
   leaves it out of `opencti_indicators`.
 - The Security Platform must be of type SIEM: a same-name platform of another type is neither adopted
-  nor shadowed by a new one, a configured id of another type is rejected, and a cached resolution is
-  reused only for a SIEM platform while its configuration (auto mode, name) is unchanged.
+  nor shadowed by a new one, a configured id of another type is rejected, a creation that OpenCTI
+  upserted onto a platform of another type is not adopted, and a cached resolution is reused only for
+  a SIEM platform while its configuration (auto mode, name) is unchanged.
+- Deployment write-back is enabled on platforms exposing only the batched
+  `indicatorReportDeployments` mutation.
 - IOC validation proves a detection only with a hit inside the test window (the grace period no
   longer widens it), and never declares a miss when a hit window spans the test or the hit history
   was trimmed past its start. A miss also needs proof that `OpenCTI - Report indicator hits` searched

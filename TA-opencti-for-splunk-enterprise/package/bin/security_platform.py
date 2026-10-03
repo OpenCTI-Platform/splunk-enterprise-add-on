@@ -244,8 +244,18 @@ class SecurityPlatformResolver:
                         "(Configuration > Security Platform)"
                     )
                 elif platform is None:
+                    # OpenCTI keys a Security Platform on its name: concurrent creations by
+                    # several search heads upsert one entity, possibly one of another type
+                    # created in between.
                     platform = self._create(name)
-                    if platform:
+                    if platform and not _is_siem(platform):
+                        self.logger.error(
+                            f"The Security Platform '{name}' OpenCTI returned is of type "
+                            f"{platform.get('security_platform_type')}, not {SECURITY_PLATFORM_TYPE}: "
+                            "it is not used for Splunk"
+                        )
+                        platform = None
+                    elif platform:
                         self.logger.info(
                             f"Created the Security Platform '{name}' ({platform.get('id')}) of type "
                             f"{SECURITY_PLATFORM_TYPE} in OpenCTI"

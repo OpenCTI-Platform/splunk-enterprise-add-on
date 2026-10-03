@@ -69,6 +69,16 @@ class ResolverTest(unittest.TestCase):
         self.assertEqual(created["name"], "SOC Splunk")
         self.assertEqual(created["security_platform_type"], "SIEM")
 
+    def test_creation_upserting_a_platform_of_another_type_is_not_adopted(self):
+        edr = dict(PLATFORM, id="internal-edr", security_platform_type="EDR")
+        client = FakeClient({
+            "SplunkSecurityPlatformByName": _by_name([]),
+            "SplunkSecurityPlatformAdd": {"securityPlatformAdd": edr},
+        })
+        resolver = _resolver(client, PlatformSettings())
+        self.assertIsNone(resolver.resolve())
+        self.assertTrue(resolver.logger.has("error", "not SIEM"))
+
     def test_auto_prefers_the_siem_platform_of_that_name(self):
         edr = dict(PLATFORM, id="internal-edr", security_platform_type="EDR")
         client = FakeClient({"SplunkSecurityPlatformByName": _by_name([edr, PLATFORM])})

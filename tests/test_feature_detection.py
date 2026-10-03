@@ -61,6 +61,12 @@ class ComputeFeaturesTest(unittest.TestCase):
         ):
             self.assertIn(feature, result)
 
+    def test_batch_deployment_mutation_alone_means_deployed_on(self):
+        result = compute_features({"indicatorReportDeployments"}, set(), set(), {}, False)
+        self.assertIn(features.FEATURE_DEPLOYED_ON, result)
+        self.assertIn(features.FEATURE_DEPLOYMENT_BATCH, result)
+        self.assertNotIn(features.FEATURE_DEPLOYMENT, result)
+
     def test_case_autopilot_requires_enterprise_edition(self):
         self.assertNotIn(features.FEATURE_CASE_AUTOPILOT,
                          compute_features({"investigationRunAdd"}, set(), set(), {}, False))

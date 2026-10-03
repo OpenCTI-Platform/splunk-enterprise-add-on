@@ -412,7 +412,7 @@ def _attach_pending(context, hunt_run_id):
             context.client.graphql_query(HUNT_EVIDENCE_MUTATION, {"id": hunt_run_id, "input": payload})
         remaining = [object_id for object_id in item.get("result_ids") or [] if object_id not in present]
         if remaining:
-            kept.append(dict(item, result_ids=remaining))
+            kept.append(dict(item, result_ids=remaining, hits_count=0 if present else item.get("hits_count", 0)))
     if kept:
         context.cache.set(key, {"items": kept})
     elif entry:
@@ -446,7 +446,11 @@ def report_hunt_evidence(context, hunt_run_id, result_ids, hits_count, platform_
     if pending:
         key = _pending_key(hunt_run_id)
         items = (context.cache.get(key) or {}).get("items") or []
-        items.append(dict(payload, result_ids=pending, parked_at=utc_now_iso()))
+        # The hits of this report are counted once, by its first attachment.
+        parked = dict(payload, result_ids=pending, parked_at=utc_now_iso())
+        if ingested:
+            parked["hits_count"] = 0
+        items.append(parked)
         context.cache.set(key, {"items": items})
     if not ingested:
         raise ValueError(
