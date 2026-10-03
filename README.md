@@ -366,7 +366,10 @@ warning when this happens).
 > Upgrading from 1.1.x: indexed events get new ids in 1.2.0. An event already sent by 1.1.x and returned
 > again by an overlapping scheduled run just after the upgrade creates a second object, once.
 
-The timeline milestone (lane `custom`) and Run Case Autopilot happen once OpenCTI has ingested the created object
+The timeline milestone (lane `detection`, so the alert drives the container's first detection; kind `milestone`;
+external id `splunk:<alert sid>`, one per triggered alert and container; authored by the Splunk Security Platform;
+pointing to the indicator when the result carries an `indicator_id`) and Run Case Autopilot happen once OpenCTI
+has ingested the created object
 (the bundle is processed asynchronously by the OpenCTI workers, the action waits up to 60 seconds). A follow-up
 whose object is still not ingested, or whose call failed, is parked in the `opencti_addon_state` KV Store
 collection and retried by the next runs of any OpenCTI alert action, with the alert name and results link of
@@ -648,8 +651,10 @@ detection rules indicating the techniques and deployed on the Splunk Security Pl
 searches (KV Store sync, hits, validation, reconciliation, inventory) declare no technique and trigger no
 alert action, so the connector does not import them with its default `alerts` scope.
 
-To make the connector and the add-on target the same Security Platform, set the connector
-`platform_name` to the add-on Security Platform name (both derive the same identity from the name).
+To make the connector and the add-on target the same Security Platform, set the connector `platform_id`
+(`SPLUNK_SAVED_SEARCHES_PLATFORM_ID`) to the id of the add-on Security Platform: the connector then references
+that platform and never rewrites it. Without it, set the connector `platform_name` to the add-on Security
+Platform name and keep its `platform_type` at `SIEM` (both derive the same identity from name and type).
 
 #### Telemetry inventory (provides)
 

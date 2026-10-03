@@ -373,11 +373,52 @@ class FollowupTest(unittest.TestCase):
         milestone = client.calls_of("SplunkTimelineMilestone")[0]["input"]
         incident_id = _objects(client.bundles[0], "incident")[0]["id"]
         self.assertEqual(milestone["container_id"], incident_id)
-        self.assertEqual((milestone["lane"], milestone["kind"]), ("custom", "milestone"))
+        self.assertEqual((milestone["lane"], milestone["kind"]), ("detection", "milestone"))
         self.assertEqual(milestone["title"], "Splunk alert: Brute force")
         self.assertIn("https://splunk/results", milestone["description"])
-        self.assertTrue(milestone["external_id"].startswith("splunk-alert:"))
+        self.assertTrue(milestone["external_id"].startswith("splunk-alert:"), "no sid in the payload")
+        self.assertNotIn("createdBy", milestone, "no Security Platform resolved")
+        self.assertNotIn("element_id", milestone)
         self.assertEqual(client.calls_of("SplunkCaseAutopilot")[0], {"subjectId": incident_id, "policyId": "policy-1"})
+
+    def test_milestone_carries_the_alert_sid_platform_and_indicator(self):
+        helper = FakeAlertHelper(params={"name": "Brute force", "tlp": "tlp_clear", "observables_extraction": "disable",
+                                         "timeline_milestone": "1"},
+                                 events=[dict(EVENT, indicator_id=INDICATOR_ID)],
+                                 settings={"search_name": "Brute force", "results_link": "https://splunk/results",
+                                           "sid": "scheduler__admin__search__RMD5_at_1727000000_42"})
+        client = FakeClient({"SplunkTimelineMilestone": {"timelineEventAdd": {"id": "event-1"}}})
+        context = FakeAlertContext(helper, client=client, detector=FakeDetector((FEATURE_TIMELINE,)), platform=PLATFORM)
+        self.assertEqual(_run(alert_create_incident_helper.create_incident, helper, context), 0)
+        milestone = client.calls_of("SplunkTimelineMilestone")[0]["input"]
+        self.assertEqual(milestone["external_id"], "splunk:scheduler__admin__search__RMD5_at_1727000000_42")
+        self.assertEqual(milestone["createdBy"], PLATFORM["id"])
+        self.assertEqual(milestone["element_id"], INDICATOR_ID)
+
+    def test_milestone_retried_without_an_unknown_element(self):
+        calls = []
+
+        def timeline(variables):
+            calls.append(variables["input"])
+            if "element_id" in variables["input"]:
+                return graphql_error("Timeline element cannot be found")
+            return {"timelineEventAdd": {"id": "event-1"}}
+
+        client = FakeClient({"SplunkTimelineMilestone": timeline})
+        context = FakeAlertContext(FakeAlertHelper(), client=client, detector=FakeDetector((FEATURE_TIMELINE,)),
+                                   platform=PLATFORM)
+        self.assertTrue(program_actions.add_timeline_milestone(context, "incident--1", element_id=INDICATOR_ID))
+        self.assertEqual(len(calls), 2)
+        self.assertNotIn("element_id", calls[1])
+        self.assertEqual(calls[1]["createdBy"], PLATFORM["id"], "only the unknown field is dropped")
+        self.assertTrue(context.logger.has("warning", "without element_id"))
+
+    def test_milestone_other_errors_are_raised(self):
+        client = FakeClient({"SplunkTimelineMilestone": graphql_error("Container not found")})
+        context = FakeAlertContext(FakeAlertHelper(), client=client, detector=FakeDetector((FEATURE_TIMELINE,)))
+        with self.assertRaises(OpenCTIGraphQLError):
+            program_actions.add_timeline_milestone(context, "incident--1", element_id=INDICATOR_ID)
+        self.assertEqual(len(client.calls_of("SplunkTimelineMilestone")), 1)
 
     def test_case_autopilot_runs_once_per_container(self):
         helper = FakeAlertHelper(params={"name": "Brute force", "tlp": "tlp_clear", "observables_extraction": "disable",

@@ -249,6 +249,10 @@ class FakeAlertContext:
     def results_link(self):
         return self.helper.settings.get("results_link", "")
 
+    @property
+    def sid(self):
+        return self.helper.settings.get("sid", "")
+
     def param(self, name, default=None):
         value = self.helper.get_param(name)
         return default if value is None else value

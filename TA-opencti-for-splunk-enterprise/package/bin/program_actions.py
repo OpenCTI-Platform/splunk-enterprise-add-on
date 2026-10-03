@@ -10,11 +10,13 @@
   evidence write-back (huntRunEvidenceAdd, requested on #18671).
 """
 
+import re
 import time
 import uuid
 from datetime import datetime, timezone
 
 from addon_state import state_key, take_over, utc_now_iso
+from app_connector_helper import OpenCTIGraphQLError
 from constants import INDICATORS_KVSTORE_NAME
 from opencti_features import (
     FEATURE_CASE_AUTOPILOT,
@@ -33,6 +35,8 @@ CASE_INSENSITIVE_KINDS = frozenset({"domain", "ipv4", "ipv6", "email_addr", "fil
 TIMELINE_TITLE_MAX = 512
 TIMELINE_DESCRIPTION_MAX = 10000
 TIMELINE_EXTERNAL_ID_MAX = 256
+# indicator_id of the shipped detection searches (the milestone pivots to it)
+INDICATOR_ID_RE = re.compile(r"^indicator--[0-9a-fA-F-]{36}$")
 
 TIMELINE_ADD_MUTATION = """
 mutation SplunkTimelineMilestone($input: TimelineEventAddInput!) {
@@ -102,13 +106,19 @@ HUNT_SIGHTABLE_TYPES = {
 
 
 # region timeline milestone
-def build_milestone_input(container_id, search_name, trigger_time, event_time=None, results_link=""):
+def build_milestone_input(container_id, search_name, trigger_time, event_time=None, results_link="", sid=None,
+                          author_id=None, element_id=None):
     """
+    Field values agreed with innovation 11 on OpenCTI-Platform/opencti#18681.
+
     :param container_id: STIX id of the Incident / Case-Incident
     :param search_name: Splunk alert name
     :param trigger_time: when the alert fired (datetime)
     :param event_time: time of the Splunk result (datetime or None)
     :param results_link: link to the Splunk search results
+    :param sid: Splunk search id of the triggered alert
+    :param author_id: Splunk Security Platform id (createdBy)
+    :param element_id: indicator the alert is about
     :return: TimelineEventAddInput
     """
     title = f"Splunk alert: {search_name}"[:TIMELINE_TITLE_MAX]
@@ -117,25 +127,44 @@ def build_milestone_input(container_id, search_name, trigger_time, event_time=No
         lines.append(f"Matching event time: {to_iso(event_time)}.")
     if results_link:
         lines.append(f"Splunk search results: {results_link}")
-    return {
+    milestone = {
         "container_id": container_id,
         "event_time": to_iso(trigger_time),
         "precision": "exact",
-        "lane": "custom",
+        # A Splunk alert is a detection: this lane drives the first_detection anchor
+        "lane": "detection",
         "kind": "milestone",
         "title": title,
         "description": "\n".join(lines)[:TIMELINE_DESCRIPTION_MAX],
-        # One milestone per alert and container: re-runs update it
-        "external_id": f"splunk-alert:{state_key(search_name, container_id)}"[:TIMELINE_EXTERNAL_ID_MAX],
+        # One milestone per triggered alert and container: retries update it
+        "external_id": (f"splunk:{sid}" if sid else f"splunk-alert:{state_key(search_name, container_id)}")[
+            :TIMELINE_EXTERNAL_ID_MAX
+        ],
     }
+    if author_id:
+        milestone["createdBy"] = author_id
+    if element_id:
+        milestone["element_id"] = element_id
+    return milestone
+
+
+def _platform_id(context):
+    try:
+        platform = context.platform
+    except Exception as ex:
+        context.logger.warning(f"Timeline milestone added without its author: {ex}")
+        return None
+    return (platform or {}).get("id")
 
 
 def add_timeline_milestone(context, container_id, event_time=None, trigger_time=None, search_name=None,
-                           results_link=None):
+                           results_link=None, sid=None, element_id=None):
     """
     :param context: alert_common.AlertContext
     :param search_name: alert that created the container (default: the running alert)
     :param results_link: its search results (default: those of the running alert)
+    :param sid: Splunk search id of the triggered alert
+    :param element_id: indicator the alert is about, when known
     :return: True when added, False when the platform has no timeline
     """
     if not context.detector.require(FEATURE_TIMELINE, "Timeline milestone"):
@@ -146,8 +175,23 @@ def add_timeline_milestone(context, container_id, event_time=None, trigger_time=
         trigger_time or datetime.now(timezone.utc),
         event_time,
         context.results_link if results_link is None else results_link,
+        sid,
+        _platform_id(context),
+        element_id,
     )
-    context.client.graphql_query(TIMELINE_ADD_MUTATION, {"input": milestone})
+    try:
+        context.client.graphql_query(TIMELINE_ADD_MUTATION, {"input": milestone})
+    except OpenCTIGraphQLError as ex:
+        # The timeline rejects an element or author the account cannot load: the milestone matters more.
+        unknown = [key for key, marker in (("element_id", "element cannot be found"),
+                                           ("createdBy", "author cannot be found"))
+                   if key in milestone and marker in str(ex)]
+        if not unknown:
+            raise
+        context.logger.warning(f"Timeline milestone on {container_id} added without {', '.join(unknown)}: {ex}")
+        context.client.graphql_query(TIMELINE_ADD_MUTATION, {
+            "input": {key: value for key, value in milestone.items() if key not in unknown},
+        })
     context.logger.info(f"Timeline milestone added on {container_id}")
     return True
 # endregion
@@ -170,11 +214,14 @@ def schedule_container_followups(context, container_id, event):
     :param event: the Splunk result
     """
     if context.flag("timeline_milestone", True) and context.detector.require(FEATURE_TIMELINE, "Timeline milestone"):
+        indicator_id = str(event.get("indicator_id") or "").strip()
         context.defer(container_id, "Timeline milestone", FOLLOWUP_TIMELINE, {
             "search_name": context.search_name,
             "results_link": context.results_link,
+            "sid": context.sid,
             "trigger_time": to_iso(datetime.now(timezone.utc)),
             "event_time": to_iso(_event_time(event)),
+            "element_id": indicator_id if INDICATOR_ID_RE.match(indicator_id) else None,
         })
     if context.flag("run_case_autopilot", False) and context.detector.require(
         FEATURE_CASE_AUTOPILOT, "Run Case Autopilot"
@@ -201,6 +248,8 @@ def run_followup(context, kind, container_id, params):
             params.get("trigger_time"),
             params.get("search_name"),
             params.get("results_link"),
+            params.get("sid"),
+            params.get("element_id"),
         )
     if kind == FOLLOWUP_CASE_AUTOPILOT:
         return run_case_autopilot(context, container_id, params.get("policy_id"))

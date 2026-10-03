@@ -101,6 +101,11 @@ class AlertContext:
         return self.payload.get("results_link") or ""
 
     @property
+    def sid(self):
+        """:return: Splunk search id of the triggered alert ("" when unknown)"""
+        return self.payload.get("sid") or ""
+
+    @property
     def service(self):
         if self._service is None:
             self._service = connect_service(
@@ -207,8 +212,8 @@ class AlertContext:
             )
             return False
         params = followup.get("params") or {}
-        # One entry per follow-up, alert and container: a later trigger replaces it.
-        key = self._parked_prefix() + state_key(followup["kind"], entity_id, params.get("search_name"))
+        # One entry per follow-up, triggered alert and container
+        key = self._parked_prefix() + state_key(followup["kind"], entity_id, params.get("search_name"), params.get("sid"))
         try:
             self.cache.set(key, dict(followup, parked_at=utc_now_iso()))
         except Exception as ex:

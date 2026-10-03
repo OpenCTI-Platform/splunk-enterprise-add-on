@@ -43,7 +43,9 @@ Compatibility with the OpenCTI autonomous threat management program
   (`pulse_prevalence`, `pulse_trend`, `pulse_first_seen_network`) fields on `opencti_indicators` and
   index events, refreshed daily (`| openctireconcile mode=knowledge`), with filter macros.
 - Create Incident / Create Incident Response: timeline milestone (alert name, trigger time, results
-  link, lane `custom`) and optional Run Case Autopilot (Enterprise Edition), once the object is ingested.
+  link; lane `detection`, kind `milestone`, external id `splunk:<alert sid>`, authored by the Splunk
+  Security Platform, pointing to the alert's indicator when known) and optional Run Case Autopilot
+  (Enterprise Edition), once the object is ingested.
 - Monitoring dashboard tabs: Dissemination assurance, Sources, Threat Pulse, Defense matrix, Hunts, Timeline.
 - `opencti_hunt_scope` macro and guidance for the OpenCTI `internal-hunt/splunk` connector.
 
