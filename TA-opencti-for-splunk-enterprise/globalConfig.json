@@ -621,7 +621,7 @@
                     "field": "incident_key",
                     "defaultValue": "",
                     "required": false,
-                    "help": "Optional token identifying the result (for example $result.event_id$). Distinct keys always create distinct objects, the same key upserts."
+                    "help": "Optional result field names, comma-separated, whose values identify each result (for example event_id, or user,src for a stats ... by user src search). Distinct values create distinct objects, the same values upsert."
                 },
                 {
                     "type": "checkbox",
@@ -772,7 +772,7 @@
                     "field": "incident_key",
                     "defaultValue": "",
                     "required": false,
-                    "help": "Optional token identifying the result (for example $result.event_id$). Distinct keys always create distinct objects, the same key upserts."
+                    "help": "Optional result field names, comma-separated, whose values identify each result (for example event_id, or user,src for a stats ... by user src search). Distinct values create distinct objects, the same values upsert."
                 },
                 {
                     "type": "checkbox",

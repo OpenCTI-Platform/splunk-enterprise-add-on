@@ -281,9 +281,11 @@ def incident_event_key(event, explicit_key=None):
     Identity of a Splunk result folded into the Incident / Case-Incident id (#47).
 
     Resolution order:
-      1. the "Incident key" alert parameter (for example $result.event_id$ of an
-         ES notable, or $result.user$ for a `stats ... by user` search), when
-         the search author provides one
+      1. the "Incident key" alert parameter: comma-separated names of result
+         fields read on every row (for example ``event_id`` for ES notables, or
+         ``user,src`` for a ``stats ... by user src`` search). Splunk resolves
+         $result.<field>$ tokens against the first result only, so a value
+         naming no field of the row is used as is (the same for every row).
       2. event_identity_key(): the address of the indexed event (_bkt/_cd) or
          its _raw text, stable across overlapping scheduled runs
 
@@ -295,8 +297,12 @@ def incident_event_key(event, explicit_key=None):
     :param explicit_key: value of the incident_key alert parameter
     :return: str key ("" when the historical name + created id applies)
     """
-    if explicit_key is not None and str(explicit_key).strip():
-        return "key|" + str(explicit_key).strip()
+    explicit_key = str(explicit_key or "").strip()
+    if explicit_key:
+        names = [name.strip() for name in explicit_key.split(",") if name.strip()]
+        if any(name in event for name in names):
+            return "fields|" + "|".join(f"{name}={event.get(name, '')}" for name in names)
+        return "key|" + explicit_key
     return event_identity_key(event)
 
 def generate_indicator_id(pattern):

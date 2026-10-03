@@ -111,10 +111,11 @@ class KVCollection:
                     documents[document["_key"]] = document
         return documents
 
-    def query_all(self, query=None, page_size=KV_BATCH_MAX, fields=None, max_records=1000000, sort="_key"):
+    def query_all(self, query=None, page_size=KV_BATCH_MAX, fields=None, max_records=1000000, sort="_key:1"):
         """
-        Iterate a whole collection by pages, sorted (by _key by default) so
-        that skip-based paging stays stable while documents are rewritten.
+        Iterate a whole collection by pages, sorted (ascending _key by default,
+        KV Store "field:1" syntax) so that skip-based paging stays stable while
+        documents are rewritten.
         """
         skip = 0
         while skip < max_records:

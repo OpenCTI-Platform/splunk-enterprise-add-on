@@ -350,7 +350,7 @@ You can create an incident or an incident response case in OpenCTI from a custom
 | `Labels`                 | Labels (separated by a comma) to be applied           | Incident & Incident response case | 
 | `TLP`                    | Markings to be applied                                | Incident & Incident response case | 
 | `Observables extraction` | Method for extracting observables                     | Incident & Incident response case | 
-| `Incident key`           | Optional token identifying the result (for example `$result.event_id$` of an ES notable, or `$result.user$` for a `stats ... by user` search). Distinct keys always create distinct objects, the same key upserts | Incident & Incident response case |
+| `Incident key`           | Optional result field names, comma-separated, read on every result (for example `event_id` for an ES notable, or `user,src` for a `stats ... by user src` search). Distinct values always create distinct objects, the same values upsert. Use field names, not `$result.<field>$` tokens: Splunk resolves those against the first result only | Incident & Incident response case |
 | `Add a timeline milestone` | Adds the alert (name, trigger time, link to the Splunk results) as a milestone of the timeline of the created object (OpenCTI with incident and case timelines) | Incident & Incident response case |
 | `Run Case Autopilot`     | Runs Case Autopilot once per created object (OpenCTI Enterprise Edition with Case Autopilot) | Incident & Incident response case |
 | `Case Autopilot policy ID` | Optional investigation policy, the platform default applies when empty | Incident & Incident response case |
@@ -358,9 +358,10 @@ You can create an incident or an incident response case in OpenCTI from a custom
 Incidents and cases created from indexed events (results carrying `_cd` / `_raw`) get an id derived from
 the event itself, so distinct events firing in the same second never merge (#47), while the same event
 returned by overlapping scheduled runs keeps upserting onto one object. Rows of transforming searches
-(`stats`, `table`...) keep the historical name + time id unless an `Incident key` is given; when several
-of them share that id in one run, the second and following rows get distinct ids, in row order, so give an
-`Incident key` whenever the row order of the search can change.
+(`stats`, `table`...) should name their split-by fields in `Incident key`. Without it they keep the
+historical name + time id; when several of them share that id in one run, the second and following rows
+get distinct ids in row order, which only stays stable while the row order does (the action logs a
+warning when this happens).
 
 > Upgrading from 1.1.x: indexed events get new ids in 1.2.0. An event already sent by 1.1.x and returned
 > again by an overlapping scheduled run just after the upgrade creates a second object, once.

@@ -22,7 +22,7 @@ class FakeData:
         if "$or" in query:
             keys = {branch["_key"] for branch in query["$or"]}
             documents = [d for d in documents if d["_key"] in keys]
-        if kwargs.get("sort") == "_key":
+        if kwargs.get("sort") == "_key:1":
             documents = sorted(documents, key=lambda d: d["_key"])
         skip = kwargs.get("skip", 0)
         limit = kwargs.get("limit") or len(documents)
@@ -39,7 +39,7 @@ class KVCollectionTest(unittest.TestCase):
         data = FakeData([{"_key": f"{i:03d}"} for i in reversed(range(5))])
         records = list(KVCollection(FakeService(data), "c").query_all(page_size=2))
         self.assertEqual([r["_key"] for r in records], ["000", "001", "002", "003", "004"])
-        self.assertTrue(all(call["sort"] == "_key" for call in data.calls))
+        self.assertTrue(all(call["sort"] == "_key:1" for call in data.calls))
 
     def test_get_many_is_chunked(self):
         data = FakeData([{"_key": f"{i:03d}", "v": i} for i in range(addon_state.GET_MANY_CHUNK + 3)])

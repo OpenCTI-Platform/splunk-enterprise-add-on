@@ -111,7 +111,7 @@ class FakeKV:
     def get_many(self, keys):
         return {key: dict(self.records[key]) for key in keys if key in self.records}
 
-    def query_all(self, query=None, page_size=1000, fields=None, max_records=1000000, sort="_key"):
+    def query_all(self, query=None, page_size=1000, fields=None, max_records=1000000, sort="_key:1"):
         for row in self.query(query=query):
             yield row
 

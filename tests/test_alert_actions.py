@@ -265,11 +265,26 @@ class IncidentKeyTest(unittest.TestCase):
         ids = {self._id({"_time": "1727000000", "_raw": f"event {i}", "_cd": f"1:{i}"}) for i in range(300)}
         self.assertEqual(len(ids), 300)
 
-    def test_explicit_key_separates_transforming_rows(self):
-        a = self._id({"_time": "1727000000", "user": "bob"}, key="bob")
-        b = self._id({"_time": "1727000000", "user": "eve"}, key="eve")
+    def test_key_fields_separate_transforming_rows(self):
+        a = self._id({"_time": "1727000000", "user": "bob", "src": "10.0.0.1"}, key="user, src")
+        b = self._id({"_time": "1727000000", "user": "eve", "src": "10.0.0.1"}, key="user, src")
         self.assertNotEqual(a, b)
-        self.assertEqual(a, self._id({"_time": "1727000000", "user": "bob", "count": "9"}, key="bob"))
+        self.assertEqual(a, self._id({"_time": "1727000000", "user": "bob", "src": "10.0.0.1", "count": "9"}, key="user,src"),
+                         "the same row keeps upserting whatever its counts and position")
+
+    def test_key_fields_are_read_on_every_row_of_a_run(self):
+        used = {}
+        ids = [convert_to_incident(dict(self.PARAMS, incident_key="user"), {"_time": "1727000000", "user": user},
+                                   return_id=True, used_ids=used)[1] for user in ("eve", "bob")]
+        reordered = [convert_to_incident(dict(self.PARAMS, incident_key="user"), {"_time": "1727000000", "user": user},
+                                         return_id=True, used_ids={})[1] for user in ("bob", "eve")]
+        self.assertEqual(len(set(ids)), 2)
+        self.assertEqual(set(ids), set(reordered), "ids do not depend on the row order")
+
+    def test_literal_key_is_used_as_is(self):
+        a = self._id({"_time": "1727000000"}, key="notable-123")
+        self.assertEqual(a, self._id({"_time": "1727000000", "user": "eve"}, key="notable-123"))
+        self.assertNotEqual(a, self._id({"_time": "1727000000"}, key="notable-456"))
 
     def test_rows_without_identity_keep_the_historical_id(self):
         from utils import generate_incident_id
