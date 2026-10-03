@@ -180,6 +180,16 @@ class CommandsTest(unittest.TestCase):
         self.assertEqual(steps[-1], "where `opencti_usable_indicator`")
         self.assertIn("mvfind(revoked", _conf("macros.conf").get("opencti_usable_indicator", "definition"))
 
+    def test_knowledge_filters_keep_nothing_without_provenance(self):
+        # A negated test would keep every indicator of a platform without the fields
+        macros = _conf("macros.conf")
+        for name, field in (("opencti_multi_sourced_indicator", "single_sourced"),
+                            ("opencti_fresh_indicator", "freshness_stale")):
+            definition = macros.get(name, "definition")
+            self.assertNotIn("NOT ", definition, name)
+            self.assertIn(f'match(lower(tostring({field})), "^(0|false)$")', definition, name)
+        self.assertIn("tonumber(corroboration_count) > 1", macros.get("opencti_multi_sourced_indicator", "definition"))
+
 
 class GlobalConfigTest(unittest.TestCase):
     def setUp(self):
