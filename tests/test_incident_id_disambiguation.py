@@ -178,6 +178,27 @@ class ConverterTest(unittest.TestCase):
         inc = _object(convert_to_incident(ALERT_PARAMS, ev), "incident")
         self.assertTrue(inc["created"].startswith("2024-09-22T10:13:20.000"))
 
+    def test_row_without_time_takes_the_alert_dispatch_time(self):
+        # stats rows carry no _time: the id must not change between retries of one alert run
+        row = {"user": "alice", "count": "3"}
+        params = dict(ALERT_PARAMS, sid="scheduler__admin__search__RMD5ab_at_1727000400_17", incident_key="user")
+        first = _object(convert_to_incident(params, dict(row)), "incident")
+        retry = _object(convert_to_incident(params, dict(row)), "incident")
+        self.assertEqual(first["id"], retry["id"])
+        self.assertTrue(first["created"].startswith("2024-09-22T10:20:00"))
+        response = _object(convert_to_incident_response(params, dict(row)), "case-incident")
+        self.assertTrue(response["created"].startswith("2024-09-22T10:20:00"))
+        later = _object(convert_to_incident(dict(params, sid="scheduler__admin__search__RMD5ab_at_1727000700_18"),
+                                            dict(row)), "incident")
+        self.assertNotEqual(first["id"], later["id"], "a later scheduled run is a new detection")
+
+    def test_ad_hoc_sid_and_unknown_sid(self):
+        ad_hoc = _object(convert_to_incident(dict(ALERT_PARAMS, sid="1727000400.42"), {"user": "alice"}), "incident")
+        self.assertTrue(ad_hoc["created"].startswith("2024-09-22T10:20:00"))
+        before = datetime.now(timezone.utc).replace(microsecond=0)
+        unknown = _object(convert_to_incident(dict(ALERT_PARAMS, sid="custom"), {"user": "alice"}), "incident")
+        self.assertGreaterEqual(datetime.fromisoformat(unknown["created"].replace("Z", "+00:00")), before)
+
 
 if __name__ == "__main__":
     unittest.main()

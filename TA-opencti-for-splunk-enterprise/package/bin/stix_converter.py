@@ -1,3 +1,4 @@
+import re
 import stix2
 from datetime import datetime, timezone
 
@@ -5,6 +6,11 @@ from stix_constants import CustomObservableUserAgent, CustomObservableText, Cust
 from utils import get_hash_type, is_ipv6, is_ipv4, disambiguate_created, incident_event_key, to_epoch
 from utils import generate_incident_id, generate_identity_id, generate_relation_id, generate_case_incident_id, generate_sighting_id
 from utils import generate_indicator_id, generate_observed_data_id
+
+# Dispatch time in a Splunk sid: scheduled ("scheduler__<owner>__<app>__<name>_at_<epoch>_<n>",
+# also rt_ and ES variants) and ad hoc ("<epoch>.<n>") searches
+SCHEDULED_SID_RE = re.compile(r"_at_(\d{9,11})_\d+$")
+ADHOC_SID_RE = re.compile(r"^(\d{9,11})\.\d+$")
 
 # Sighting of Type values targeting an Indicator (#57, #67)
 SIGHTING_OF_INDICATOR_ID = "indicator_id"
@@ -338,11 +344,7 @@ def convert_to_incident_response(alert_params, event, return_id=False, used_ids=
     """
     bundle_objects = []
 
-    # event date
-    if "_time" in event and event.get("_time"):
-        event_date = datetime.fromtimestamp(float(event.get("_time")), timezone.utc)
-    else:
-        event_date = datetime.now(timezone.utc)
+    event_date = _container_date(event, alert_params)
 
     # created: disambiguated so same-second results don't share an ID (#50)
     created_date = disambiguate_created(event_date, event)
@@ -415,11 +417,7 @@ def convert_to_incident(alert_params, event, return_id=False, used_ids=None):
     """
     bundle_objects = []
 
-    # event date
-    if "_time" in event and event.get("_time"):
-        event_date = datetime.fromtimestamp(float(event.get("_time")), timezone.utc)
-    else:
-        event_date = datetime.now(timezone.utc)
+    event_date = _container_date(event, alert_params)
 
     # created: disambiguated so same-second results don't share an ID (#50)
     created_date = disambiguate_created(event_date, event)
@@ -499,6 +497,21 @@ def convert_to_incident(alert_params, event, return_id=False, used_ids=None):
 def _event_date(event):
     if "_time" in event and event.get("_time"):
         return datetime.fromtimestamp(float(event.get("_time")), timezone.utc)
+    return datetime.now(timezone.utc)
+
+
+def _container_date(event, alert_params):
+    """
+    created of an Incident / Case-Incident, which seeds its id: the result
+    time, else the time the alert was dispatched read from its sid (the same
+    for every retry of that alert run), else now.
+    """
+    if event.get("_time"):
+        return datetime.fromtimestamp(float(event.get("_time")), timezone.utc)
+    sid = str(alert_params.get("sid") or "")
+    match = SCHEDULED_SID_RE.search(sid) or ADHOC_SID_RE.match(sid)
+    if match:
+        return datetime.fromtimestamp(int(match.group(1)), timezone.utc)
     return datetime.now(timezone.utc)
 
 

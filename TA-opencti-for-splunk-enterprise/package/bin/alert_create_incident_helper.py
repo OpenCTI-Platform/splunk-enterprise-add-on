@@ -23,6 +23,7 @@ def create_incident(context, event):
         "tlp": helper.get_param("tlp"),
         "observables_extraction": helper.get_param("observables_extraction"),
         "incident_key": helper.get_param("incident_key"),
+        "sid": context.sid,
     }
     helper.log_debug(f"Alert params={params}")
 
