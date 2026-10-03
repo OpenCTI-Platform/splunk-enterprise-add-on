@@ -141,8 +141,9 @@ def provenance_from_graphql(indicator):
         fields["sources"] = ", ".join(names[:MAX_SOURCE_NAMES]) + (
             f" (+{len(names) - MAX_SOURCE_NAMES})" if len(names) > MAX_SOURCE_NAMES else ""
         )
-    # Counts and dates describe every source, as in the stream extension: a partial list keeps them out
-    if assertions and len(assertions) >= fields["corroboration_count"]:
+    # Counts and dates describe every source, as in the stream extension: a partial list keeps them out,
+    # a complete one (an empty list when no source asserts it anymore) sets or clears them
+    if len(assertions) >= fields["corroboration_count"]:
         fields["assertions_count"] = sum(_assert_count(assertion) for assertion in assertions)
         kinds = {}
         for assertion in assertions:

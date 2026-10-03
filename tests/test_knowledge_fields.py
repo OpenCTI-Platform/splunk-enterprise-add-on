@@ -135,6 +135,18 @@ class GraphQLTest(unittest.TestCase):
         self.assertEqual(record["sources"], "AlienVault", "only the names the account sees")
         self.assertEqual(record["corroboration_count"], 3)
 
+    def test_refresh_clears_the_attribution_of_an_indicator_without_assertions(self):
+        from knowledge_fields import refresh_knowledge_fields
+
+        node = {"corroboration_count": 0, "single_sourced": False, "has_conflicts": False, "freshness_stale": False,
+                "x_opencti_assertions": []}
+        record = {"assertions_count": 4, "sources_by_kind": "feed=2", "first_asserted_at": "2026-08-01T00:00:00.000Z",
+                  "sources": "AlienVault, MISP", "corroboration_count": 2}
+        refresh_knowledge_fields(record, node, pulse=False)
+        self.assertEqual((record["corroboration_count"], record["assertions_count"], record["sources_by_kind"]), (0, 0, ""))
+        self.assertNotIn("first_asserted_at", record)
+        self.assertNotIn("sources", record)
+
     def test_refresh_clears_the_preview_flag_of_a_contributing_platform(self):
         from knowledge_fields import refresh_knowledge_fields
 
