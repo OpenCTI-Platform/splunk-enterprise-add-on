@@ -54,6 +54,8 @@ FEATURE_LABELS = {
 DEFAULT_TTL_SECONDS = 3600
 # A failed detection is retried sooner than a successful one is refreshed.
 FAILURE_TTL_SECONDS = 60
+# Clock difference tolerated between the search heads sharing the KV Store cache
+CLOCK_SKEW_SECONDS = 300
 
 INTROSPECTION_QUERY = """
 query OpenCTIFeatureDetection {
@@ -172,13 +174,15 @@ class OpenCTIFeatureDetector:
         return "features|" + (getattr(self.client, "opencti_url", "") or "")
 
     def _fresh(self, entry):
+        """A corrupt or future detection time, or a TTL above the configured one, never keeps an entry fresh."""
         if not isinstance(entry, dict) or not isinstance(entry.get("features"), list):
             return False
         try:
-            ttl = float(entry.get("ttl") or self.ttl)
-            return self.clock() - float(entry.get("detected_at") or 0) < ttl
+            ttl = min(float(entry.get("ttl") or self.ttl), self.ttl)
+            age = self.clock() - float(entry.get("detected_at") or 0)
         except (TypeError, ValueError):
             return False
+        return -CLOCK_SKEW_SECONDS <= age < ttl
 
     def _load_cached(self):
         entry = OpenCTIFeatureDetector._memory.get(self.cache_key)

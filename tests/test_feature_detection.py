@@ -130,6 +130,10 @@ class DetectorTest(unittest.TestCase):
             {"features": '{"hits": true}', "detected_at": 1000.0},
             {"features": "[]", "detected_at": "yesterday"},
             {"features": "[]", "detected_at": 1000.0, "ttl": "soon"},
+            {"features": "[]", "detected_at": "nan"},
+            # detector clock: 1000.0; a millisecond timestamp lies far in the future
+            {"features": "[]", "detected_at": 1000.0 * 1000},
+            {"features": "[]", "detected_at": 1000.0 - 7200, "ttl": 10 ** 9},
         ):
             with self.subTest(corrupt=corrupt):
                 OpenCTIFeatureDetector.clear_memory()
@@ -139,6 +143,14 @@ class DetectorTest(unittest.TestCase):
                 cache.set(detector.cache_key, corrupt)
                 self.assertTrue(detector.has(features.FEATURE_HITS))
                 self.assertEqual(len(client.calls_of("OpenCTIFeatureDetection")), 1)
+
+    def test_detection_time_within_the_clock_skew_of_another_search_head_is_fresh(self):
+        cache = FakeCache()
+        client = _client(_schema())
+        detector = self._detector(client, cache=cache)
+        cache.set(detector.cache_key, {"features": '["indicator_hits"]', "detected_at": self.now[0] + 120})
+        self.assertTrue(detector.has(features.FEATURE_HITS))
+        self.assertEqual(client.calls, [])
 
     def test_cache_expires_after_ttl(self):
         client = _client(_schema(("indicatorReportHits",)))

@@ -166,6 +166,8 @@ Compatibility with the OpenCTI autonomous threat management program
 - A corrupt or future resolution time in the Security Platform cache (KV Store) makes the add-on resolve
   the platform again and rewrite the entry, instead of failing every platform-aware operation until the
   entry is removed by hand.
+- The same goes for the OpenCTI feature detection cache: a corrupt or future detection time, or a stored
+  lifetime above the configured `Feature detection cache`, makes the add-on detect the features again.
 - Dashboards and the indicator lookup searches read KV Store timestamps at second and millisecond
   precision alike (the 30-day hit chart, the indicators added chart, the last deployment sync, the
   `added_at` of an indicator first written by the KV Store mode).
