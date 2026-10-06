@@ -346,7 +346,7 @@
     "ds_tl_milestones": {
       "name": "Timeline milestones",
       "options": {
-        "query": "index=_internal sourcetype=\"taopenctiforsplunkenterprise:log\" \"Timeline milestone added on\" | rex \"Timeline milestone added on \\S+ to \\\"(?<container>[^\\\"]*)\\\" for the alert \\\"(?<alert>[^\\\"]*)\\\"\" | eval Time = strftime(_time, \"%Y-%m-%d %H:%M:%S\") | table Time container alert | rename container AS \"Incident or case\", alert AS \"Alert\""
+        "query": "index=_internal sourcetype=\"taopenctiforsplunkenterprise:log\" \"Timeline milestone added on\" | rex \"Timeline milestone added on \\S+ to \\\"(?<container>[^\\\"]*)\\\" for the alert \\\"(?<alert>[^\\\"]*)\\\"\" | eval Time = strftime(_time, \"%Y-%m-%d %H:%M:%S\"), container = if(isnull(container) OR container==\"\", \"(unnamed)\", container) | table Time container alert | rename container AS \"Incident or case\", alert AS \"Alert\""
       },
       "type": "ds.search"
     }

@@ -91,6 +91,8 @@ class FollowupTest(unittest.TestCase):
         pattern = re.search(r'\| rex "((?:[^"\\]|\\.)*)"', query).group(1).replace('\\"', '"').replace("(?<", "(?P<")
         fields = re.search(pattern, line).groupdict()
         self.assertEqual(fields, {"container": "Brute force on 'vpn'", "alert": "Brute force detection"})
+        self.assertIn('container = if(isnull(container) OR container=="", "(unnamed)", container)', query,
+                      "a container without a name reads as unnamed")
 
     def test_incident_response_schedules_the_milestone(self):
         helper = FakeAlertHelper(params={"name": "Brute force", "tlp": "tlp_clear", "observables_extraction": "disable",
