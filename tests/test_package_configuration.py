@@ -140,6 +140,10 @@ class CommandsTest(unittest.TestCase):
                                     "value AS indicator_value"))
         self.assertEqual(steps[-2:], ["where `opencti_usable_indicator` AND `opencti_kind_indicator` AND "
                                       "`opencti_exact_url_indicator`", "fields - indicator_value"])
+        lookup = _conf("transforms.conf")
+        self.assertFalse(lookup.has_option("opencti_indicators", "time_field"))
+        self.assertGreaterEqual(int(lookup.get("opencti_indicators", "max_matches")), 100,
+                                "the value lookup returns every indicator sharing the value")
         usable = _conf("macros.conf").get("opencti_usable_indicator", "definition")
         self.assertIn("mvfind(revoked", usable)
         self.assertIn("isnull(valid_until) OR coalesce(", usable, "expired indicators never hit")
