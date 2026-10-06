@@ -64,6 +64,7 @@ class ConnectorUserAgentTest(unittest.TestCase):
 
     def test_user_agent_sent_with_graphql_requests(self):
         response = mock.Mock(status_code=200)
+        response.json.return_value = {"data": {"stixBundlePush": "ok"}}
         with mock.patch("app_connector_helper.requests.post", return_value=response) as post:
             _connector(USER_AGENT).send_stix_bundle(bundle="{}")
         self.assertEqual(post.call_args.kwargs["headers"]["User-Agent"], USER_AGENT)

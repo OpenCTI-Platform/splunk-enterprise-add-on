@@ -4,6 +4,30 @@ on: push
 
 jobs:
 
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.10: oldest Python the pinned libraries (stix2 3.0.2, requests 2.33) support;
+        # 3.12: Python the build job vendors lib/ with; 3.13: Python of Splunk Enterprise 10.
+        python-version: ["3.10", "3.12", "3.13"]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install the add-on runtime libraries
+        run: |
+          pip install -r TA-opencti-for-splunk-enterprise/package/lib/requirements.txt pytest
+
+      - name: Run the tests
+        run: python -m pytest tests -q
+
   build:
     runs-on: ubuntu-latest
 
@@ -32,6 +56,53 @@ jobs:
         with:
           name: my-package
           path: app-dir/
+
+  run-appinspect-cli:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: my-package
+          path: app-dir/
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install AppInspect
+        run: pip install splunk-appinspect
+
+      - name: Inspect the package (Splunk Cloud checks)
+        run: |
+          splunk-appinspect inspect app-dir/*.tar.gz --mode test --included-tags cloud \
+            --data-format json --output-file appinspect-cli-report.json
+
+      - name: Fail on AppInspect failures and errors
+        run: |
+          python - <<'EOF'
+          import json
+          with open("appinspect-cli-report.json", encoding="utf-8") as handle:
+              report = json.load(handle)
+          summary = report["summary"]
+          print(json.dumps(summary, indent=2))
+          blocking = []
+          for group in report["reports"][0]["groups"]:
+              for check in group["checks"]:
+                  if check["result"] in ("failure", "error"):
+                      blocking.append(check["name"])
+                      for message in check.get("messages", [])[:5]:
+                          print(f"{check['result']}: {check['name']}: {message.get('message')}")
+          if blocking:
+              raise SystemExit(f"AppInspect blocking checks: {', '.join(sorted(set(blocking)))}")
+          EOF
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: appinspect-cli-report
+          path: appinspect-cli-report.json
 
   run-appinspect-api:
     needs: build
