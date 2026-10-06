@@ -7,10 +7,10 @@ from program_fakes import FakeCache, FakeClient, FakeDetector, FakeKV, FakeLogge
 
 import openctiprovides
 from addon_config import AddonSettings
-from addon_state import state_key
+from addon_state import PROVIDES_PLATFORM_COLLECTION, state_key
 from opencti_features import FEATURE_PROVIDES
-from provides import (STATUS_DECLARED, STATUS_ERROR, STATUS_PRUNED, STATUS_UNMATCHED, ProvidesPublisher, RateLimiter,
-                      aggregate_inventory, provides_description)
+from provides import (CURRENT_PLATFORM_KEY, STATUS_DECLARED, STATUS_ERROR, STATUS_PRUNED, STATUS_UNMATCHED,
+                      ProvidesPublisher, RateLimiter, aggregate_inventory, provides_description)
 
 PLATFORM = {"id": "platform-internal", "standard_id": "identity--p"}
 
@@ -205,6 +205,49 @@ class ProvidesTest(unittest.TestCase):
         description = provides_description([f"s{i}" for i in range(40)])
         self.assertIn("(+25 more)", description)
 
+    PREVIOUS_PLATFORM = {"_key": CURRENT_PLATFORM_KEY, "platform_id": "previous-platform", "reported_at": "2026-01-01T00:00:00Z"}
+
+    def test_run_records_its_platform_even_for_an_empty_inventory(self):
+        """Otherwise the dashboard keeps showing the entries of the previous Security Platform as current."""
+        platforms = FakeKV([self.PREVIOUS_PLATFORM])
+        publisher = ProvidesPublisher(FakeClient({"SplunkDataComponents": self._dc}), FakeDetector((FEATURE_PROVIDES,)),
+                                      PLATFORM, FakeKV(), platform_state=platforms)
+        publisher.publish([], prune=True)
+        publisher.publish([], prune=True)
+        current = platforms.records[CURRENT_PLATFORM_KEY]
+        self.assertEqual(current["platform_id"], "platform-internal")
+        self.assertNotEqual(current["reported_at"], self.PREVIOUS_PLATFORM["reported_at"])
+        self.assertEqual(len(platforms.saved), 1, "recorded once per run, whatever the number of chunks")
+
+    def test_skipped_run_keeps_the_recorded_platform(self):
+        for platform, detector in (({}, FakeDetector((FEATURE_PROVIDES,))), (PLATFORM, FakeDetector())):
+            platforms = FakeKV([self.PREVIOUS_PLATFORM])
+            rows = ProvidesPublisher(FakeClient(), detector, platform, FakeKV(), platform_state=platforms).publish(self.INVENTORY)
+            self.assertEqual(rows[0]["status"], "skipped")
+            self.assertEqual(platforms.records, {CURRENT_PLATFORM_KEY: self.PREVIOUS_PLATFORM})
+
+    def test_unrecorded_platform_is_logged_and_retried(self):
+        platforms = FakeKV()
+        failures = [OSError("KV Store unavailable")]
+        save = platforms.upsert
+
+        def upsert(records):
+            if failures:
+                raise failures.pop()
+            return save(records)
+
+        platforms.upsert = upsert
+        logger = FakeLogger()
+        client = FakeClient({"SplunkDataComponents": self._dc, "SplunkProvides": {"stixCoreRelationshipAdd": {"id": "rel"}}})
+        publisher = ProvidesPublisher(client, FakeDetector((FEATURE_PROVIDES,)), PLATFORM, FakeKV(), logger=logger,
+                                      platform_state=platforms)
+        rows = publisher.publish(self.INVENTORY[:1])
+        self.assertEqual(rows[0]["status"], STATUS_DECLARED)
+        self.assertTrue(logger.has("warning", "Unable to record the Security Platform of the telemetry inventory"))
+        self.assertEqual(platforms.records, {})
+        publisher.publish(self.INVENTORY[1:2])
+        self.assertEqual(platforms.records[CURRENT_PLATFORM_KEY]["platform_id"], "platform-internal")
+
 
 class RateLimiterTest(unittest.TestCase):
     def test_bursts_then_waits(self):
@@ -252,6 +295,8 @@ class ProvidesCommandTest(unittest.TestCase):
         with mock.patch.object(openctiprovides, "CommandContext", return_value=context):
             rows = list(command.transform([{"data_component": "Process Creation", "sources": "sourcetype:sysmon", "event_count": "9"}]))
         self.assertEqual(rows[0]["status"], "declared")
+        recorded = context.collections[PROVIDES_PLATFORM_COLLECTION].records[CURRENT_PLATFORM_KEY]
+        self.assertEqual(recorded["platform_id"], PLATFORM["id"])
 
 
 class CommandContextTest(unittest.TestCase):

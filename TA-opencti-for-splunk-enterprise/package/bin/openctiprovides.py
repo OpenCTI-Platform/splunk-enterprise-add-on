@@ -10,7 +10,7 @@ import sys
 import import_declare_test  # noqa: F401  # type: ignore
 from splunklib.searchcommands import Configuration, EventingCommand, Option, dispatch, validators  # type: ignore
 
-from addon_state import PROVIDES_COLLECTION
+from addon_state import PROVIDES_COLLECTION, PROVIDES_PLATFORM_COLLECTION
 from command_common import CommandContext
 from provides import ProvidesPublisher
 
@@ -38,6 +38,7 @@ class OpenCTIProvidesCommand(EventingCommand):
                 context.platform,
                 context.collection(PROVIDES_COLLECTION),
                 logger=context.logger,
+                platform_state=context.collection(PROVIDES_PLATFORM_COLLECTION),
             )
         records = list(records)
         finished = bool(getattr(self, "_finished", True))

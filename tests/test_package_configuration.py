@@ -86,23 +86,27 @@ class SavedSearchesTest(unittest.TestCase):
 
 class CollectionsTest(unittest.TestCase):
     def test_state_collections_and_lookups(self):
-        from addon_state import PROVIDES_COLLECTION, STATE_COLLECTION
+        from addon_state import PROVIDES_COLLECTION, PROVIDES_PLATFORM_COLLECTION, STATE_COLLECTION
 
         collections = _conf("collections.conf")
         transforms = _conf("transforms.conf")
-        for name in (STATE_COLLECTION, PROVIDES_COLLECTION):
+        for name in (STATE_COLLECTION, PROVIDES_COLLECTION, PROVIDES_PLATFORM_COLLECTION):
             self.assertIn(name, collections.sections())
-        self.assertEqual(transforms.get(PROVIDES_COLLECTION, "external_type"), "kvstore")
+        for name in (PROVIDES_COLLECTION, PROVIDES_PLATFORM_COLLECTION):
+            self.assertEqual(transforms.get(name, "external_type"), "kvstore")
+            self.assertEqual(transforms.get(name, "collection"), name)
+            self.assertEqual(transforms.get(name, "case_sensitive_match"), "false")
 
     def test_provides_lookup_exposes_every_stored_field(self):
         """inputlookup only returns the fields of fields_list: a stored field missing there never reaches a panel."""
-        from addon_state import PROVIDES_COLLECTION
+        from addon_state import PROVIDES_COLLECTION, PROVIDES_PLATFORM_COLLECTION
 
         collections = _conf("collections.conf")
         transforms = _conf("transforms.conf")
-        declared = {key[len("field."):] for key in collections.options(PROVIDES_COLLECTION) if key.startswith("field.")}
-        listed = {field.strip() for field in transforms.get(PROVIDES_COLLECTION, "fields_list").split(",")}
-        self.assertEqual(declared - listed, set())
+        for name in (PROVIDES_COLLECTION, PROVIDES_PLATFORM_COLLECTION):
+            declared = {key[len("field."):] for key in collections.options(name) if key.startswith("field.")}
+            listed = {field.strip() for field in transforms.get(name, "fields_list").split(",")}
+            self.assertEqual(declared - listed, set(), name)
 
     def test_cim_mapping_lookup(self):
         transforms = _conf("transforms.conf")
@@ -279,19 +283,17 @@ class DashboardTest(unittest.TestCase):
             self.assertIn(f'status=="{status}"', query)
 
     def test_defense_matrix_reads_the_current_platform_only(self):
-        """The entries a previously configured Security Platform left in opencti_provides are not current."""
-        from datetime import datetime
-
-        from addon_state import utc_now_iso
+        """The panels keep the entries of the Security Platform recorded by the latest run, not the newest entries."""
+        from addon_state import PROVIDES_COLLECTION, PROVIDES_PLATFORM_COLLECTION
 
         definition = _conf("macros.conf").get("opencti_provides_current", "definition")
         steps = [" ".join(step.split()) for step in definition.split("|")]
-        self.assertEqual(steps[0], "inputlookup opencti_provides")
-        self.assertIn("eventstats max(provides_reported) AS platform_reported by platform_id", steps)
-        self.assertIn("where platform_reported == latest_reported", steps)
-        reported_format = "%Y-%m-%dT%H:%M:%SZ"
-        self.assertIn(f'strptime(reported_at, "{reported_format}")', definition)
-        datetime.strptime(utc_now_iso(), reported_format)
+        self.assertEqual(steps, [
+            f"inputlookup {PROVIDES_COLLECTION}",
+            f"lookup {PROVIDES_PLATFORM_COLLECTION} platform_id OUTPUT platform_id AS current_platform_id",
+            "where isnotnull(current_platform_id)",
+            "fields - current_platform_id",
+        ])
         with open(os.path.join(TA, "custom_dashboard.json"), encoding="utf-8") as handle:
             sources = json.load(handle)["dataSources"]
         checked = 0

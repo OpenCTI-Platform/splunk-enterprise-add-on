@@ -3,6 +3,7 @@
 Collections (declared in default/collections.conf):
 - opencti_addon_state: caches (feature detection, resolved Security Platform)
 - opencti_provides: telemetry inventory posted as provides relationships
+- opencti_provides_platform: Security Platform of the latest telemetry inventory run
 """
 
 import hashlib
@@ -12,6 +13,7 @@ from datetime import datetime, timezone
 
 STATE_COLLECTION = "opencti_addon_state"
 PROVIDES_COLLECTION = "opencti_provides"
+PROVIDES_PLATFORM_COLLECTION = "opencti_provides_platform"
 
 # KV Store accepts at most 1000 documents per batch_save call.
 KV_BATCH_MAX = 1000

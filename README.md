@@ -514,9 +514,11 @@ interactive search reports once, on its final results. Its logs are in `$SPLUNK_
 
 The Monitoring dashboard has a **Defense matrix** tab: data components declared to OpenCTI (provides) and
 the telemetry inventory, with the status and message of each data component. Both read the
-`opencti_provides_current` macro, the entries of the Security Platform the latest inventory run reported to:
-after a change of Security Platform, the entries of the previous one stay in `opencti_provides` (pruning
-needs their relationships if it is configured again) but are not counted as current.
+`opencti_provides_current` macro, the entries of the Security Platform the latest inventory run reported to.
+Every run records that platform in `opencti_provides_platform`, an empty inventory included; a skipped run (no
+Security Platform resolved, or no provides relationship in OpenCTI) leaves the record as it is. After a change
+of Security Platform, the entries of the previous one stay in `opencti_provides` (pruning needs their
+relationships if it is configured again) but are not counted as current.
 
 ### Program saved searches (all shipped disabled)
 

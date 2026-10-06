@@ -45,6 +45,9 @@ STATUS_UNMATCHED = "unmatched_data_component"
 STATUS_PRUNED = "pruned"
 STATUS_ERROR = "error"
 
+# _key of the single opencti_provides_platform record
+CURRENT_PLATFORM_KEY = "current"
+
 
 class RateLimiter:
     """Token bucket: at most ``per_minute`` calls per rolling minute, bursts allowed."""
@@ -108,22 +111,26 @@ def provides_description(sources):
 
 
 class ProvidesPublisher:
-    def __init__(self, client, detector, platform, state, logger=None, rate_per_minute=120):
+    def __init__(self, client, detector, platform, state, logger=None, rate_per_minute=120, platform_state=None):
         """
         :param client: SplunkAppConnectorHelper
         :param detector: OpenCTIFeatureDetector
         :param platform: Splunk Security Platform node (id)
         :param state: KVCollection over opencti_provides
+        :param platform_state: KVCollection over opencti_provides_platform, where
+            the run records the Security Platform it reports to
         """
         self.client = client
         self.detector = detector
         self.platform = platform or {}
         self.state = state
+        self.platform_state = platform_state
         self.logger = logger or logging.getLogger(__name__)
         self.limiter = RateLimiter(rate_per_minute)
         # A declaration error in any chunk of the search disables pruning:
         # the inventory of the run is then incomplete.
         self._had_error = False
+        self._platform_recorded = False
 
     def resolve_data_components(self, names):
         """
@@ -165,6 +172,7 @@ class ProvidesPublisher:
             return [{"data_component": "", "status": "skipped", "message": "No Splunk Security Platform"}]
         if not self.detector.require(FEATURE_PROVIDES, "Telemetry provides declaration"):
             return [{"data_component": "", "status": "skipped", "message": "The OpenCTI platform has no provides relationship"}]
+        self._record_platform()
         inventory = aggregate_inventory(records)
         unresolved = ""
         try:
@@ -242,6 +250,25 @@ class ProvidesPublisher:
         except Exception as ex:
             self.logger.warning(f"Unable to store the telemetry inventory in the KV Store: {ex}")
         return rows
+
+    def _record_platform(self):
+        """
+        Record, once per run and even for an empty inventory, the Security
+        Platform this run reports to: the dashboard shows the opencti_provides
+        entries of that platform only, so the entries a previously configured
+        platform left behind are not taken as current.
+        """
+        if self.platform_state is None or self._platform_recorded:
+            return
+        try:
+            self.platform_state.upsert([{
+                "_key": CURRENT_PLATFORM_KEY,
+                "platform_id": self.platform["id"],
+                "reported_at": utc_now_iso(),
+            }])
+            self._platform_recorded = True
+        except Exception as ex:
+            self.logger.warning(f"Unable to record the Security Platform of the telemetry inventory in the KV Store: {ex}")
 
     def _failure_states(self, failures):
         """
