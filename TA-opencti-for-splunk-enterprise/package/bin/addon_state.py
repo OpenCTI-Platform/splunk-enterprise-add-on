@@ -182,11 +182,15 @@ class KVStoreCache:
     def release(self, key):
         self._collection.delete(state_key(key))
 
+    def touch(self, entries):
+        """Rewrite (key, value) entries in one batch, which moves them behind the others in items()."""
+        self._collection.upsert([self._record(key, value) for key, value in entries])
+
     def items(self, prefix, limit=100):
-        """:return: list of (key, value) of the entries whose key starts with prefix"""
+        """:return: list of (key, value) of the entries whose key starts with prefix, least recently written first"""
         found = []
         query = {"name": {"$regex": "^" + re.escape(prefix)}}
-        for record in self._collection.query(query=query, limit=limit) or []:
+        for record in self._collection.query(query=query, limit=limit, sort="updated_at:1") or []:
             try:
                 value = json.loads(record.get("value") or "{}")
             except ValueError:
@@ -208,7 +212,13 @@ class MemoryCache:
         return self.values.get(key)
 
     def set(self, key, value):
+        # Insertion order stands for the write time of KVStoreCache.items()
+        self.values.pop(key, None)
         self.values[key] = value
+
+    def touch(self, entries):
+        for key, value in entries:
+            self.set(key, value)
 
     def reserve(self, key, value):
         if key in self.values:

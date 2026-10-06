@@ -208,6 +208,29 @@ class FollowupTest(unittest.TestCase):
         self.assertEqual(len(client.calls_of("SplunkTimelineMilestone")), alert_common.FOLLOWUP_MAX_FAILURES)
         self.assertTrue(any("dropped after" in m for level, m in helper.logs if level == "error"))
 
+    def test_parked_followups_beyond_one_run_are_taken_in_turn(self):
+        cache = FakeCache()
+        prefix = self._followup_context(cache=cache)._parked_prefix()
+        total = alert_common.FOLLOWUP_RETRIED_PER_RUN + 20
+        for number in range(total):
+            cache.set(f"{prefix}{number:04d}", {"entity_id": f"incident--{number}", "description": "Timeline milestone",
+                                                "kind": program_actions.FOLLOWUP_TIMELINE, "params": {},
+                                                "parked_at": utc_now_iso()})
+        checked = []
+
+        def nothing_ingested(ids):
+            checked.extend(ids)
+            return set()
+        self._followup_context(cache=cache, ingested=nothing_ingested).run_followups()
+        self.assertEqual(len(checked), alert_common.FOLLOWUP_RETRIED_PER_RUN)
+        # The next run starts with the entries the first one did not reach
+        later = self._followup_context(cache=cache, ingested=lambda ids: set(ids))
+        later.run_followups()
+        milestones = {call["input"]["container_id"] for call in later.client.calls_of("SplunkTimelineMilestone")}
+        unreached = {f"incident--{n}" for n in range(alert_common.FOLLOWUP_RETRIED_PER_RUN, total)}
+        self.assertEqual(milestones & unreached, unreached)
+        self.assertEqual(len(self._parked(cache)), total - alert_common.FOLLOWUP_RETRIED_PER_RUN)
+
     def test_parked_followup_expires(self):
         cache = FakeCache()
         context = self._followup_context(cache=cache, ingested=lambda ids: set(ids))

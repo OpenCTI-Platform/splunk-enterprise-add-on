@@ -352,8 +352,9 @@ pointing to the indicator when the result carries an `indicator_id`) is added on
 created object (the bundle is processed asynchronously by the OpenCTI workers, the action waits up to 60
 seconds). A follow-up whose object is still not ingested, or whose call failed, is parked in the `opencti_addon_state` KV Store
 collection and retried by the next runs of any OpenCTI alert action, with the alert name and results link of
-the run that deferred it; the milestone is idempotent. A parked follow-up is dropped (logged as an error) after 24 hours
-without ingestion or after 5 failed calls.
+the run that deferred it; the milestone is idempotent. Each run retries up to 100 parked follow-ups, the least
+recently tried first, so more parked follow-ups are taken in turn by the next runs. A parked follow-up is dropped
+(logged as an error) after 24 hours without ingestion or after 5 failed calls.
 
 7. To create a sighting, complete the form with the following settings:
 

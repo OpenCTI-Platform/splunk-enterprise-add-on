@@ -276,6 +276,15 @@ class AlertContext:
                 self._retry_one(key, followup, found)
             except Exception as ex:
                 self.logger.warning(f"Parked follow-up {key} not retried: {ex}")
+        # items() returns the least recently written entries first: the ones still
+        # waiting go behind the others, so beyond FOLLOWUP_RETRIED_PER_RUN parked
+        # entries the runs take them in turn instead of the same ones every time.
+        waiting = [(key, followup) for key, followup in live if followup["entity_id"] not in found]
+        if waiting:
+            try:
+                self.cache.touch(waiting)
+            except Exception as ex:
+                self.logger.warning(f"Parked follow-ups not moved behind the others: {ex}")
 
     def run_followups(self, sleep=time.sleep, budget=FOLLOWUP_WAIT_SECONDS):
         """
