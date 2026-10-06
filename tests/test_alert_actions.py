@@ -1,5 +1,7 @@
 """Tests for the incident alert actions: Case Autopilot runs and their follow-ups (#18, #68)."""
 import json
+import os
+import re
 import unittest
 from unittest import mock
 
@@ -10,9 +12,17 @@ import alert_create_incident_helper
 import alert_create_incident_response_helper
 import program_actions
 from addon_state import MemoryCache, takeover_key
+from program_actions import FollowupWaiting
 from opencti_features import FEATURE_CASE_AUTOPILOT
 
 EVENT = {"_time": "1727000000", "_raw": "dns query evil.example", "_cd": "1:2", "host": "sh01"}
+NO_RUN = {"investigationRuns": {"edges": []}}
+TA = os.path.join(os.path.dirname(__file__), "..", "TA-opencti-for-splunk-enterprise")
+
+
+def _client(handlers):
+    """OpenCTI where the container has no Case Autopilot run yet, unless the handlers say otherwise."""
+    return FakeClient(dict({"SplunkCaseAutopilotRuns": NO_RUN}, **handlers))
 
 
 def _objects(bundle, stix_type):
@@ -58,7 +68,7 @@ class FollowupTest(unittest.TestCase):
         helper = FakeAlertHelper(params={"name": "Brute force", "tlp": "tlp_clear", "observables_extraction": "disable",
                                          "run_case_autopilot": "1", "autopilot_policy_id": "policy-1"},
                                  events=[EVENT])
-        client = FakeClient({"SplunkCaseAutopilot": {"investigationRunAdd": {"id": "run-1"}}})
+        client = _client({"SplunkCaseAutopilot": {"investigationRunAdd": {"id": "run-1"}}})
         context = FakeAlertContext(helper, client=client, detector=FakeDetector((FEATURE_CASE_AUTOPILOT,)))
         self.assertEqual(_run(alert_create_incident_helper.create_incident, helper, context), 0)
         incident_id = _objects(client.bundles[0], "incident")[0]["id"]
@@ -75,7 +85,7 @@ class FollowupTest(unittest.TestCase):
         helper = FakeAlertHelper(params={"name": "Brute force", "tlp": "tlp_clear", "observables_extraction": "disable",
                                          "run_case_autopilot": "1"},
                                  events=[EVENT, EVENT])
-        client = FakeClient({"SplunkCaseAutopilot": {"investigationRunAdd": {"id": "run-1"}}})
+        client = _client({"SplunkCaseAutopilot": {"investigationRunAdd": {"id": "run-1"}}})
         context = FakeAlertContext(helper, client=client, detector=FakeDetector((FEATURE_CASE_AUTOPILOT,)))
         _run(alert_create_incident_response_helper.create_incident_response, helper, context)
         self.assertEqual(len(client.calls_of("SplunkCaseAutopilot")), 1)
@@ -83,7 +93,7 @@ class FollowupTest(unittest.TestCase):
     def test_case_autopilot_skipped_without_persistent_state(self):
         from addon_state import MemoryCache
 
-        client = FakeClient({"SplunkCaseAutopilot": {"investigationRunAdd": {"id": "run-1"}}})
+        client = _client({"SplunkCaseAutopilot": {"investigationRunAdd": {"id": "run-1"}}})
         context = FakeAlertContext(FakeAlertHelper(), client=client, detector=FakeDetector((FEATURE_CASE_AUTOPILOT,)))
         context.cache = MemoryCache()
         self.assertIsNone(program_actions.run_case_autopilot(context, "incident--x"))
@@ -91,30 +101,62 @@ class FollowupTest(unittest.TestCase):
         self.assertTrue(any("state collection" in line for _, line in context.logger.lines))
 
     def test_case_autopilot_marker_write_failure_is_reported(self):
-        client = FakeClient({"SplunkCaseAutopilot": {"investigationRunAdd": {"id": "run-1"}}})
+        client = _client({"SplunkCaseAutopilot": {"investigationRunAdd": {"id": "run-1"}}})
         context = FakeAlertContext(FakeAlertHelper(), client=client, detector=FakeDetector((FEATURE_CASE_AUTOPILOT,)))
         context.cache.set = mock.Mock(side_effect=RuntimeError("KV Store down"))
         self.assertEqual(program_actions.run_case_autopilot(context, "incident--x"), "run-1")
-        self.assertTrue(context.logger.has("error", "reservation expires"))
-        self.assertIsNone(program_actions.run_case_autopilot(context, "incident--x"), "the pending reservation blocks a second run")
+        self.assertTrue(context.logger.has("error", "finds it in OpenCTI"))
+        with self.assertRaises(FollowupWaiting, msg="the pending reservation blocks a second run"):
+            program_actions.run_case_autopilot(context, "incident--x")
         self.assertEqual(len(client.calls_of("SplunkCaseAutopilot")), 1)
 
     def _autopilot_context(self, response=None):
-        client = FakeClient({"SplunkCaseAutopilot": response or {"investigationRunAdd": {"id": "run-1"}}})
+        client = _client({"SplunkCaseAutopilot": response or {"investigationRunAdd": {"id": "run-1"}}})
         context = FakeAlertContext(FakeAlertHelper(), client=client, detector=FakeDetector((FEATURE_CASE_AUTOPILOT,)))
         return context, client, f"autopilot|{client.opencti_url}|incident--x"
 
-    def test_case_autopilot_reserved_by_a_concurrent_run_is_skipped(self):
+    def test_case_autopilot_reserved_by_a_concurrent_run_waits(self):
         context, client, marker = self._autopilot_context()
         context.cache.reserve(marker, {"status": "pending", "reserved_at": program_actions.utc_now_iso()})
-        self.assertIsNone(program_actions.run_case_autopilot(context, "incident--x"))
+        with self.assertRaises(FollowupWaiting):
+            program_actions.run_case_autopilot(context, "incident--x")
         self.assertEqual(client.calls_of("SplunkCaseAutopilot"), [])
 
-    def test_case_autopilot_lost_reservation_race_is_skipped(self):
+    def test_case_autopilot_lost_reservation_race_waits(self):
         context, client, _ = self._autopilot_context()
         context.cache.reserve = mock.Mock(return_value=False)
+        with self.assertRaises(FollowupWaiting):
+            program_actions.run_case_autopilot(context, "incident--x")
+        self.assertEqual(client.calls_of("SplunkCaseAutopilot"), [])
+
+    def test_case_autopilot_run_known_to_opencti_is_never_started_again(self):
+        """A request whose answer was lost, or a run whose record was lost: OpenCTI already has the run."""
+        context, client, marker = self._autopilot_context()
+        client.handlers["SplunkCaseAutopilotRuns"] = {"investigationRuns": {"edges": [{"node": {"id": "run-0"}}]}}
         self.assertIsNone(program_actions.run_case_autopilot(context, "incident--x"))
         self.assertEqual(client.calls_of("SplunkCaseAutopilot"), [])
+        self.assertEqual(client.calls_of("SplunkCaseAutopilotRuns"), [{"subjectId": "incident--x"}])
+        self.assertEqual(context.cache.get(marker)["run_id"], "run-0")
+
+    def test_case_autopilot_unanswered_request_is_retried_without_a_second_run(self):
+        context, client, marker = self._autopilot_context(OSError("read timed out"))
+        with self.assertRaises(OSError):
+            program_actions.run_case_autopilot(context, "incident--x")
+        self.assertIsNone(context.cache.get(marker))
+        # OpenCTI created the run although the answer never came back
+        client.handlers["SplunkCaseAutopilotRuns"] = {"investigationRuns": {"edges": [{"node": {"id": "run-1"}}]}}
+        self.assertIsNone(program_actions.run_case_autopilot(context, "incident--x"))
+        self.assertEqual(len(client.calls_of("SplunkCaseAutopilot")), 1)
+
+    def test_case_autopilot_log_line_feeds_the_dashboard_tab(self):
+        context, _, _ = self._autopilot_context()
+        program_actions.run_case_autopilot(context, "incident--x", None, 'Brute force on "vpn"', "Brute force detection")
+        line = [m for level, m in context.logger.lines if level == "info" and m.startswith("Case Autopilot run")][0]
+        with open(os.path.join(TA, "custom_dashboard.json"), encoding="utf-8") as handle:
+            sources = json.load(handle)["dataSources"]
+        query = [s["options"]["query"] for s in sources.values() if "Case Autopilot run" in s["options"].get("query", "")][0]
+        pattern = re.search(r'\| rex "((?:[^"\\]|\\.)*)"', query).group(1).replace('\\"', '"').replace("(?<", "(?P<")
+        self.assertEqual(re.search(pattern, line).groupdict(), {"container": "Brute force on 'vpn'", "alert": "Brute force detection"})
 
     def test_case_autopilot_stale_reservation_is_retried(self):
         context, client, marker = self._autopilot_context()
@@ -130,7 +172,8 @@ class FollowupTest(unittest.TestCase):
         # Both processes read the stale reservation before either reclaims it.
         context.cache.get = lambda key: stale if key == marker else real_get(key)
         self.assertEqual(program_actions.run_case_autopilot(context, "incident--x"), "run-1")
-        self.assertIsNone(program_actions.run_case_autopilot(context, "incident--x"))
+        with self.assertRaises(FollowupWaiting):
+            program_actions.run_case_autopilot(context, "incident--x")
         self.assertEqual(len(client.calls_of("SplunkCaseAutopilot")), 1)
         self.assertEqual(real_get(marker)["run_id"], "run-1", "the loser never touches the winner's marker")
 
@@ -149,7 +192,8 @@ class FollowupTest(unittest.TestCase):
         context.cache.set(marker, stale)
         live = {"status": "pending", "reserved_at": program_actions.utc_now_iso()}
         context.cache.set(takeover_key(marker, stale), live)
-        self.assertIsNone(program_actions.run_case_autopilot(context, "incident--x"))
+        with self.assertRaises(FollowupWaiting):
+            program_actions.run_case_autopilot(context, "incident--x")
         self.assertEqual(client.calls_of("SplunkCaseAutopilot"), [])
 
     def test_case_autopilot_failure_releases_the_reservation(self):
@@ -168,7 +212,7 @@ class FollowupTest(unittest.TestCase):
 
     @staticmethod
     def _followup_context(client=None, cache=None, helper=None, ingested=None):
-        client = client or FakeClient({"SplunkCaseAutopilot": {"investigationRunAdd": {"id": "run-1"}}})
+        client = client or _client({"SplunkCaseAutopilot": {"investigationRunAdd": {"id": "run-1"}}})
         context = alert_common.AlertContext(helper or FakeAlertHelper(), settings=mock.Mock(), client=client)
         context._detector = FakeDetector((FEATURE_CASE_AUTOPILOT,))
         context._cache = FakeCache() if cache is None else cache
@@ -213,7 +257,7 @@ class FollowupTest(unittest.TestCase):
 
     def test_failed_followup_is_retried_then_dropped(self):
         cache = FakeCache()
-        client = FakeClient({"SplunkCaseAutopilot": graphql_error("investigation engine unavailable")})
+        client = _client({"SplunkCaseAutopilot": graphql_error("investigation engine unavailable")})
         context = self._followup_context(client=client, cache=cache, ingested=lambda ids: set(ids))
         self._defer_autopilot(context)
         self.assertEqual(context.run_followups(sleep=lambda delay: None), 1)
@@ -225,6 +269,46 @@ class FollowupTest(unittest.TestCase):
         self.assertEqual(self._parked(cache), [])
         self.assertEqual(len(client.calls_of("SplunkCaseAutopilot")), alert_common.FOLLOWUP_MAX_FAILURES)
         self.assertTrue(any("dropped after" in m for level, m in helper.logs if level == "error"))
+
+    def test_followup_blocked_by_another_alert_run_stays_parked_without_a_failure(self):
+        cache = FakeCache()
+        context = self._followup_context(cache=cache, ingested=lambda ids: set(ids))
+        cache.reserve(f"autopilot|{context.client.opencti_url}|incident--1",
+                      {"status": "pending", "reserved_at": program_actions.utc_now_iso()})
+        self._defer_autopilot(context)
+        self.assertEqual(context.run_followups(sleep=lambda delay: None), 1)
+        self.assertEqual([value.get("failures") for _, value in self._parked(cache)], [None])
+        later = self._followup_context(cache=cache, ingested=lambda ids: set(ids))
+        later.run_followups()
+        self.assertEqual([value.get("failures") for _, value in self._parked(cache)], [None], "still waiting")
+        # The other run recorded its run: the parked follow-up is done
+        cache.set(f"autopilot|{context.client.opencti_url}|incident--1", {"run_id": "run-1"})
+        self._followup_context(cache=cache, ingested=lambda ids: set(ids)).run_followups()
+        self.assertEqual(self._parked(cache), [])
+        self.assertEqual(later.client.calls_of("SplunkCaseAutopilot"), [])
+
+    def test_parked_followups_beyond_one_run_are_taken_in_turn(self):
+        cache = FakeCache()
+        prefix = self._followup_context(cache=cache)._parked_prefix()
+        total = alert_common.FOLLOWUP_RETRIED_PER_RUN + 20
+        for number in range(total):
+            cache.set(f"{prefix}{number:04d}", {"entity_id": f"incident--{number}", "description": "Run Case Autopilot",
+                                                "kind": program_actions.FOLLOWUP_CASE_AUTOPILOT, "params": {},
+                                                "parked_at": program_actions.utc_now_iso()})
+        checked = []
+
+        def nothing_ingested(ids):
+            checked.extend(ids)
+            return set()
+        self._followup_context(cache=cache, ingested=nothing_ingested).run_followups()
+        self.assertEqual(len(checked), alert_common.FOLLOWUP_RETRIED_PER_RUN)
+        # The next run starts with the entries the first one did not reach
+        later = self._followup_context(cache=cache, ingested=lambda ids: set(ids))
+        later.run_followups()
+        started = {call["subjectId"] for call in later.client.calls_of("SplunkCaseAutopilot")}
+        unreached = {f"incident--{n}" for n in range(alert_common.FOLLOWUP_RETRIED_PER_RUN, total)}
+        self.assertEqual(started & unreached, unreached)
+        self.assertEqual(len(self._parked(cache)), total - alert_common.FOLLOWUP_RETRIED_PER_RUN)
 
     def test_parked_followup_expires(self):
         cache = FakeCache()

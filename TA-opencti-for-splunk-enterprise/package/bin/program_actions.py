@@ -20,8 +20,18 @@ mutation SplunkCaseAutopilot($subjectId: ID!, $policyId: ID) {
 }
 """
 
+AUTOPILOT_RUNS_QUERY = """
+query SplunkCaseAutopilotRuns($subjectId: String) {
+  investigationRuns(subjectId: $subjectId, first: 1) { edges { node { id } } }
+}
+"""
 
-def schedule_container_followups(context, container_id, event):
+
+class FollowupWaiting(Exception):
+    """A follow-up that cannot run yet and has not failed: it stays parked (alert_common)."""
+
+
+def schedule_container_followups(context, container_id, event, container_name=None):
     """
     Defer the Case Autopilot run of a container created by an alert until
     OpenCTI has ingested it (alert_common).
@@ -29,12 +39,15 @@ def schedule_container_followups(context, container_id, event):
     :param context: alert_common.AlertContext
     :param container_id: STIX id of the Incident / Case-Incident
     :param event: the Splunk result
+    :param container_name: name of the Incident / Case-Incident
     """
     if context.flag("run_case_autopilot", False) and context.detector.require(
         FEATURE_CASE_AUTOPILOT, "Run Case Autopilot"
     ):
         context.defer(container_id, "Run Case Autopilot", FOLLOWUP_CASE_AUTOPILOT, {
             "policy_id": context.param("autopilot_policy_id", ""),
+            "container_name": container_name,
+            "search_name": context.search_name,
         })
 
 
@@ -48,7 +61,8 @@ def run_followup(context, kind, container_id, params):
     :param params: JSON parameters recorded when it was deferred
     """
     if kind == FOLLOWUP_CASE_AUTOPILOT:
-        return run_case_autopilot(context, container_id, params.get("policy_id"))
+        return run_case_autopilot(context, container_id, params.get("policy_id"),
+                                  params.get("container_name"), params.get("search_name"))
     raise ValueError(f"Unknown follow-up {kind}")
 
 
@@ -67,13 +81,33 @@ def _stale_reservation(marker, now=None):
     return (now - reserved_at).total_seconds() > AUTOPILOT_RESERVATION_SECONDS
 
 
-def run_case_autopilot(context, container_id, policy_id=None):
+def _log_quoted(value):
+    """Double-quoted for the log line the Case Autopilot dashboard tab extracts with rex."""
+    return '"' + " ".join(str(value or "").replace('"', "'").split()) + '"'
+
+
+def existing_autopilot_run(context, container_id):
+    """:return: id of a Case Autopilot run OpenCTI already holds for this container, or None"""
+    data = context.client.graphql_query(AUTOPILOT_RUNS_QUERY, {"subjectId": container_id})
+    for edge in ((data.get("investigationRuns") or {}).get("edges")) or []:
+        node = (edge or {}).get("node") or {}
+        if node.get("id"):
+            return node["id"]
+    return None
+
+
+def run_case_autopilot(context, container_id, policy_id=None, container_name=None, search_name=None):
     """
     Run Case Autopilot once per container (repeated alerts on the same
-    incident do not start new runs).
+    incident do not start new runs). OpenCTI is the reference: a container
+    that already has a run is never given another one, whatever the add-on
+    state says, so a retry after an unanswered request never starts twice.
 
     :param context: alert_common.AlertContext
-    :return: id of the run, or None when skipped
+    :param container_name: name of the Incident / Case-Incident (logged for the dashboard)
+    :param search_name: alert that created the container (default: the running alert)
+    :return: id of the run started, or None when skipped
+    :raise FollowupWaiting: another alert run is starting it
     """
     if not context.detector.require(FEATURE_CASE_AUTOPILOT, "Run Case Autopilot"):
         return None
@@ -87,6 +121,8 @@ def run_case_autopilot(context, container_id, policy_id=None):
     marker = f"autopilot|{context.client.opencti_url}|{container_id}"
     existing = context.cache.get(marker)
     if existing and not _stale_reservation(existing):
+        if existing.get("status") == "pending":
+            raise FollowupWaiting(f"Case Autopilot is being started for {container_id} by another alert run")
         context.logger.info(f"Case Autopilot already run for {container_id}")
         return None
     if existing:
@@ -96,26 +132,32 @@ def run_case_autopilot(context, container_id, policy_id=None):
     # can never take it over again once the run is recorded.
     reservation = {"status": "pending", "reserved_at": utc_now_iso()}
     if take_over(context.cache, marker, reservation, _stale_reservation) is None:
-        context.logger.info(f"Case Autopilot already being started for {container_id}")
-        return None
+        raise FollowupWaiting(f"Case Autopilot is being started for {container_id} by another alert run")
     try:
-        data = context.client.graphql_query(AUTOPILOT_ADD_MUTATION, {
-            "subjectId": container_id,
-            "policyId": (policy_id or "").strip() or None,
-        })
+        known_run = existing_autopilot_run(context, container_id)
+        if known_run is None:
+            data = context.client.graphql_query(AUTOPILOT_ADD_MUTATION, {
+                "subjectId": container_id,
+                "policyId": (policy_id or "").strip() or None,
+            })
     except Exception:
+        # Safe to retry: the next attempt asks OpenCTI first
         context.cache.release(marker)
         raise
-    run = data.get("investigationRunAdd") or {}
+    run_id = known_run or (data.get("investigationRunAdd") or {}).get("id")
     try:
-        context.cache.set(marker, {"run_id": run.get("id"), "launched_at": utc_now_iso()})
+        context.cache.set(marker, {"run_id": run_id, "launched_at": utc_now_iso()})
     except Exception as ex:
         context.logger.error(
-            f"Case Autopilot run {run.get('id')} started for {container_id} but not recorded in the "
-            f"add-on state collection; another run may start once the reservation expires "
-            f"({AUTOPILOT_RESERVATION_SECONDS}s): {ex}"
+            f"Case Autopilot run {run_id} of {container_id} not recorded in the add-on state collection "
+            f"(the next attempt finds it in OpenCTI): {ex}"
         )
-        return run.get("id")
-    context.logger.info(f"Case Autopilot run {run.get('id')} started for {container_id}")
-    return run.get("id")
+    if known_run:
+        context.logger.info(f"Case Autopilot run {known_run} already exists for {container_id}: not started again")
+        return None
+    context.logger.info(
+        f"Case Autopilot run {run_id} started for {container_id} on {_log_quoted(container_name)} "
+        f"for the alert {_log_quoted(context.search_name if search_name is None else search_name)}"
+    )
+    return run_id
 # endregion

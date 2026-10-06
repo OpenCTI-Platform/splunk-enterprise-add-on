@@ -327,8 +327,11 @@ You can create an incident or an incident response case in OpenCTI from a custom
 Run Case Autopilot happens once OpenCTI has ingested the created object (the bundle is processed
 asynchronously by the OpenCTI workers, the action waits up to 60 seconds). A run whose object is still not
 ingested, or whose call failed, is parked in the `opencti_addon_state` KV Store collection and retried by the
-next runs of any OpenCTI alert action; a run already started for the object is never started again. A parked
-run is dropped (logged as an error) after 24 hours without ingestion or after 5 failed calls.
+next runs of any OpenCTI alert action (up to 100 per run, the least recently tried first, so more parked runs are
+taken in turn). Before starting a run, the action asks OpenCTI whether the object already has one, so a run
+already started for the object is never started again, even after a request whose answer was lost; while
+another alert run is starting it, the run stays parked without counting as a failure. A parked run is dropped
+(logged as an error) after 24 hours without ingestion or after 5 failed calls.
 
 7. To create a sighting, complete the form with the following settings:
 
@@ -425,7 +428,7 @@ line such as
 | Add-on capability                                            | OpenCTI capability (detected)                                    | OpenCTI releases without it          |
 |--------------------------------------------------------------|------------------------------------------------------------------|--------------------------------------|
 | Ingestion, enrichment, Create Incident / Case / Sighting     | live streams, `stixBundlePush`                                   | always available                     |
-| Run Case Autopilot                                           | `investigationRunAdd` and an Enterprise Edition license          | skipped                              |
+| Run Case Autopilot                                           | `investigationRunAdd` (+ `investigationRuns`) and an Enterprise Edition license | skipped                 |
 
 **OpenCTI account permissions.** Run Case Autopilot needs, on top of the capabilities of a connector service
 account, "Knowledge: ask for enrichment" and an Enterprise Edition license.
@@ -433,4 +436,4 @@ account, "Knowledge: ask for enrichment" and an Enterprise Edition license.
 ### Monitoring
 
 The Monitoring dashboard has a **Case Autopilot** tab: the Case Autopilot runs started by the incident alert
-actions.
+actions, with their time, the incident or case they investigate and the alert that started them.

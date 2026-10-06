@@ -86,6 +86,18 @@ class KVCollectionTest(unittest.TestCase):
         cache = addon_state.KVStoreCache(FakeService(data), collection="c")
         self.assertEqual(cache.items("pending|run|"), [("pending|run|a", {"result_ids": ["x"]})])
 
+    def test_cache_items_come_least_recently_written_first(self):
+        data = FakeData([])
+        cache = addon_state.KVStoreCache(FakeService(data), collection="c")
+        cache.items("alert_followup|")
+        self.assertEqual(data.calls[0]["sort"], "updated_at:1")
+        saved = []
+        data.batch_save = lambda *documents: saved.append(documents)
+        cache.touch([("alert_followup|a", {"entity_id": "a"}), ("alert_followup|b", {"entity_id": "b"})])
+        self.assertEqual(len(saved), 1, "one batch for every entry")
+        self.assertEqual([d["name"] for d in saved[0]], ["alert_followup|a", "alert_followup|b"])
+        self.assertTrue(all(d["updated_at"] for d in saved[0]))
+
 
 def _stale(value):
     return value.get("at") == "old"

@@ -19,7 +19,7 @@ from addon_config import is_true, settings_from_alert_helper
 from addon_state import KVStoreCache, MemoryCache, connect_service, state_key, utc_now_iso
 from constants import ADDON_NAME
 from opencti_features import OpenCTIFeatureDetector
-from program_actions import run_followup
+from program_actions import FollowupWaiting, run_followup
 from utils import parse_iso
 
 ALERT_FAILURE_EXIT_CODE = 2
@@ -169,10 +169,13 @@ class AlertContext:
             return set()
 
     def _run_followup(self, followup):
-        """:return: True when done, False when it failed"""
+        """:return: True when done, False when it failed, None when it has to wait (not a failure)"""
         try:
             run_followup(self, followup.get("kind"), followup.get("entity_id"), followup.get("params") or {})
             return True
+        except FollowupWaiting as ex:
+            self.logger.info(f"{followup.get('description')} for {followup.get('entity_id')} waits: {ex}")
+            return None
         except Exception as ex:
             self.logger.warning(f"{followup.get('description')} for {followup.get('entity_id')} failed: {ex}")
             return False
@@ -215,19 +218,24 @@ class AlertContext:
         return ""
 
     def _retry_one(self, key, followup, found):
+        """:return: True when the follow-up stays parked waiting (for its object or another alert run)"""
         if followup["entity_id"] not in found:
-            return
-        if self._run_followup(followup):
+            return True
+        outcome = self._run_followup(followup)
+        if outcome is None:
+            return True
+        if outcome:
             self.cache.release(key)
-            return
+            return False
         failures = int(followup.get("failures") or 0) + 1
         if failures < FOLLOWUP_MAX_FAILURES:
             self.cache.set(key, dict(followup, failures=failures))
-            return
+            return False
         self.logger.error(
             f"{followup.get('description')} for {followup['entity_id']} dropped after {failures} failed attempts"
         )
         self.cache.release(key)
+        return False
 
     def _retry_parked(self):
         """Run the follow-ups parked by earlier alert runs whose objects now exist."""
@@ -251,11 +259,21 @@ class AlertContext:
                 self.logger.warning(f"Parked follow-up {key} not released: {ex}")
         found = self._found([followup["entity_id"] for _, followup in live]) if live else set()
         # One entry failing never keeps the others waiting
+        waiting = []
         for key, followup in live:
             try:
-                self._retry_one(key, followup, found)
+                if self._retry_one(key, followup, found):
+                    waiting.append((key, followup))
             except Exception as ex:
                 self.logger.warning(f"Parked follow-up {key} not retried: {ex}")
+        # items() returns the least recently written entries first: the ones still
+        # waiting go behind the others, so beyond FOLLOWUP_RETRIED_PER_RUN parked
+        # entries the runs take them in turn instead of the same ones every time.
+        if waiting:
+            try:
+                self.cache.touch(waiting)
+            except Exception as ex:
+                self.logger.warning(f"Parked follow-ups not moved behind the others: {ex}")
 
     def run_followups(self, sleep=time.sleep, budget=FOLLOWUP_WAIT_SECONDS):
         """
@@ -269,7 +287,7 @@ class AlertContext:
         pending = list(self.followups)
         self.followups = []
         self._retry_parked()
-        failed = []
+        failed, blocked = [], []
         waited = 0.0
         attempt = 0
         while pending:
@@ -278,7 +296,11 @@ class AlertContext:
             for followup in pending:
                 if followup["entity_id"] not in found:
                     remaining.append(followup)
-                elif not self._run_followup(followup):
+                    continue
+                outcome = self._run_followup(followup)
+                if outcome is None:
+                    blocked.append(followup)
+                elif not outcome:
                     failed.append(followup)
             pending = remaining
             if not pending:
@@ -293,7 +315,9 @@ class AlertContext:
             self._park(followup, f"{followup['entity_id']} was not ingested by OpenCTI within {int(budget)}s")
         for followup in failed:
             self._park(dict(followup, failures=1), "it failed")
-        return len(pending) + len(failed)
+        for followup in blocked:
+            self._park(followup, "another alert run is running it")
+        return len(pending) + len(failed) + len(blocked)
 
 
 def run_alert(helper, action_name, handler, context_factory=AlertContext):

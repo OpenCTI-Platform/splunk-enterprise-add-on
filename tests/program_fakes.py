@@ -129,7 +129,13 @@ class FakeCache:
         return self.values.get(key)
 
     def set(self, key, value):
+        # Insertion order stands for the write time of KVStoreCache.items()
+        self.values.pop(key, None)
         self.values[key] = value
+
+    def touch(self, entries):
+        for key, value in entries:
+            self.set(key, value)
 
     def reserve(self, key, value):
         if key in self.values:

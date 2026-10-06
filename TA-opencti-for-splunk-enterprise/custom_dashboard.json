@@ -346,7 +346,7 @@
     "ds_tl_autopilot": {
       "name": "Case Autopilot runs",
       "options": {
-        "query": "index=_internal sourcetype=\"taopenctiforsplunkenterprise:log\" \"Case Autopilot run\" \"started for\" | rex \"Case Autopilot run (?<run_id>\\S+) started for (?<container_id>\\S+)\" | table _time source run_id container_id"
+        "query": "index=_internal sourcetype=\"taopenctiforsplunkenterprise:log\" \"Case Autopilot run\" \"started for\" | rex \"Case Autopilot run \\S+ started for \\S+ on \\\"(?<container>[^\\\"]*)\\\" for the alert \\\"(?<alert>[^\\\"]*)\\\"\" | eval Time = strftime(_time, \"%Y-%m-%d %H:%M:%S\") | table Time container alert | rename container AS \"Incident or case\", alert AS \"Alert\""
       },
       "type": "ds.search"
     }
