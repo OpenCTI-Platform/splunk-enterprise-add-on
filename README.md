@@ -72,6 +72,28 @@ If a proxy configuration is required to connect to OpenCTI platform, you can con
 | `Proxy Username` | An optional proxy username                                                  |
 | `Proxy Password` | An optional proxy password                                                  |
 
+### Security Platform settings
+
+The add-on identifies this Splunk deployment in OpenCTI as a **Security Platform** of type SIEM. The
+hunt evidence of the add-on (sightings of the hunt targets) is made on it. Configure it on the
+"Security Platform" tab of the Configuration page:
+
+| Parameter                                | Description                                                                                                                                  | Default            |
+|------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------|--------------------|
+| `Security Platform ID`                   | Id (internal or STIX) of an existing OpenCTI Security Platform. Takes precedence over the name                                               | empty              |
+| `Create the Security Platform`           | When no id is set, find the Security Platform by name, or create it (type SIEM)                                                               | enabled            |
+| `Security Platform name`                 | Name used to find or create it                                                                                                               | `Splunk <server>`  |
+| `Feature detection cache (minutes)`      | How long the capabilities read from the OpenCTI GraphQL schema are cached                                                                     | 60                 |
+
+The resolved Security Platform is cached in the KV Store (`opencti_addon_state`) and shared by every
+search head of a cluster, so members with different server names keep one Security Platform. Without a
+configured name, the first default name recorded in that collection is used by every member, so members
+resolving it for the first time at the same moment create one platform, not one each.
+
+**OpenCTI account permissions.** The account of the add-on needs the capabilities of a connector service
+account (bundle push and connector registration) plus "Knowledge: create / update" for the evidence
+attachment to the hunt runs and the Security Platform creation.
+
 ## OpenCTI Data Inputs Configuration
 
 The "OpenCTI for Splunk Enterprise Add-on" enables Splunk to be feed with intelligence exposed through an OpenCTI live stream. 
@@ -358,6 +380,7 @@ The “CIM model” method is based on the definition of CIM model fields. With 
 | `src_ip`          | IPv4 or IPv6 observable             |
 | `file_hash`       | File observable                     |
 | `file_name`       | File observable                     |
+| `query`           | Domain, IPv4 or IPv6 observable (the name or address of a `Network_Resolution` DNS lookup; a value that is not a host name is skipped) |
 
 
 #### Field mapping
@@ -395,3 +418,96 @@ Logs related to OpenCTI customer alerts are available in the following two log f
 ```$SPLUNK_HOME/var/log/splunk/opencti_create_incident_modalert.log```
 
 ```$SPLUNK_HOME/var/log/splunk/opencti_create_incident_response_modalert.log```
+
+---
+
+## OpenCTI program compatibility
+
+The add-on takes part in the autonomous hunting of OpenCTI: hunt searches run in Splunk report their
+results as evidence of the OpenCTI hunt run, sighted on the named Splunk Security Platform.
+
+### Compatibility matrix
+
+The add-on reads the OpenCTI GraphQL schema once per platform (cached in the KV Store, see
+`Feature detection cache`) and enables each capability only where the platform provides it. Missing
+capabilities are skipped with one log line such as
+`Hunt evidence attachment to the run: skipped, the OpenCTI platform (<version>) does not provide the hunt evidence write-back (huntRunEvidenceAdd)`.
+
+| Add-on capability                                            | OpenCTI capability (detected)                                    | OpenCTI releases without it          |
+|--------------------------------------------------------------|------------------------------------------------------------------|--------------------------------------|
+| Ingestion, enrichment, Create Incident / Case / Sighting     | live streams, `stixBundlePush`                                   | always available                     |
+| Splunk Security Platform (configured or auto-created)        | `securityPlatformAdd`, `securityPlatforms`                       | hunt evidence sighted on the Splunk host identity |
+| Hunt evidence linked to the run                              | `huntRun` (+ `huntRunEvidenceAdd`)                               | evidence sent without the run link   |
+
+### Hunts
+
+#### Report hunt evidence
+
+The "OpenCTI - Report hunt evidence" alert action reports the results of a hunt search as evidence of
+an OpenCTI hunt run:
+
+| Parameter                | Description                                                                 |
+|--------------------------|-----------------------------------------------------------------------------|
+| `Hunt run ID`            | Id of the OpenCTI hunt run, usually a field of the results (`$result.hunt_run_id$`) |
+| `Count`                  | Number of matching events of the result (`$result.count$`)                  |
+| `Observables Extraction` | `CIM Model` (default) or `Field Mapping`, as for the incident actions        |
+| `Labels`, `TLP`          | Labels and marking of the evidence                                          |
+
+For each result, the action creates an Observed-Data over the extracted observables (`number_observed` =
+count) and a sighting of each target of the hunt (indicators, attack patterns, threats) on the Splunk
+Security Platform; every object carries `x_opencti_hunt_run_id` and names the run in its description.
+Ids are the ones OpenCTI derives from its key fields (the objects of an Observed-Data; the target, the
+platform and the window of a sighting): OpenCTI merges the same observation reported again, by the
+same or another run, into one object.
+When the platform supports it, the objects are attached to the hunt run (`huntRunEvidenceAdd`, which
+carries the hit count and time of each report), so each run lists its own evidence even when it shares
+an object with another run. The bundle is ingested asynchronously by the OpenCTI workers: the action
+waits up to 15 seconds for the objects of a result, and stops waiting once 60 seconds of the alert run,
+over all its results, went to these waits, to the ingestion checks (one request per object) and to
+retrying earlier reports: the later results check their objects once and park them, and the retries are
+left to the next alert run. The objects still not ingested are attached by the next
+evidence reports of the same run, the least recently tried first (within a day; evidence OpenCTI never
+ingests is dropped after a day by the next evidence report of any run); that deferral is not a failure.
+Attaching an object again is harmless (OpenCTI keeps one link per object). A link OpenCTI rejects
+fails the result (the alert action reports it) and is retried by the next evidence report of the run.
+Both retries need the add-on state collection in the KV Store: when it is unavailable, evidence that is
+not ingested in time, or whose link OpenCTI rejects, fails the result (the alert action reports it) and
+is not retried.
+
+Example hunt search, run with the id of the hunt run OpenCTI created:
+
+```
+| tstats count min(_time) AS first_seen max(_time) AS last_seen from datamodel=Network_Resolution.DNS
+    where `opencti_hunt_scope` DNS.query="*.example-c2.top" by DNS.query DNS.src
+| rename DNS.query AS query DNS.src AS src
+| eval hunt_run_id="<hunt run id>"
+```
+
+#### OpenCTI internal-hunt/splunk connector
+
+The OpenCTI hunt connector for Splunk translates the Sigma logic of hunts into SPL with pySigma and runs
+it through the Splunk REST search API. Recommendations:
+
+- **Service account**: a dedicated Splunk user for the connector, with a role allowing `search` and
+  `rest_properties_get` only, searchable indexes restricted to the hunt scope, a search quota
+  (`srchJobsQuota`, `srchDiskQuota`) and a time window limit (`srchTimeWin`). Use a Splunk token, not a
+  password.
+- **Scope**: set the role default and allowed indexes to the same indexes as the `opencti_hunt_scope`
+  macro, and use the macro in hunt searches written by hand, so a hunt never reads more than intended.
+- **REST endpoint**: `https://<search head>:8089/services/search/v2/jobs/export` (or `search/jobs`
+  for long runs); the connector needs network access to the management port.
+- **pySigma pipelines**: `splunk_windows` for Windows event logs, `splunk_cim_data_model` (or the CIM
+  pipeline of your backend version) when your data is CIM-normalized; the CIM field names (`dest`,
+  `src`, `user`, `process`, `file_hash`, `query`, `url`...) are those of the Splunk Common Information
+  Model.
+- **Evidence**: the connector reports the hits of the runs it executes; hunts implemented as Splunk
+  saved searches report through the "OpenCTI - Report hunt evidence" alert action above.
+
+The action writes its log to `$SPLUNK_HOME/var/log/splunk/opencti_report_hunt_evidence_modalert.log` and exits
+with a non-zero code when at least one result could not be reported, so failures show in the Splunk alert
+action status (`index=_internal sourcetype=splunkd component=sendmodalert`).
+
+### Monitoring
+
+The Monitoring dashboard has a **Hunts** tab: hunt evidence reported by the "OpenCTI - Report hunt evidence"
+alert action (time, hunt, objects, hunt targets), and its errors.

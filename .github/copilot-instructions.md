@@ -89,6 +89,19 @@ TA-opencti-for-splunk-enterprise/
 └── lib/                               # Vendored Python dependencies
 ```
 
+### OpenCTI hunting modules
+
+| Module (`package/bin/`) | Role |
+|---|---|
+| `opencti_features.py` | `OpenCTIFeatureDetector`: cached GraphQL introspection; every program call is gated with `detector.require(FEATURE_*, "<action>")` |
+| `security_platform.py` | Resolves / creates the Splunk Security Platform (SIEM); cache shared across search heads |
+| `addon_config.py`, `addon_state.py` | Settings loader (alert actions) and KV Store state collection |
+| `alert_common.py`, `program_actions.py` | Alert action plumbing (exit codes), hunt runs and the evidence write-back |
+
+Rules for these modules:
+- Never call a program mutation without a feature check; on a missing feature, skip and log once.
+- Pure logic stays testable without Splunk (fakes in `tests/program_fakes.py`); helper scripts are thin.
+
 ---
 
 ## Key Technical Details
@@ -156,7 +169,7 @@ This enrichment is done via `app_connector_helper.py`.
 
 ### Python
 
-- **Target**: Python 3.7+ (Splunk's embedded Python)
+- **Target**: Python 3.10 to 3.13 (the pinned libraries need 3.10 or later; Splunk Enterprise 10 embeds 3.13), tested in CI on 3.10, 3.12 and 3.13
 - Use `solnlib` for configuration management, logging, and checkpointing
 - Use `splunklib` for KV Store operations and event writing
 - Always use `logger_for_input()` for per-input logging — never `print()`

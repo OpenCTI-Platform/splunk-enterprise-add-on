@@ -1,6 +1,6 @@
 {
   "title": "OpenCTI",
-  "description": "A summary of indicators ingested from OpenCTI",
+  "description": "Indicators ingested from OpenCTI, and the hunt evidence Splunk reports back",
   "inputs": {
     "input_global_trp": {
       "options": {
@@ -231,6 +231,26 @@
       },
       "title": "Indicator types",
       "type": "splunk.pie"
+    },
+    "viz_hunt_evidence": {
+      "dataSources": {
+        "primary": "ds_hunt_evidence"
+      },
+      "options": {},
+      "showLastUpdated": false,
+      "showProgressBar": false,
+      "title": "Hunt evidence",
+      "type": "splunk.table"
+    },
+    "viz_hunt_errors": {
+      "dataSources": {
+        "primary": "ds_hunt_errors"
+      },
+      "options": {},
+      "showLastUpdated": false,
+      "showProgressBar": false,
+      "title": "Hunt evidence errors",
+      "type": "splunk.table"
     }
   },
   "dataSources": {
@@ -330,6 +350,20 @@
       "options": {
         "query": "| inputlookup opencti_indicators | stats by revoked",
         "queryParameters": {}
+      },
+      "type": "ds.search"
+    },
+    "ds_hunt_evidence": {
+      "name": "Hunt evidence",
+      "options": {
+        "query": "index=_internal sourcetype=\"taopenctiforsplunkenterprise:log\" source=\"*opencti_report_hunt_evidence_modalert.log*\" \"Hunt evidence for run\" | rex \"Hunt evidence for run \\S+ \\((?<hunt>.*?)\\) sent: (?<objects>\\d+) objects, (?<targets>\\d+) hunt targets\" | where isnotnull(objects) | eval Time = strftime(_time, \"%Y-%m-%d %H:%M:%S\") | table Time hunt objects targets | rename hunt AS \"Hunt\", objects AS \"Objects\", targets AS \"Hunt targets\""
+      },
+      "type": "ds.search"
+    },
+    "ds_hunt_errors": {
+      "name": "Hunt evidence errors",
+      "options": {
+        "query": "index=_internal sourcetype=\"taopenctiforsplunkenterprise:log\" source=\"*opencti_report_hunt_evidence_modalert.log*\" (ERROR OR WARNING) | head 100 | table _time _raw"
       },
       "type": "ds.search"
     }
@@ -438,14 +472,48 @@
           }
         ],
         "type": "absolute"
+      },
+      "layout_hunts": {
+        "options": {
+          "display": "fit-to-width",
+          "height": 720,
+          "width": 1440
+        },
+        "structure": [
+          {
+            "item": "viz_hunt_evidence",
+            "position": {
+              "h": 400,
+              "w": 1420,
+              "x": 10,
+              "y": 0
+            },
+            "type": "block"
+          },
+          {
+            "item": "viz_hunt_errors",
+            "position": {
+              "h": 300,
+              "w": 1420,
+              "x": 10,
+              "y": 410
+            },
+            "type": "block"
+          }
+        ],
+        "type": "absolute"
       }
     },
     "options": {},
     "tabs": {
       "items": [
         {
-          "label": "New tab",
+          "label": "Indicators",
           "layoutId": "layout_1"
+        },
+        {
+          "label": "Hunts",
+          "layoutId": "layout_hunts"
         }
       ]
     }
