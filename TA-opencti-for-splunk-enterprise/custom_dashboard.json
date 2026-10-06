@@ -494,7 +494,7 @@
     "ds_dep_failures": {
       "name": "Failed deployments (latest)",
       "options": {
-        "query": "| inputlookup opencti_deployments | where result=\"error\" OR status=\"failed\" | lookup opencti_indicators id AS indicator_id OUTPUT value type | sort - reported_at | head 100 | eval value = coalesce(value, \"(no longer in opencti_indicators)\"), status = case(status==\"deployed\", \"Deployed\", status==\"removed\", \"Removed\", status==\"failed\", \"Failed\", status==\"expired\", \"Expired\", true(), status) | table reported_at value type status error | rename reported_at AS \"Reported at\", value AS \"Value\", type AS \"Type\", status AS \"Status\", error AS \"Error\"",
+        "query": "| inputlookup opencti_deployments | where result=\"error\" OR status=\"failed\" | lookup opencti_indicators id AS indicator_id OUTPUT value type | sort - reported_at | head 100 | eval value = coalesce(value, \"(indicator not in Splunk)\"), status = case(status==\"deployed\", \"Deployed\", status==\"removed\", \"Removed\", status==\"failed\", \"Failed\", status==\"expired\", \"Expired\", true(), status) | table reported_at value type status error | rename reported_at AS \"Reported at\", value AS \"Value\", type AS \"Type\", status AS \"Status\", error AS \"Error\"",
         "queryParameters": {}
       },
       "type": "ds.search"
@@ -502,7 +502,7 @@
     "ds_hits_top": {
       "name": "Most hit indicators",
       "options": {
-        "query": "| inputlookup opencti_indicator_hits | sort - hit_count | head 20 | eval last_status = case(last_status==\"reported\", \"Reported\", last_status==\"reported_as_sighting\", \"Reported as a sighting\", true(), last_status) | table value type hit_count first_hit last_hit last_status | rename value AS \"Value\", type AS \"Type\", hit_count AS \"Hits\", first_hit AS \"First hit\", last_hit AS \"Last hit\", last_status AS \"Last status\"",
+        "query": "| inputlookup opencti_indicator_hits | sort - hit_count | head 20 | eval first_hit = replace(first_hit, \"\\.\\d+Z$\", \"Z\"), last_hit = replace(last_hit, \"\\.\\d+Z$\", \"Z\"), last_status = case(last_status==\"reported\", \"Reported\", last_status==\"reported_as_sighting\", \"Reported as a sighting\", true(), last_status) | table value type hit_count first_hit last_hit last_status | rename value AS \"Value\", type AS \"Type\", hit_count AS \"Hits\", first_hit AS \"First hit\", last_hit AS \"Last hit\", last_status AS \"Last status\"",
         "queryParameters": {}
       },
       "type": "ds.search"
@@ -518,7 +518,7 @@
     "ds_val_latest": {
       "name": "Latest validations",
       "options": {
-        "query": "| inputlookup opencti_validation_results | sort - decided_at | head 100 | eval outcome = case(outcome==\"detected\", \"Detected\", outcome==\"missed\", \"Missed\", outcome==\"requested\", \"Waiting\", true(), outcome), channel = case(channel==\"iocValidationReportResults\", \"Validation results\", channel==\"bundle\", \"Sighting bundle\", isnull(channel) OR channel==\"\", \"Not reported\", true(), channel) | table decided_at request_name value test_kind outcome first_matching_hit channel | rename decided_at AS \"Decided at\", request_name AS \"Request\", value AS \"Value\", test_kind AS \"Test\", outcome AS \"Outcome\", first_matching_hit AS \"First matching hit\", channel AS \"Channel\"",
+        "query": "| inputlookup opencti_validation_results | sort - decided_at | head 100 | eval test_kind = case(test_kind==\"dns_resolution\", \"DNS resolution\", test_kind==\"http_head\", \"HTTP HEAD through the egress proxy\", test_kind==\"network_traffic\", \"Network connection (safe mode)\", test_kind==\"file_drop\", \"Benign file surrogate\", test_kind==\"log_injection\", \"Log injection\", true(), replace(test_kind, \"_\", \" \")), first_matching_hit = replace(first_matching_hit, \"\\.\\d+Z$\", \"Z\"), outcome = case(outcome==\"detected\", \"Detected\", outcome==\"missed\", \"Missed\", outcome==\"requested\", \"Waiting\", true(), outcome), channel = case(channel==\"iocValidationReportResults\", \"Validation results\", channel==\"bundle\", \"Sighting bundle\", isnull(channel) OR channel==\"\", \"Not reported\", true(), channel) | table decided_at request_name value test_kind outcome first_matching_hit channel | rename decided_at AS \"Decided at\", request_name AS \"Request\", value AS \"Value\", test_kind AS \"Test\", outcome AS \"Outcome\", first_matching_hit AS \"First matching hit\", channel AS \"Channel\"",
         "queryParameters": {}
       },
       "type": "ds.search"

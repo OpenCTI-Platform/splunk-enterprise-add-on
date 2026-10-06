@@ -291,6 +291,26 @@ class DashboardTest(unittest.TestCase):
                     self.assertNotRegex(shown.lower(), r"\bids?\b")
         self.assertGreaterEqual(checked, 3)
 
+    def test_tables_show_words_not_internal_values(self):
+        sources = self.dashboard["dataSources"]
+        validations = sources["ds_val_latest"]["options"]["query"]
+        # The labels OpenCTI shows for the IOC validation tests
+        for kind, label in (("dns_resolution", "DNS resolution"), ("http_head", "HTTP HEAD through the egress proxy"),
+                            ("network_traffic", "Network connection (safe mode)"),
+                            ("file_drop", "Benign file surrogate"), ("log_injection", "Log injection")):
+            self.assertIn(f'test_kind=="{kind}", "{label}"', validations)
+        self.assertIn('true(), replace(test_kind, "_", " "))', validations, "an unknown test kind reads as words")
+        failures = sources["ds_dep_failures"]["options"]["query"]
+        self.assertIn('coalesce(value, "(indicator not in Splunk)")', failures)
+        self.assertNotRegex(failures, r'coalesce\(value, "[^"]*opencti_')
+
+    def test_tables_show_one_timestamp_form(self):
+        """KV Store rows hold second and millisecond timestamps: the tables show them in the second form."""
+        for name, fields in (("ds_hits_top", ("first_hit", "last_hit")), ("ds_val_latest", ("first_matching_hit",))):
+            query = self.dashboard["dataSources"][name]["options"]["query"]
+            for field in fields:
+                self.assertIn(f'{field} = replace({field}, "\\.\\d+Z$", "Z")', query, name)
+
     def test_iso_timestamps_parse_both_precisions(self):
         # KV Store rows hold second (utc_now_iso) and millisecond (to_iso) timestamps
         parsed = 0
