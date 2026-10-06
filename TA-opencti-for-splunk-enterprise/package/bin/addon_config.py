@@ -109,7 +109,8 @@ def load_settings(session_key, logger=None):
     conf = cfm.get_conf(SETTINGS_CONF)
     account = _stanza(conf, "account")
     platform = _stanza(conf, PLATFORM_STANZA)
-    proxy_settings = {}
+    # The proxy stanza always ships (its type has a default), so a read failure
+    # means a configured proxy is unusable: never fall back to a direct connection.
     try:
         proxy_settings = conf_manager.get_proxy_dict(
             logger=logger,
@@ -118,8 +119,7 @@ def load_settings(session_key, logger=None):
             conf_name=SETTINGS_CONF,
         ) or {}
     except Exception as ex:
-        if logger is not None:
-            logger.warning(f"Proxy settings unreadable, connecting without proxy: {ex}")
+        raise RuntimeError(f"Proxy settings unreadable, not connecting to OpenCTI: {ex}") from ex
     server_name = ""
     try:
         server_name = splunkenv.get_splunk_host_info(session_key)[0]
