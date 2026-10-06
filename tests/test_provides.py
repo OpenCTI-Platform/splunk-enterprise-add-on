@@ -103,11 +103,12 @@ class ProvidesTest(unittest.TestCase):
                              "SplunkProvides": {"stixCoreRelationshipAdd": {"id": "rel"}},
                              "SplunkProvidesDelete": {"stixCoreRelationshipEdit": {"delete": "rel-old"}}})
         state = FakeKV([{"_key": "old", "platform_id": "platform-internal", "data_component": "Module Load",
-                         "relationship_ids": "rel-old", "status": STATUS_DECLARED}])
+                         "relationship_ids": "rel-old", "status": STATUS_DECLARED, "message": "denied"}])
         rows = ProvidesPublisher(client, FakeDetector((FEATURE_PROVIDES,)), PLATFORM, state).publish(self.INVENTORY[:1], prune=True)
         self.assertIn({"data_component": "Module Load", "status": STATUS_PRUNED, "message": ""}, rows)
         self.assertEqual(client.calls_of("SplunkProvidesDelete"), [{"id": "rel-old"}])
-        self.assertEqual(state.records["old"]["status"], STATUS_PRUNED)
+        self.assertEqual((state.records["old"]["status"], state.records["old"]["message"]), (STATUS_PRUNED, ""),
+                         "an earlier failure is not shown on a pruned entry")
 
     def test_prune_keeps_components_of_previous_chunks(self):
         client = FakeClient({"SplunkDataComponents": self._dc, "SplunkProvides": {"stixCoreRelationshipAdd": {"id": "rel"}}})
@@ -128,6 +129,8 @@ class ProvidesTest(unittest.TestCase):
         self.assertIn("not pruned", [r for r in rows if r["data_component"] == "Module Load"][0]["message"])
         self.assertEqual(state.records["old"]["status"], STATUS_DECLARED)
         self.assertEqual(state.records["old"]["relationship_ids"], "rel-b", "only the relationship left is retried")
+        self.assertEqual(state.records["old"]["message"], "not pruned: OpenCTI GraphQL errors: denied",
+                         "the inventory shows the failed pruning")
 
     def test_unacknowledged_declaration_is_a_failure(self):
         client = FakeClient({"SplunkDataComponents": self._dc, "SplunkProvides": {"stixCoreRelationshipAdd": None}})

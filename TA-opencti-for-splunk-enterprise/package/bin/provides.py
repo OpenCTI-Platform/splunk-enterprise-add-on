@@ -298,16 +298,16 @@ class ProvidesPublisher:
                     error = ex
             if remaining:
                 # Still declared: the next pruning run retries the relationships left.
+                message = f"not pruned: {str(error)[:1000]}"
                 states.append(dict(
                     {k: v for k, v in record.items() if k == "_key" or not k.startswith("_")},
-                    relationship_ids=",".join(remaining),
+                    relationship_ids=",".join(remaining), message=message, reported_at=utc_now_iso(),
                 ))
-                rows.append({"data_component": record.get("data_component"), "status": STATUS_ERROR,
-                             "message": f"not pruned: {str(error)[:1000]}"})
+                rows.append({"data_component": record.get("data_component"), "status": STATUS_ERROR, "message": message})
                 continue
             states.append(dict(
                 {k: v for k, v in record.items() if k == "_key" or not k.startswith("_")},
-                status=STATUS_PRUNED, reported_at=utc_now_iso(),
+                status=STATUS_PRUNED, message="", reported_at=utc_now_iso(),
             ))
             rows.append({"data_component": record.get("data_component"), "status": STATUS_PRUNED, "message": ""})
         return rows
