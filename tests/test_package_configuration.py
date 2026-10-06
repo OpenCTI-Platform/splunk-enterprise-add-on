@@ -102,6 +102,37 @@ class DashboardTest(unittest.TestCase):
                 visualization = dashboard["visualizations"][item["item"]]
                 self.assertIn(visualization["dataSources"]["primary"], dashboard["dataSources"])
 
+    def test_tables_show_human_headers(self):
+        """Splunk shows the fields of the final table, renamed, as column headers: no raw names or IDs."""
+        with open(os.path.join(TA, "custom_dashboard.json"), encoding="utf-8") as handle:
+            dashboard = json.load(handle)
+        checked = 0
+        for name, source in dashboard["dataSources"].items():
+            query = source.get("options", {}).get("query", "")
+            tables = re.findall(r"\|\s*table\s+([^|]+)", query)
+            if not tables or "_raw" in tables[-1].split():
+                continue  # the errors and warnings panels list raw log lines on purpose
+            checked += 1
+            renames = dict(re.findall(r'(\w+) AS "([^"]+)"', query.split("| table")[-1]))
+            for field in tables[-1].split():
+                shown = renames.get(field, field)
+                if shown.startswith("_"):
+                    continue  # hidden by Splunk tables
+                with self.subTest(source=name, field=field):
+                    self.assertIsNone(re.fullmatch(r"[a-z0-9_]+", shown), f"{shown} is a raw field name")
+                    self.assertNotRegex(shown.lower(), r"\bids?\b")
+        self.assertGreaterEqual(checked, 1)
+
+    def test_hunt_evidence_table_reads_the_sent_lines_only(self):
+        with open(os.path.join(TA, "custom_dashboard.json"), encoding="utf-8") as handle:
+            sources = json.load(handle)["dataSources"]
+        query = [s["options"]["query"] for s in sources.values() if "Hunt evidence for run" in s["options"].get("query", "")][0]
+        pattern = re.search(r'\| rex "((?:[^"\\]|\\.)*)"', query).group(1).replace('\\"', '"').replace("(?<", "(?P<")
+        sent = "Hunt evidence for run 1f7c (C2 over DNS) sent: 4 objects, 2 hunt targets sighted"
+        self.assertEqual(re.search(pattern, sent).groupdict(), {"hunt": "C2 over DNS", "objects": "4", "targets": "2"})
+        self.assertIsNone(re.search(pattern, "Hunt evidence for run 1f7c sent, its attachment is deferred: 1 evidence"))
+        self.assertIn("where isnotnull(objects)", query)
+
 
 if __name__ == "__main__":
     unittest.main()

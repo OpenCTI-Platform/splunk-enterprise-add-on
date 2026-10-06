@@ -356,7 +356,7 @@
     "ds_hunt_evidence": {
       "name": "Hunt evidence",
       "options": {
-        "query": "index=_internal sourcetype=\"taopenctiforsplunkenterprise:log\" source=\"*opencti_report_hunt_evidence_modalert.log*\" \"Hunt evidence for run\" | rex \"Hunt evidence for run (?<hunt_run_id>\\S+) \\((?<hunt>.*?)\\) sent: (?<objects>\\d+) objects, (?<targets>\\d+) hunt targets\" | where isnotnull(hunt_run_id) | table _time hunt_run_id hunt objects targets"
+        "query": "index=_internal sourcetype=\"taopenctiforsplunkenterprise:log\" source=\"*opencti_report_hunt_evidence_modalert.log*\" \"Hunt evidence for run\" | rex \"Hunt evidence for run \\S+ \\((?<hunt>.*?)\\) sent: (?<objects>\\d+) objects, (?<targets>\\d+) hunt targets\" | where isnotnull(objects) | eval Time = strftime(_time, \"%Y-%m-%d %H:%M:%S\") | table Time hunt objects targets | rename hunt AS \"Hunt\", objects AS \"Objects\", targets AS \"Hunt targets\""
       },
       "type": "ds.search"
     },

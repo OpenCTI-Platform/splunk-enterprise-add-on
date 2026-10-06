@@ -39,6 +39,9 @@ query SplunkEvidenceIngested($id: String!) {
 # The OpenCTI workers ingest a pushed bundle asynchronously: the evidence is
 # attached to the run once it exists, after at most these waits.
 EVIDENCE_INGESTION_DELAYS_SECONDS = (1, 2, 4, 8)
+# Seconds one alert run spends waiting, over all its results: once spent, the
+# evidence of the later results is checked once and parked if not ingested yet.
+EVIDENCE_WAIT_BUDGET_SECONDS = 60
 # Evidence still not ingested is attached by a later report of the same run,
 # within this delay.
 EVIDENCE_PENDING_SECONDS = 86400
@@ -95,6 +98,10 @@ def wait_for_ingestion(context, object_ids, delays=EVIDENCE_INGESTION_DELAYS_SEC
     pending = list(object_ids)
     for delay in (0,) + tuple(delays):
         if delay:
+            left = getattr(context, "evidence_wait_left", EVIDENCE_WAIT_BUDGET_SECONDS)
+            if delay > left:
+                break
+            context.evidence_wait_left = left - delay
             time.sleep(delay)
         present = set(_ingested(context, pending))
         pending = [object_id for object_id in pending if object_id not in present]
@@ -160,6 +167,21 @@ def _drop_expired_pending(context):
 def _attach_pending(context, hunt_run_id):
     """Attach the evidence of earlier reports of this run that is now ingested."""
     prefix = _pending_prefix(hunt_run_id)
+    waiting = []
+    try:
+        _attach_listed(context, hunt_run_id, prefix, waiting)
+    finally:
+        # items() returns the least recently written entries first: the ones still
+        # waiting go behind the others, so a run with more parked reports than one
+        # listing holds gets all of them attached in turn.
+        if waiting:
+            try:
+                context.cache.touch(waiting)
+            except Exception as ex:
+                context.logger.warning(f"Deferred hunt evidence of run {hunt_run_id} not moved behind the rest: {ex}")
+
+
+def _attach_listed(context, hunt_run_id, prefix, waiting):
     for key, item in context.cache.items(prefix):
         if "|" in key[len(prefix):]:
             continue
@@ -190,6 +212,8 @@ def _attach_pending(context, hunt_run_id):
                 context.cache.release(key)
             elif present:
                 context.cache.set(key, dict(item, result_ids=remaining, hits_count=0))
+            else:
+                waiting.append((key, item))
         except Exception as ex:
             # One entry failing never keeps the others of the run waiting
             context.logger.warning(f"Deferred hunt evidence {key} of run {hunt_run_id} not attached yet: {ex}")

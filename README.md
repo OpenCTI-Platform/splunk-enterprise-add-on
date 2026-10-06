@@ -462,9 +462,11 @@ same or another run, into one object.
 When the platform supports it, the objects are attached to the hunt run (`huntRunEvidenceAdd`, which
 carries the hit count and time of each report), so each run lists its own evidence even when it shares
 an object with another run. The bundle is ingested asynchronously by the OpenCTI workers: the action
-waits up to 15 seconds for the objects, and the ones still not ingested are attached by the next
-evidence report of the same run (within a day; evidence OpenCTI never ingests is dropped after a day by the
-next evidence report of any run); that deferral is not a failure. A link OpenCTI rejects
+waits up to 15 seconds for the objects of a result, and 60 seconds at most over all the results of one
+alert run (later results are checked once). The objects still not ingested are attached by the next
+evidence reports of the same run, the least recently tried first (within a day; evidence OpenCTI never
+ingests is dropped after a day by the next evidence report of any run); that deferral is not a failure.
+Attaching an object again is harmless (OpenCTI keeps one link per object). A link OpenCTI rejects
 fails the result (the alert action reports it) and is retried by the next evidence report of the run,
 as is evidence that cannot be deferred because the KV Store is unavailable.
 
@@ -504,4 +506,4 @@ action status (`index=_internal sourcetype=splunkd component=sendmodalert`).
 ### Monitoring
 
 The Monitoring dashboard has a **Hunts** tab: hunt evidence reported by the "OpenCTI - Report hunt evidence"
-alert action, and its errors.
+alert action (time, hunt, objects, hunt targets), and its errors.

@@ -194,6 +194,34 @@ class ActionTest(unittest.TestCase):
         self.assertEqual(len(evidence), 1)
         self.assertEqual(evidence[0]["input"]["result_ids"], ["observed-data--1", "sighting--1"])
 
+    def test_one_alert_run_waits_within_its_budget(self):
+        context = self._evidence_context(set())
+        waits = []
+        with mock.patch.object(program_actions, "EVIDENCE_WAIT_BUDGET_SECONDS", 3), \
+                mock.patch.object(program_actions.time, "sleep", side_effect=waits.append):
+            for object_id in ("observed-data--1", "observed-data--2"):
+                with self.assertRaises(program_actions.HuntEvidenceDeferred):
+                    program_actions.report_hunt_evidence(context, "run-1", [object_id], 1)
+        self.assertEqual(waits, [1, 2], "the second result checks once and parks without waiting")
+        self.assertEqual(len(context.cache.items("hunt_evidence_pending|run-1|")), 2)
+
+    def test_parked_reports_beyond_one_listing_are_attached_in_turn(self):
+        ingested = set()
+        context = self._evidence_context(ingested)
+        total = 120
+        for number in range(total):
+            program_actions._park(context, "run-1", {"result_ids": [f"observed-data--{number}"], "hits_count": 1,
+                                                     "source": "splunk-alert-action",
+                                                     "parked_at": program_actions.utc_now_iso()})
+        with mock.patch.object(program_actions.time, "sleep"):
+            with self.assertRaises(program_actions.HuntEvidenceDeferred):
+                program_actions.report_hunt_evidence(context, "run-1", ["observed-data--new"], 1)
+            ingested.update({f"observed-data--{number}" for number in range(total)} | {"sighting--x"})
+            program_actions.report_hunt_evidence(context, "run-1", ["sighting--x"], 1)
+        attached = {call["input"]["result_ids"][0] for call in context.client.calls_of("SplunkHuntRunEvidence")}
+        unreached = {f"observed-data--{number}" for number in range(100, total)}
+        self.assertEqual(attached & unreached, unreached, "the second listing starts with the entries the first did not reach")
+
     def test_evidence_not_ingested_is_attached_by_the_next_report(self):
         ingested = set()
         context = self._evidence_context(ingested)
