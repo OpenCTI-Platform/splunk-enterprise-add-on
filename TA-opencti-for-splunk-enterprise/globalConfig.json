@@ -481,6 +481,21 @@
                     "help": "Enable extraction of observables",
                     "required": false,
                     "defaultValue": "disable"
+                },
+                {
+                    "type": "checkbox",
+                    "label": "Run Case Autopilot",
+                    "field": "run_case_autopilot",
+                    "defaultValue": 0,
+                    "help": "Run Case Autopilot once per created object (OpenCTI Enterprise Edition with Case Autopilot)."
+                },
+                {
+                    "type": "text",
+                    "label": "Case Autopilot policy ID",
+                    "field": "autopilot_policy_id",
+                    "defaultValue": "",
+                    "required": false,
+                    "help": "Optional investigation policy; the platform default applies when empty."
                 }
             ]
         },
@@ -602,6 +617,21 @@
                     "help": "Enable extraction of observables",
                     "required": false,
                     "defaultValue": "disable"
+                },
+                {
+                    "type": "checkbox",
+                    "label": "Run Case Autopilot",
+                    "field": "run_case_autopilot",
+                    "defaultValue": 0,
+                    "help": "Run Case Autopilot once per created object (OpenCTI Enterprise Edition with Case Autopilot)."
+                },
+                {
+                    "type": "text",
+                    "label": "Case Autopilot policy ID",
+                    "field": "autopilot_policy_id",
+                    "defaultValue": "",
+                    "required": false,
+                    "help": "Optional investigation policy; the platform default applies when empty."
                 }
             ]
         },

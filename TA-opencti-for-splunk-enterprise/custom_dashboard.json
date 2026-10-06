@@ -1,6 +1,6 @@
 {
   "title": "OpenCTI",
-  "description": "A summary of indicators ingested from OpenCTI",
+  "description": "Indicators ingested from OpenCTI, and the Case Autopilot runs the incident alerts start",
   "inputs": {
     "input_global_trp": {
       "options": {
@@ -231,6 +231,16 @@
       },
       "title": "Indicator types",
       "type": "splunk.pie"
+    },
+    "viz_tl_autopilot": {
+      "dataSources": {
+        "primary": "ds_tl_autopilot"
+      },
+      "options": {},
+      "showLastUpdated": false,
+      "showProgressBar": false,
+      "title": "Case Autopilot runs",
+      "type": "splunk.table"
     }
   },
   "dataSources": {
@@ -330,6 +340,13 @@
       "options": {
         "query": "| inputlookup opencti_indicators | stats by revoked",
         "queryParameters": {}
+      },
+      "type": "ds.search"
+    },
+    "ds_tl_autopilot": {
+      "name": "Case Autopilot runs",
+      "options": {
+        "query": "index=_internal sourcetype=\"taopenctiforsplunkenterprise:log\" \"Case Autopilot run\" \"started for\" | rex \"Case Autopilot run (?<run_id>\\S+) started for (?<container_id>\\S+)\" | table _time source run_id container_id"
       },
       "type": "ds.search"
     }
@@ -438,14 +455,38 @@
           }
         ],
         "type": "absolute"
+      },
+      "layout_autopilot": {
+        "options": {
+          "display": "fit-to-width",
+          "height": 360,
+          "width": 1440
+        },
+        "structure": [
+          {
+            "item": "viz_tl_autopilot",
+            "position": {
+              "h": 350,
+              "w": 1420,
+              "x": 10,
+              "y": 0
+            },
+            "type": "block"
+          }
+        ],
+        "type": "absolute"
       }
     },
     "options": {},
     "tabs": {
       "items": [
         {
-          "label": "New tab",
+          "label": "Indicators",
           "layoutId": "layout_1"
+        },
+        {
+          "label": "Case Autopilot",
+          "layoutId": "layout_autopilot"
         }
       ]
     }
