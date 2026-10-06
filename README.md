@@ -462,8 +462,9 @@ The add-on ships detections matching the OpenCTI indicators against CIM data, di
 | `OpenCTI - File or process matching an indicator hash`  | `Endpoint` file and process hashes          | T1204.002, T1105                 |
 | `OpenCTI - Email from an indicator sender`              | `Email` sender                              | T1566.001, T1566.002             |
 
-Each one is a scheduled alert (tracked, throttled per indicator for one hour) whose rows carry
-`indicator_id`, `value`, `count`, `first_seen` and `last_seen`. Each one matches its values against the
+Each one is a scheduled alert (tracked, throttled per indicator for one hour) with one row per indicator,
+carrying `indicator_id`, `value` (every value that matched it, for example the same domain in two cases: the
+indicator lookup ignores case), `count`, `first_seen` and `last_seen`. Each one matches its values against the
 indicators of the same kind only (IP addresses, domains and hostnames, URLs, file hashes, email
 addresses), and revoked or expired indicators never match. A URL matches only the indicator of that
 exact URL: the scheme and host in any case, the path, query and fragment exactly. The techniques are

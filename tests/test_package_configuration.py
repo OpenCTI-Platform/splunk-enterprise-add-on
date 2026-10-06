@@ -75,6 +75,14 @@ class SavedSearchesTest(unittest.TestCase):
         self.assertIn("| tstats count where `opencti_inventory_scope` by sourcetype", search)
         self.assertEqual(self.searches.get(stanza, "dispatch.earliest_time"), "-7d@d")
 
+    def test_detections_yield_one_row_per_indicator(self):
+        """The indicator lookup ignores case: values that differ only in case must not split an indicator into rows."""
+        for name in DETECTIONS:
+            search = " ".join(self.searches.get(name, "search").split())
+            final = search.rsplit("| stats ", 1)[-1]
+            with self.subTest(name=name):
+                self.assertTrue(final.endswith(" values(value) AS value by indicator_id"), final)
+
     def test_hash_fields_are_reduced_to_the_digest(self):
         """CIM hash fields carry values such as sha256=<digest>; the indicators hold the raw digest."""
         search = self.searches.get("OpenCTI - File or process matching an indicator hash", "search")
