@@ -68,6 +68,13 @@ class SavedSearchesTest(unittest.TestCase):
         self.assertEqual(self.searches.get(stanza, "alert.track"), "0")
         self.assertIn("| openctiprovides", self.searches.get(stanza, "search"))
 
+    def test_inventory_counts_the_events_of_its_window_only(self):
+        stanza = "OpenCTI - Telemetry inventory"
+        search = self.searches.get(stanza, "search")
+        self.assertNotIn("| metadata", search, "metadata counts every event of the buckets, whatever their age")
+        self.assertIn("| tstats count where `opencti_inventory_scope` by sourcetype", search)
+        self.assertEqual(self.searches.get(stanza, "dispatch.earliest_time"), "-7d@d")
+
     def test_hash_fields_are_reduced_to_the_digest(self):
         """CIM hash fields carry values such as sha256=<digest>; the indicators hold the raw digest."""
         search = self.searches.get("OpenCTI - File or process matching an indicator hash", "search")

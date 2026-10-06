@@ -480,8 +480,8 @@ Platform name and keep its `platform_type` at `SIEM` (both derive the same ident
 
 #### Telemetry inventory (provides)
 
-`OpenCTI - Telemetry inventory` (daily, over 7 days) lists the CIM data models (`tstats`) and the
-sourcetypes (`metadata`) holding data, maps them to MITRE Data Components through the
+`OpenCTI - Telemetry inventory` (daily) lists the CIM data models and the sourcetypes holding data over
+the last 7 days (`tstats`, so the event counts cover those 7 days only), maps them to MITRE Data Components through the
 `opencti_cim_data_components` lookup and pipes one row per data component into `| openctiprovides`, which
 declares `provides` relationships Splunk Security Platform -> Data Component in OpenCTI. The defense
 matrix then knows which techniques Splunk has telemetry for.
