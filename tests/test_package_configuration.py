@@ -87,6 +87,16 @@ class CollectionsTest(unittest.TestCase):
             self.assertIn(name, collections.sections())
         self.assertEqual(transforms.get(PROVIDES_COLLECTION, "external_type"), "kvstore")
 
+    def test_provides_lookup_exposes_every_stored_field(self):
+        """inputlookup only returns the fields of fields_list: a stored field missing there never reaches a panel."""
+        from addon_state import PROVIDES_COLLECTION
+
+        collections = _conf("collections.conf")
+        transforms = _conf("transforms.conf")
+        declared = {key[len("field."):] for key in collections.options(PROVIDES_COLLECTION) if key.startswith("field.")}
+        listed = {field.strip() for field in transforms.get(PROVIDES_COLLECTION, "fields_list").split(",")}
+        self.assertEqual(declared - listed, set())
+
     def test_cim_mapping_lookup(self):
         transforms = _conf("transforms.conf")
         self.assertEqual(transforms.get("opencti_cim_data_components", "match_type"), "WILDCARD(source)")
@@ -201,6 +211,35 @@ class DashboardTest(unittest.TestCase):
             for item in layout["structure"]:
                 visualization = dashboard["visualizations"][item["item"]]
                 self.assertIn(visualization["dataSources"]["primary"], dashboard["dataSources"])
+
+    def test_tables_show_human_headers(self):
+        """Splunk shows the fields of the final table, renamed, as column headers: no raw names or IDs."""
+        with open(os.path.join(TA, "custom_dashboard.json"), encoding="utf-8") as handle:
+            dashboard = json.load(handle)
+        checked = 0
+        for name, source in dashboard["dataSources"].items():
+            query = source.get("options", {}).get("query", "")
+            tables = re.findall(r"\|\s*table\s+([^|]+)", query)
+            if not tables:
+                continue
+            checked += 1
+            renames = dict(re.findall(r'(\w+) AS "([^"]+)"', query.split("| table")[-1]))
+            for field in tables[-1].split():
+                shown = renames.get(field, field)
+                if shown.startswith("_"):
+                    continue  # hidden by Splunk tables
+                with self.subTest(source=name, field=field):
+                    self.assertIsNone(re.fullmatch(r"[a-z0-9_]+", shown), f"{shown} is a raw field name")
+                    self.assertNotRegex(shown.lower(), r"\bids?\b")
+        self.assertGreaterEqual(checked, 1)
+
+    def test_inventory_shows_readable_statuses(self):
+        import provides
+
+        with open(os.path.join(TA, "custom_dashboard.json"), encoding="utf-8") as handle:
+            query = json.load(handle)["dataSources"]["ds_df_inventory"]["options"]["query"]
+        for status in (provides.STATUS_DECLARED, provides.STATUS_UNMATCHED, provides.STATUS_ERROR, provides.STATUS_PRUNED):
+            self.assertIn(f'status=="{status}"', query)
 
 
 if __name__ == "__main__":

@@ -489,8 +489,9 @@ The lookup (`lookups/opencti_cim_data_components.csv`) is editable: one row per 
 (`datamodel:<Model>[.<Dataset>]` or `sourcetype:<sourcetype>`, wildcards allowed) and `data_component`
 (the MITRE Data Component name, as imported in OpenCTI). Data components unknown to OpenCTI are reported
 with the status `unmatched_data_component`, and a failed declaration with the status `error`; both are kept
-in `opencti_provides` with their message, so the dashboard shows them. A data component declared by an
-earlier run stays `declared` when a later declaration fails, with the failure in its message.
+in `opencti_provides` with their message, so the dashboard shows them. A data component that holds provides
+relationships in OpenCTI (declared by an earlier run, or partly by this one before the failure) stays
+`declared` with all of them, the failure in its message, so pruning can still delete them.
 `| openctiprovides prune=true` also deletes the provides relationships the add-on declared earlier for data
 components absent from the inventory (and retires their unmatched or failed entries); nothing is
 pruned when the inventory is empty or when a declaration of the run failed. With the

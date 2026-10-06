@@ -64,6 +64,23 @@ class ProvidesTest(unittest.TestCase):
                          "an earlier declaration stays prunable")
         self.assertIn("denied", earlier["message"])
 
+    def test_relationships_created_before_a_failure_stay_prunable(self):
+        def two_components(variables):
+            return {"dataComponents": {"edges": [{"node": {"id": "dc-1", "name": "Process Creation"}},
+                                                 {"node": {"id": "dc-1b", "name": "Process Creation"}}]}}
+
+        client = FakeClient({"SplunkDataComponents": two_components,
+                             "SplunkProvides": lambda v: graphql_error("denied") if v["input"]["toId"] == "dc-1b"
+                             else {"stixCoreRelationshipAdd": {"id": "rel-1"}}})
+        state = FakeKV()
+        rows = ProvidesPublisher(client, FakeDetector((FEATURE_PROVIDES,)), PLATFORM, state, logger=FakeLogger()).publish(
+            self.INVENTORY[:1])
+        self.assertEqual(rows[0]["status"], STATUS_ERROR)
+        record = state.records[state_key("platform-internal", "process creation")]
+        self.assertEqual((record["status"], record["relationship_ids"]), (STATUS_DECLARED, "rel-1"))
+        self.assertIn("denied", record["message"])
+        self.assertEqual(record["data_component_ids"], "dc-1,dc-1b")
+
     def test_successful_declaration_clears_the_message(self):
         client = FakeClient({"SplunkDataComponents": self._dc, "SplunkProvides": {"stixCoreRelationshipAdd": {"id": "rel"}}})
         key = state_key("platform-internal", "process creation")

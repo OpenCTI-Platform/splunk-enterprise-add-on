@@ -364,7 +364,7 @@
     "ds_df_inventory": {
       "name": "Telemetry inventory",
       "options": {
-        "query": "| inputlookup opencti_provides | sort data_component | table data_component status message event_count sources reported_at",
+        "query": "| inputlookup opencti_provides | sort data_component | eval status = case(status==\"declared\", \"Declared\", status==\"unmatched_data_component\", \"Unknown to OpenCTI\", status==\"error\", \"Failed\", status==\"pruned\", \"Withdrawn\", true(), status) | table data_component status message event_count sources reported_at | rename data_component AS \"Data component\", status AS \"Status\", message AS \"Message\", event_count AS \"Events\", sources AS \"Sources\", reported_at AS \"Reported at\"",
         "queryParameters": {}
       },
       "type": "ds.search"

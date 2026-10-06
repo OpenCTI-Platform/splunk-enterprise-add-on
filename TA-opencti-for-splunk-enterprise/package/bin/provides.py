@@ -173,7 +173,7 @@ class ProvidesPublisher:
             if not ids:
                 row.update({"status": STATUS_UNMATCHED, "message": "no Data Component with this name in OpenCTI"})
                 rows.append(row)
-                failures.append((key, entry, row))
+                failures.append((key, entry, row, [], []))
                 continue
             relationship_ids = []
             try:
@@ -205,7 +205,8 @@ class ProvidesPublisher:
                     "reported_at": utc_now_iso(),
                 })
             else:
-                failures.append((key, entry, row))
+                # The relationships created before the failure are kept, so pruning can delete them
+                failures.append((key, entry, row, ids, [r for r in relationship_ids if r]))
         if any(row["status"] == STATUS_ERROR for row in rows):
             self._had_error = True
         states.extend(self._failure_states(failures))
@@ -226,32 +227,41 @@ class ProvidesPublisher:
     def _failure_states(self, failures):
         """
         Keep the data components this run could not declare in opencti_provides
-        for monitoring. An earlier declaration keeps its status and relationships
-        (pruning still finds them, the next run retries); the failure goes to
-        its message.
+        for monitoring. A data component holding relationships in OpenCTI (an
+        earlier declaration, or the ones this run created before failing) stays
+        declared with all of them, so pruning still finds them and the next run
+        retries; the failure goes to its message.
 
-        :param failures: list of (lower-cased name, inventory entry, output row)
+        :param failures: list of (lower-cased name, inventory entry, output row,
+            data component ids, relationship ids created by this run)
         """
         if not failures:
             return []
-        keys = [state_key(self.platform["id"], key) for key, _, _ in failures]
+        keys = [state_key(self.platform["id"], failure[0]) for failure in failures]
         try:
             existing = self.state.get_many(keys)
         except Exception as ex:
             self.logger.warning(f"Unable to read the telemetry inventory from the KV Store: {ex}")
             existing = {}
         states = []
-        for (key, entry, row), state_id in zip(failures, keys):
+        for (key, entry, row, ids, created), state_id in zip(failures, keys):
             previous = existing.get(state_id) or {}
-            declared = previous.get("status") == STATUS_DECLARED
+            held = []
+            if previous.get("status") == STATUS_DECLARED:
+                held = [r for r in (previous.get("relationship_ids") or "").split(",") if r]
+            held += [r for r in created if r not in held]
+            component_ids = [c for c in (previous.get("data_component_ids") or "").split(",") if c]
+            component_ids += [c for c in ids if c not in component_ids]
             states.append(dict(
                 {k: v for k, v in previous.items() if not k.startswith("_")},
                 _key=state_id,
                 platform_id=self.platform["id"],
                 data_component=entry["name"],
+                data_component_ids=",".join(component_ids),
+                relationship_ids=",".join(held),
                 sources=", ".join(entry["sources"]),
                 event_count=entry["event_count"],
-                status=STATUS_DECLARED if declared else row["status"],
+                status=STATUS_DECLARED if held or previous.get("status") == STATUS_DECLARED else row["status"],
                 message=row["message"],
                 reported_at=utc_now_iso(),
             ))
