@@ -62,8 +62,16 @@ class ConverterTest(unittest.TestCase):
         self.assertEqual([d["value"] for d in _objects(bundle, "domain-name")], ["beacon.example-c2.top"])
         self.assertEqual([i["value"] for i in _objects(bundle, "ipv4-addr")], ["10.1.2.3"])
 
+    def test_query_host_names_are_domains(self):
+        for query in ("WWW.Example.COM", "_dmarc.example.org", "a.b-c.example.co.uk", "shop.example.xn--p1ai", "x1.io"):
+            with self.subTest(query=query):
+                bundle, _ = convert_to_hunt_evidence(PARAMS, dict(EVENT, query=query), "run-1", PLATFORM["standard_id"], [TECHNIQUE])
+                self.assertEqual([d["value"] for d in _objects(bundle, "domain-name")], [query])
+
     def test_query_that_is_not_a_host_name_is_not_a_domain(self):
-        for query in ("select * from users", "wpad", "10.9.8.7"):
+        for query in ("select * from users", "wpad", "10.9.8.7", "host.-ab", "host.ab-", "-host.example.com",
+                      "host-.example.com", "999.1.1.12", "host.123", "a..example.com", "host.c", "under_.example.com",
+                      "a" * 64 + ".example.com", ("abc." * 63) + "com"):
             with self.subTest(query=query):
                 bundle, _ = convert_to_hunt_evidence(PARAMS, dict(EVENT, query=query), "run-1", PLATFORM["standard_id"], [TECHNIQUE])
                 self.assertEqual(_objects(bundle, "domain-name"), [])

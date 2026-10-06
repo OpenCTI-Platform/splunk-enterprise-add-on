@@ -10,8 +10,13 @@ from utils import generate_observed_data_id
 
 FAKE_INDICATOR_ID = "indicator--51b92778-cef0-4a90-b7ec-ebd620d01ac8"
 
-# "query" is a generic field name outside the CIM: only a host name makes a Domain observable
-DNS_NAME = re.compile(r"^(?=.{1,253}$)([A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z0-9-]{2,63}$")
+# "query" is a generic field name outside the CIM: only a host name makes a Domain observable.
+# Labels start and end with a letter or digit (a leading underscore is allowed, as in _dmarc);
+# the top-level label has 2 to 63 characters and is not all digits.
+DNS_NAME = re.compile(
+    r"^(?=.{1,253}$)(?:[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9])?\.)+"
+    r"(?![0-9]+$)[A-Za-z0-9][A-Za-z0-9-]{0,61}[A-Za-z0-9]$"
+)
 
 # TLP:AMBER+STRICT is not a stix2 built-in; the ID is OpenCTI's static one
 # (pycti MarkingDefinition.generate_id("TLP", "TLP:AMBER+STRICT"))
