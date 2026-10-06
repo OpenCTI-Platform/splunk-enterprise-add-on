@@ -1,0 +1,100 @@
+source,data_component,description
+datamodel:Authentication,User Account Authentication,CIM Authentication: logon attempts
+datamodel:Authentication,Logon Session Creation,CIM Authentication: successful logons
+datamodel:Network_Traffic,Network Traffic Flow,CIM Network Traffic: flow records
+datamodel:Network_Traffic,Network Connection Creation,CIM Network Traffic: connection attempts
+datamodel:Network_Resolution,Network Traffic Content,CIM Network Resolution: DNS queries and answers
+datamodel:Web,Network Traffic Content,CIM Web: HTTP requests (proxy and web server logs)
+datamodel:Web,Application Log Content,CIM Web: web application logs
+datamodel:Network_Sessions,Logon Session Creation,CIM Network Sessions: VPN sessions
+datamodel:Intrusion_Detection,Network Traffic Content,CIM Intrusion Detection: IDS/IPS inspection
+datamodel:Email,Application Log Content,CIM Email: mail gateway logs
+datamodel:Endpoint.Processes,Process Creation,CIM Endpoint Processes: process launches
+datamodel:Endpoint.Processes,Command Execution,CIM Endpoint Processes: command lines
+datamodel:Endpoint.Processes,Process Termination,CIM Endpoint Processes: process ends
+datamodel:Endpoint.Filesystem,File Creation,CIM Endpoint Filesystem: created files
+datamodel:Endpoint.Filesystem,File Modification,CIM Endpoint Filesystem: modified files
+datamodel:Endpoint.Filesystem,File Deletion,CIM Endpoint Filesystem: deleted files
+datamodel:Endpoint.Filesystem,File Metadata,CIM Endpoint Filesystem: file attributes and hashes
+datamodel:Endpoint.Registry,Windows Registry Key Creation,CIM Endpoint Registry: created keys
+datamodel:Endpoint.Registry,Windows Registry Key Modification,CIM Endpoint Registry: modified values
+datamodel:Endpoint.Registry,Windows Registry Key Deletion,CIM Endpoint Registry: deleted keys
+datamodel:Endpoint.Services,Service Creation,CIM Endpoint Services: installed services
+datamodel:Endpoint.Services,Service Modification,CIM Endpoint Services: service changes
+datamodel:Change,User Account Creation,CIM Change: account management
+datamodel:Change,User Account Modification,CIM Change: account management
+datamodel:Change,Group Modification,CIM Change: group membership changes
+datamodel:Change,Firewall Rule Modification,CIM Change: network device configuration
+datamodel:Change,Instance Modification,CIM Change: cloud and virtual instance changes
+datamodel:Change,Cloud Service Modification,CIM Change: cloud service configuration
+datamodel:Data_Access,File Access,CIM Data Access: file share and document access
+datamodel:Data_Access,Cloud Storage Access,CIM Data Access: cloud storage access
+sourcetype:*WinEventLog*Microsoft-Windows-Sysmon/Operational,Process Creation,Sysmon event 1
+sourcetype:*WinEventLog*Microsoft-Windows-Sysmon/Operational,Command Execution,Sysmon event 1 command lines
+sourcetype:*WinEventLog*Microsoft-Windows-Sysmon/Operational,Network Connection Creation,Sysmon event 3
+sourcetype:*WinEventLog*Microsoft-Windows-Sysmon/Operational,Process Termination,Sysmon event 5
+sourcetype:*WinEventLog*Microsoft-Windows-Sysmon/Operational,Driver Load,Sysmon event 6
+sourcetype:*WinEventLog*Microsoft-Windows-Sysmon/Operational,Module Load,Sysmon event 7
+sourcetype:*WinEventLog*Microsoft-Windows-Sysmon/Operational,Process Access,Sysmon event 10
+sourcetype:*WinEventLog*Microsoft-Windows-Sysmon/Operational,File Creation,Sysmon event 11
+sourcetype:*WinEventLog*Microsoft-Windows-Sysmon/Operational,Windows Registry Key Creation,Sysmon event 12
+sourcetype:*WinEventLog*Microsoft-Windows-Sysmon/Operational,Windows Registry Key Modification,Sysmon event 13
+sourcetype:*WinEventLog*Microsoft-Windows-Sysmon/Operational,Windows Registry Key Deletion,Sysmon event 12 (delete)
+sourcetype:*WinEventLog*Microsoft-Windows-Sysmon/Operational,Named Pipe Metadata,Sysmon events 17 and 18
+sourcetype:*WinEventLog*Microsoft-Windows-Sysmon/Operational,WMI Creation,Sysmon events 19 to 21
+sourcetype:*WinEventLog*Microsoft-Windows-Sysmon/Operational,File Deletion,Sysmon event 23
+sourcetype:*WinEventLog*Security,User Account Authentication,Windows Security 4624 4625 4776
+sourcetype:*WinEventLog*Security,Logon Session Creation,Windows Security 4624
+sourcetype:*WinEventLog*Security,Process Creation,Windows Security 4688
+sourcetype:*WinEventLog*Security,User Account Creation,Windows Security 4720
+sourcetype:*WinEventLog*Security,User Account Modification,Windows Security 4738
+sourcetype:*WinEventLog*Security,Group Modification,Windows Security 4728 4732 4756
+sourcetype:*WinEventLog*Security,Scheduled Job Creation,Windows Security 4698
+sourcetype:*WinEventLog*Security,Service Creation,Windows Security 4697
+sourcetype:*WinEventLog*Security,Active Directory Credential Request,Windows Security 4768 4769
+sourcetype:*WinEventLog*Security,Active Directory Object Modification,Windows Security 5136
+sourcetype:*WinEventLog*Security,Active Directory Object Access,Windows Security 4662
+sourcetype:*WinEventLog*Security,Network Share Access,Windows Security 5140 5145
+sourcetype:*WinEventLog*Microsoft-Windows-PowerShell/Operational,Script Execution,PowerShell 4104 script block logging
+sourcetype:*WinEventLog*Microsoft-Windows-PowerShell/Operational,Command Execution,PowerShell 4103 module logging
+sourcetype:*WinEventLog*System,Service Creation,Windows System 7045
+sourcetype:*WinEventLog*System,Driver Load,Windows System 7045 (kernel drivers)
+sourcetype:linux_secure,User Account Authentication,Linux authentication log
+sourcetype:linux_secure,Logon Session Creation,Linux authentication log
+sourcetype:linux_audit,Process Creation,Linux auditd execve
+sourcetype:linux_audit,Command Execution,Linux auditd execve arguments
+sourcetype:linux_audit,File Modification,Linux auditd file watches
+sourcetype:aws:cloudtrail,Cloud Service Modification,AWS CloudTrail management events
+sourcetype:aws:cloudtrail,Instance Creation,AWS CloudTrail RunInstances
+sourcetype:aws:cloudtrail,Instance Modification,AWS CloudTrail ModifyInstanceAttribute
+sourcetype:aws:cloudtrail,Instance Deletion,AWS CloudTrail TerminateInstances
+sourcetype:aws:cloudtrail,Snapshot Creation,AWS CloudTrail CreateSnapshot
+sourcetype:aws:cloudtrail,User Account Authentication,AWS CloudTrail ConsoleLogin
+sourcetype:aws:cloudtrail,Cloud Storage Access,AWS CloudTrail S3 data events
+sourcetype:aws:cloudtrail,Cloud Storage Modification,AWS CloudTrail S3 data events
+sourcetype:azure:monitor:aad,User Account Authentication,Entra ID sign-in logs
+sourcetype:azure:monitor:aad,Logon Session Creation,Entra ID sign-in logs
+sourcetype:ms:aad:signin,User Account Authentication,Entra ID sign-in logs
+sourcetype:o365:management:activity,User Account Authentication,Microsoft 365 audit log
+sourcetype:o365:management:activity,Application Log Content,Microsoft 365 audit log
+sourcetype:o365:management:activity,Cloud Storage Access,Microsoft 365 SharePoint and OneDrive access
+sourcetype:pan:traffic,Network Traffic Flow,Palo Alto Networks traffic log
+sourcetype:pan:traffic,Network Connection Creation,Palo Alto Networks traffic log
+sourcetype:pan:threat,Network Traffic Content,Palo Alto Networks threat log
+sourcetype:cisco:asa,Network Traffic Flow,Cisco ASA connection log
+sourcetype:cisco:asa,Network Connection Creation,Cisco ASA connection log
+sourcetype:stream:dns,Network Traffic Content,Splunk Stream DNS
+sourcetype:stream:http,Network Traffic Content,Splunk Stream HTTP
+sourcetype:*zeek*conn*,Network Traffic Flow,Zeek conn log
+sourcetype:*zeek*conn*,Network Connection Creation,Zeek conn log
+sourcetype:*bro*conn*,Network Traffic Flow,Bro conn log
+sourcetype:*zeek*dns*,Network Traffic Content,Zeek dns log
+sourcetype:*bro*dns*,Network Traffic Content,Bro dns log
+sourcetype:*zeek*http*,Network Traffic Content,Zeek http log
+sourcetype:kube:objects:events,Pod Creation,Kubernetes events
+sourcetype:kube:objects:events,Pod Modification,Kubernetes events
+sourcetype:crowdstrike:events:sensor,Process Creation,CrowdStrike Falcon Data Replicator
+sourcetype:crowdstrike:events:sensor,Command Execution,CrowdStrike Falcon Data Replicator
+sourcetype:crowdstrike:events:sensor,Network Connection Creation,CrowdStrike Falcon Data Replicator
+sourcetype:crowdstrike:events:sensor,File Creation,CrowdStrike Falcon Data Replicator
+sourcetype:crowdstrike:events:sensor,Module Load,CrowdStrike Falcon Data Replicator

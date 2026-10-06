@@ -2,8 +2,43 @@ import requests
 import utils
 from typing import Union
 
+# Seconds before an OpenCTI GraphQL call is abandoned (connect, read).
+GRAPHQL_TIMEOUT = (10, 120)
+
+
+class OpenCTIGraphQLError(Exception):
+    """An OpenCTI GraphQL call failed at the HTTP or at the GraphQL level."""
+
+    def __init__(self, message, errors=None, status_code=None):
+        super().__init__(message)
+        self.errors = errors or []
+        self.status_code = status_code
+
+    def messages(self):
+        """
+        :return: the messages of the GraphQL errors (empty for HTTP failures)
+        """
+        return [
+            str(error.get("message", "")) if isinstance(error, dict) else str(error)
+            for error in self.errors
+        ]
+
+    def mentions(self, text):
+        """
+        :param text: case-insensitive fragment
+        :return: True when the error or one of its GraphQL messages contains text
+        """
+        needle = text.lower()
+        if needle in str(self).lower():
+            return True
+        return any(needle in message.lower() for message in self.messages())
+
 
 class SplunkAppConnectorHelper:
+    # Connectors already registered by this process, keyed by (url, connector id):
+    # alert actions handle every result of a search in one process.
+    _registered = set()
+
     def __init__(
         self,
         connector_id,
@@ -29,7 +64,7 @@ class SplunkAppConnectorHelper:
         """
         self.connector_id = connector_id
         self.connector_name = connector_name
-        self.opencti_url = opencti_url
+        self.opencti_url = (opencti_url or "").rstrip("/")
         self.headers = {
             "Authorization": "Bearer " + opencti_api_key,
         }
@@ -41,33 +76,57 @@ class SplunkAppConnectorHelper:
 
     def graphql_query(self, query, variables=None):
         """
+        Run a GraphQL operation and fail on HTTP and GraphQL errors alike.
+
+        OpenCTI answers HTTP 200 with an "errors" member for permission,
+        validation and business errors, so the status code alone never proves
+        success (#19).
+
         :param query:
         :param variables:
-        :return:
+        :return: the "data" member of the response
+        :raise OpenCTIGraphQLError:
         """
         body = {
             "query": query,
             "variables": variables or {},
         }
 
-        r = requests.post(
-            url=self.api_url,
-            json=body,
-            headers=self.headers,
-            verify=self.verify,
-            proxies=self.proxies,
-        )
+        try:
+            r = requests.post(
+                url=self.api_url,
+                json=body,
+                headers=self.headers,
+                verify=self.verify,
+                proxies=self.proxies,
+                timeout=GRAPHQL_TIMEOUT,
+            )
+        except requests.RequestException as ex:
+            raise OpenCTIGraphQLError(f"OpenCTI GraphQL request failed: {ex}") from ex
 
         if r.status_code != 200:
-            raise Exception(
-                f"OpenCTI GraphQL HTTP {r.status_code}: {r.content}"
+            raise OpenCTIGraphQLError(
+                f"OpenCTI GraphQL HTTP {r.status_code}: {r.content}",
+                status_code=r.status_code,
             )
 
-        data = r.json()
-        if "errors" in data:
-            raise Exception(f"OpenCTI GraphQL errors: {data['errors']}")
+        try:
+            data = r.json()
+        except ValueError as ex:
+            raise OpenCTIGraphQLError(
+                f"OpenCTI GraphQL returned a non-JSON response: {r.content[:500]}",
+                status_code=r.status_code,
+            ) from ex
+        if not isinstance(data, dict):
+            raise OpenCTIGraphQLError(f"OpenCTI GraphQL returned an unexpected payload: {data!r}")
+        if data.get("errors"):
+            raise OpenCTIGraphQLError(
+                f"OpenCTI GraphQL errors: {data['errors']}",
+                errors=data["errors"],
+                status_code=r.status_code,
+            )
 
-        return data.get("data", {})
+        return data.get("data") or {}
 
     def get_indicator_relations(self, indicator_id, max_edges=50):
         """
@@ -154,9 +213,14 @@ class SplunkAppConnectorHelper:
 
     def register(self):
         """
-        :return:
+        Register the app as an OpenCTI connector, once per process.
+        :return: the registered connector
+        :raise OpenCTIGraphQLError:
         """
-        input = {
+        registration_key = (self.api_url, self.connector_id)
+        if registration_key in SplunkAppConnectorHelper._registered:
+            return None
+        variables = {
             "input": {
                 "id": self.connector_id,
                 "name": self.connector_name,
@@ -173,46 +237,26 @@ class SplunkAppConnectorHelper:
                 registerConnector(input: $input) {
                     id
                     connector_state
-                    config {
-                        connection {
-                            host
-                            vhost
-                            use_ssl
-                            port
-                            user
-                            pass
-                        }
-                        listen
-                        listen_routing
-                        listen_exchange
-                        push
-                        push_routing
-                        push_exchange
-                    }
                     connector_user_id
                 }
             }
         """
-
-        r = requests.post(
-            url=self.api_url,
-            json={"query": query, "variables": input},
-            headers=self.headers,
-            verify=self.verify,
-            proxies=self.proxies,
-        )
-
-        if r.status_code != 200:
-            raise Exception(
-                f"An exception occurred while registering Splunk App, "
-                f"received status code: {r.status_code}, "
-                f"exception: {r.content}"
+        data = self.graphql_query(query, variables)
+        connector = data.get("registerConnector")
+        if not connector:
+            raise OpenCTIGraphQLError(
+                "OpenCTI did not return the registered connector "
+                f"(response: {data!r})"
             )
+        SplunkAppConnectorHelper._registered.add(registration_key)
+        return connector
 
     def send_stix_bundle(self, bundle):
         """
-        :param bundle:
-        :return:
+        :param bundle: serialized STIX 2.1 bundle
+        :return: the stixBundlePush acknowledgement
+        :raise OpenCTIGraphQLError: also when the acknowledgement is missing,
+            null or false
         """
         query = """
             mutation stixBundle($id: String!, $bundle: String!) {
@@ -221,17 +265,10 @@ class SplunkAppConnectorHelper:
         """
 
         variables = {"id": self.connector_id, "bundle": bundle}
-
-        r = requests.post(
-            url=self.api_url,
-            json={"query": query, "variables": variables},
-            headers=self.headers,
-            verify=self.verify,
-            proxies=self.proxies,
-        )
-        if r.status_code != 200:
-            raise Exception(
-                f"An exception occurred while sending STIX bundle, "
-                f"received status code: {r.status_code}, "
-                f"exception: {r.content}"
+        data = self.graphql_query(query, variables)
+        acknowledgement = data.get("stixBundlePush")
+        if not acknowledgement:
+            raise OpenCTIGraphQLError(
+                f"OpenCTI did not acknowledge the STIX bundle (response: {data!r})"
             )
+        return acknowledgement
