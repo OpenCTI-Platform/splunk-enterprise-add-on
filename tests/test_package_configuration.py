@@ -80,6 +80,20 @@ class SavedSearchesTest(unittest.TestCase):
                     self.assertIn(f'strptime({field}, "%Y-%m-%dT%H:%M:%S.%3NZ"), strptime({field}, "%Y-%m-%dT%H:%M:%SZ")', search)
                 self.assertNotIn("case( match(modified", " ".join(search.split()))
 
+    def test_kv_sync_searches_parse_every_iso_field_in_both_precisions(self):
+        """A whole-second created_at must not give the rebuilt row a null added_at."""
+        for stanza in ("Update OpenCTI Indicators Lookup", "Nightly Rebuild OpenCTI Indicators Lookup"):
+            search = self.searches.get(stanza, "search")
+            fields = set(re.findall(r'strptime\((\w+), "%Y-%m-%dT%H:%M:%S\.%3NZ"\)', search))
+            self.assertIn("created_at", fields, stanza)
+            for field in fields:
+                with self.subTest(stanza=stanza, field=field):
+                    self.assertEqual(
+                        search.count(f'strptime({field}, "%Y-%m-%dT%H:%M:%S.%3NZ")'),
+                        search.count(f'strptime({field}, "%Y-%m-%dT%H:%M:%SZ")'),
+                    )
+            self.assertNotIn('match(created_at, "^', search, stanza)
+
     def test_kv_sync_searches_never_restore_deleted_indicators(self):
         for stanza in ("Update OpenCTI Indicators Lookup", "Nightly Rebuild OpenCTI Indicators Lookup"):
             search = self.searches.get(stanza, "search")
