@@ -148,6 +148,21 @@ class DashboardTest(unittest.TestCase):
         self.assertIn('strptime(existing_added_at, "%Y-%m-%dT%H:%M:%S.%3NZ")', search)
         self.assertIn('strptime(existing_added_at, "%Y-%m-%dT%H:%M:%SZ")', search)
 
+    def test_kv_sync_searches_parse_every_iso_field_in_both_precisions(self):
+        """A whole-second created_at must not give the rebuilt row a null added_at."""
+        searches = _conf("savedsearches.conf")
+        for stanza in ("Update OpenCTI Indicators Lookup", "Nightly Rebuild OpenCTI Indicators Lookup"):
+            search = searches.get(stanza, "search")
+            fields = set(re.findall(r'strptime\((\w+), "%Y-%m-%dT%H:%M:%S\.%3NZ"\)', search))
+            self.assertIn("created_at", fields, stanza)
+            for field in fields:
+                with self.subTest(stanza=stanza, field=field):
+                    self.assertEqual(
+                        search.count(f'strptime({field}, "%Y-%m-%dT%H:%M:%S.%3NZ")'),
+                        search.count(f'strptime({field}, "%Y-%m-%dT%H:%M:%SZ")'),
+                    )
+            self.assertNotIn('match(created_at, "^', search, stanza)
+
 
 if __name__ == "__main__":
     unittest.main()
