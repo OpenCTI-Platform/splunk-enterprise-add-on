@@ -59,6 +59,7 @@ class KVCollection:
     def __init__(self, service, name):
         self.name = name
         self._data = service.kvstore[name].data
+        self.truncated = False
 
     def get(self, key):
         """
@@ -124,22 +125,33 @@ class KVCollection:
                     documents[document["_key"]] = document
         return documents
 
-    def query_all(self, query=None, page_size=KV_BATCH_MAX, fields=None, max_records=1000000, sort="_key:1"):
+    def query_all(self, query=None, page_size=KV_BATCH_MAX, fields=None, max_records=1000000):
         """
-        Iterate a whole collection by pages, sorted (ascending _key by default,
-        KV Store "field:1" syntax) so that skip-based paging stays stable while
-        documents are rewritten.
+        Iterate a whole collection in ascending _key order, at most max_records
+        documents; ``truncated`` is True afterwards when that limit stopped the
+        scan. Each page starts after the last key read instead of at an offset,
+        so documents deleted, inserted or rewritten out of ``query`` meanwhile
+        never push a document that still matches out of the scan.
         """
-        skip = 0
-        while skip < max_records:
-            page = self.query(query=query, limit=page_size, skip=skip, fields=fields, sort=sort)
-            if not page:
-                return
-            for record in page:
+        if fields and "_key" not in fields:
+            fields = list(fields) + ["_key"]
+        self.truncated = False
+        read = 0
+        after = None
+        while True:
+            page_query = query
+            if after is not None:
+                page_query = {"$and": [query, {"_key": {"$gt": after}}]} if query else {"_key": {"$gt": after}}
+            page = self.query(query=page_query, limit=page_size, fields=fields, sort="_key:1")
+            for record in page or []:
+                if read >= max_records:
+                    self.truncated = True
+                    return
+                read += 1
                 yield record
-            if len(page) < page_size:
+            if not page or len(page) < page_size or not page[-1].get("_key"):
                 return
-            skip += page_size
+            after = page[-1]["_key"]
 
     def delete(self, key):
         try:

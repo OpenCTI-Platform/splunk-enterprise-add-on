@@ -491,7 +491,10 @@ next run plans them again. A deployment Splunk confirmed less than an hour ago (
 OpenCTI) is not withdrawn because `opencti_indicators` lacks it, since in index mode the lookup follows the
 index every 5 minutes: the summary row counts it in `count_wait`, and a later run withdraws it if it is
 still absent. An empty `opencti_indicators` collection (not synced yet, or being rebuilt)
-never withdraws the deployments OpenCTI knows: the search leaves them unchanged and logs a warning. With
+never withdraws the deployments OpenCTI knows: the search leaves them unchanged and logs a warning. A
+collection of more than 1,000,000 entries is read in part, and the deployments absent from that part are
+left unchanged too. The collection is read in key order, each page after the last key read, so entries
+written or deleted during the run never hide another entry from it. With
 `Deployment write-back` disabled, the search reports nothing and returns a `skipped` row.
 The search returns a `skipped` row on a platform without the `deployed-on` relationship or without a
 deployment write-back mutation.
@@ -520,7 +523,7 @@ when every row of the run was reported, it records the search time range as sear
 per Security Platform, restarted after a failed or skipped run). The IOC validation proof declares a miss
 only over a searched span, so keep the heartbeat when you adapt the search.
 
-Two limits of a scheduled search bound what "searched" means, and both are yours to size:
+Three limits of a scheduled search bound what "searched" means, and all are yours to respect:
 - **Indexing lag**: the window ends 5 minutes before the run, so an event indexed more than 5 minutes after
   its time is never counted, and no later run searches its time again. For slower pipelines, move both
   dispatch times back by the same amount (for example `-35m@m` to `-20m@m`).
@@ -529,6 +532,10 @@ Two limits of a scheduled search bound what "searched" means, and both are yours
   Use accelerated data models (`opencti_hits_summariesonly` = `summariesonly=true`) or narrow
   `opencti_hits_scope` so every branch completes well within that time; a branch cut short still records
   the window as searched.
+- **One writer**: each report rewrites the indicator's history in `opencti_indicator_hits`, so run
+  `openctireporthits` from this scheduled search only. Splunk never runs two instances of one scheduled
+  search at once (`max_concurrent` defaults to 1); a manual run at the same time can drop a window from
+  the history of an indicator both runs report.
 
 #### IOC validation proof
 

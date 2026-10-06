@@ -1,5 +1,6 @@
 """Tests for the KV Store wrapper (#68)."""
 import json
+import re
 import unittest
 
 import program_fakes  # noqa: F401
@@ -15,13 +16,27 @@ class FakeData:
         self.documents = documents
         self.calls = []
 
+    @classmethod
+    def _matches(cls, document, query):
+        if "$and" in query:
+            return all(cls._matches(document, branch) for branch in query["$and"])
+        if "$or" in query:
+            return any(cls._matches(document, branch) for branch in query["$or"])
+        for field, expected in query.items():
+            if isinstance(expected, dict):
+                value = document.get(field, "")
+                if "$gt" in expected and not value > expected["$gt"]:
+                    return False
+                if "$regex" in expected and not re.search(expected["$regex"], value):
+                    return False
+            elif document.get(field) != expected:
+                return False
+        return True
+
     def query(self, **kwargs):
         self.calls.append(kwargs)
-        documents = self.documents
         query = json.loads(kwargs.get("query") or "{}")
-        if "$or" in query:
-            keys = {branch["_key"] for branch in query["$or"]}
-            documents = [d for d in documents if d["_key"] in keys]
+        documents = [d for d in self.documents if self._matches(d, query)]
         if kwargs.get("sort") == "_key:1":
             documents = sorted(documents, key=lambda d: d["_key"])
         skip = kwargs.get("skip", 0)
@@ -52,6 +67,32 @@ class KVCollectionTest(unittest.TestCase):
         records = list(KVCollection(FakeService(data), "c").query_all(page_size=2))
         self.assertEqual([r["_key"] for r in records], ["000", "001", "002", "003", "004"])
         self.assertTrue(all(call["sort"] == "_key:1" for call in data.calls))
+        self.assertTrue(all("skip" not in call for call in data.calls))
+
+    def test_query_all_keeps_every_document_when_one_is_deleted_mid_scan(self):
+        data = FakeData([{"_key": f"{i:03d}", "status": "declared"} for i in range(6)])
+        collection = KVCollection(FakeService(data), "c")
+        seen = []
+        for record in collection.query_all(query={"status": "declared"}, page_size=2):
+            seen.append(record["_key"])
+            if record["_key"] == "001":
+                # Rewritten out of the query while the scan runs, as a withdrawal does
+                data.documents[0]["status"] = "withdrawn"
+        self.assertEqual(seen, ["000", "001", "002", "003", "004", "005"])
+        self.assertFalse(collection.truncated)
+
+    def test_query_all_reports_a_truncated_scan(self):
+        data = FakeData([{"_key": f"{i:03d}"} for i in range(5)])
+        collection = KVCollection(FakeService(data), "c")
+        self.assertEqual(len(list(collection.query_all(page_size=2, max_records=4))), 4)
+        self.assertTrue(collection.truncated)
+        self.assertEqual(len(list(collection.query_all(page_size=2, max_records=5))), 5)
+        self.assertFalse(collection.truncated)
+
+    def test_query_all_always_reads_the_key(self):
+        data = FakeData([{"_key": "000", "id": "a"}])
+        list(KVCollection(FakeService(data), "c").query_all(fields=["id"]))
+        self.assertEqual(data.calls[0]["fields"], "id,_key")
 
     def test_get_many_is_chunked(self):
         data = FakeData([{"_key": f"{i:03d}", "v": i} for i in range(addon_state.GET_MANY_CHUNK + 3)])

@@ -1,6 +1,7 @@
 """Tests for the deployment reconciliation (#68)."""
 import unittest
 from datetime import datetime, timedelta, timezone
+from unittest import mock
 
 from program_fakes import FakeClient, FakeDetector, FakeKV, FakeLogger
 
@@ -126,6 +127,22 @@ class ReconcilerTest(unittest.TestCase):
         self.assertEqual([r[0] for r in reporter.reports if r[1] == STATUS_REMOVED], ["indicator--gone"])
         self.assertNotIn("indicator--indexed", {r[0] for r in reporter.reports})
         self.assertEqual(rows[-1]["count_wait"], 1)
+
+    def test_reconcile_never_withdraws_on_a_truncated_scan(self):
+        page = {"stixCoreRelationships": {"pageInfo": {"hasNextPage": False}, "edges": [
+            {"node": {"deployment_status": "deployed", "from": {"standard_id": "indicator--b"}}}]}}
+        client = FakeClient({"SplunkPlatformDeployments": page})
+        kv = FakeKV([{"_key": "k1", "id": "indicator--a"}, {"_key": "k2", "id": "indicator--b"}])
+        reporter = FakeReporter()
+        logger = FakeLogger()
+        with mock.patch("reconciliation.MAX_INDICATORS", 1):
+            Reconciler(client, FakeDetector((FEATURE_DEPLOYED_ON,)), PLATFORM, kv, reporter, logger=logger).reconcile()
+        self.assertEqual([r[0] for r in reporter.reports], ["indicator--a"])
+        self.assertTrue(any(level == "warning" and "more than 1 entries" in message for level, message in logger.lines))
+
+    def test_truncated_scan_plans_no_orphan_removal(self):
+        plan = plan_reconciliation({"indicator--a": {}}, {"indicator--b": "deployed"}, now=NOW, complete=False)
+        self.assertEqual([(i, a) for i, a, _, _ in plan], [("indicator--a", ACTION_DEPLOY)])
 
     def test_reconcile_keeps_the_external_id_opencti_holds(self):
         """An index-mode deployment keeps its index external id instead of flapping to the KV key."""

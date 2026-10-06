@@ -21,6 +21,7 @@ from utils import get_bool_val, to_epoch
 LIVE_STATUSES = ("deployed", "active")
 PAGE_SIZE = 500
 MAX_DEPLOYMENTS = 500000
+MAX_INDICATORS = 1000000
 # A deployment Splunk confirmed this recently is not withdrawn for missing from
 # opencti_indicators: in index mode the lookup follows the index every 5 minutes.
 ORPHAN_GRACE_SECONDS = 3600
@@ -80,7 +81,7 @@ def recently_confirmed(confirmed_at, now):
     return recent
 
 
-def plan_reconciliation(splunk_indicators, opencti_deployments, refresh=False, now=None, recent=()):
+def plan_reconciliation(splunk_indicators, opencti_deployments, refresh=False, now=None, recent=(), complete=True):
     """
     Pure drift computation (unit tested).
 
@@ -90,6 +91,8 @@ def plan_reconciliation(splunk_indicators, opencti_deployments, refresh=False, n
     :param recent: STIX ids Splunk confirmed recently (see recently_confirmed):
         absent from opencti_indicators, they wait for the lookup instead of
         being withdrawn
+    :param complete: False when the scan of opencti_indicators stopped at its
+        limit: a deployment absent from a partial scan is not withdrawn
     :return: list of (indicator STIX id, action, status to report or None, record or None)
     """
     plan = []
@@ -111,7 +114,7 @@ def plan_reconciliation(splunk_indicators, opencti_deployments, refresh=False, n
             plan.append((indicator_id, ACTION_NONE, None, record))
     # An empty collection is more likely unreadable or not synced yet than
     # emptied on purpose: never withdraw every deployment on that ground.
-    if splunk_indicators:
+    if splunk_indicators and complete:
         for indicator_id, current in opencti_deployments.items():
             if indicator_id not in splunk_indicators and current in LIVE_STATUSES:
                 if indicator_id in recent:
@@ -176,12 +179,16 @@ class Reconciler:
                 self.reported_external_ids[document["indicator_id"]] = document["external_id"]
 
     def splunk_indicators(self):
+        """
+        :return: (dict STIX id -> opencti_indicators record, True when the
+            whole collection was read)
+        """
         indicators = {}
         fields = ["_key", "id", "revoked", "valid_until", "value", "type", "source_index"]
-        for record in self.indicators.query_all(fields=fields):
+        for record in self.indicators.query_all(fields=fields, max_records=MAX_INDICATORS):
             if record.get("id"):
                 indicators[record["id"]] = record
-        return indicators
+        return indicators, not getattr(self.indicators, "truncated", False)
 
     def opencti_deployments(self):
         deployments = {}
@@ -216,15 +223,20 @@ class Reconciler:
             return [{"action": "skipped", "message": "The OpenCTI platform has no deployed-on relationship"}]
         if not self.reporter.enabled:
             return [{"action": "skipped", "message": "The OpenCTI platform has no deployment write-back mutation"}]
-        splunk = self.splunk_indicators()
+        splunk, complete = self.splunk_indicators()
         opencti = self.opencti_deployments()
         if not splunk and opencti:
             self.logger.warning(
                 f"{self.collection_name} is empty: the {len(opencti)} deployments OpenCTI knows are left unchanged"
             )
+        if not complete:
+            self.logger.warning(
+                f"{self.collection_name} holds more than {MAX_INDICATORS} entries: deployments absent from "
+                f"the first {MAX_INDICATORS} are left unchanged"
+            )
         now = datetime.now(timezone.utc)
         plan = plan_reconciliation(splunk, opencti, refresh=refresh, now=now,
-                                   recent=recently_confirmed(self.confirmed_at, now))
+                                   recent=recently_confirmed(self.confirmed_at, now), complete=complete)
         idle = (ACTION_NONE, ACTION_WAIT)
         self.load_reported_external_ids([indicator_id for indicator_id, action, _, _ in plan if action not in idle])
         rows = []
