@@ -136,8 +136,10 @@ class CommandsTest(unittest.TestCase):
                          "each digest of a hash field is matched on its own row, so an indicator keeps its own value")
         self.assertLess(steps.index("eval indicator_id = mvdedup(indicator_id)"), steps.index("mvexpand indicator_id"))
         self.assertLess(steps.index("mvexpand indicator_id"),
-                        steps.index("lookup opencti_indicators id AS indicator_id OUTPUT revoked valid_until type AS indicator_type"))
-        self.assertEqual(steps[-1], "where `opencti_usable_indicator` AND `opencti_kind_indicator`")
+                        steps.index("lookup opencti_indicators id AS indicator_id OUTPUT revoked valid_until type AS indicator_type "
+                                    "value AS indicator_value"))
+        self.assertEqual(steps[-2:], ["where `opencti_usable_indicator` AND `opencti_kind_indicator` AND "
+                                      "`opencti_exact_url_indicator`", "fields - indicator_value"])
         usable = _conf("macros.conf").get("opencti_usable_indicator", "definition")
         self.assertIn("mvfind(revoked", usable)
         self.assertIn("isnull(valid_until) OR coalesce(", usable, "expired indicators never hit")
@@ -159,6 +161,30 @@ class CommandsTest(unittest.TestCase):
                 calls += 1
                 self.assertRegex(search[:match.start()], r'eval opencti_value_kind="(ip|domain|url|hash|email)" $', name)
         self.assertGreaterEqual(calls, 7)
+
+    def test_url_indicator_hits_only_its_exact_url(self):
+        """The lookup ignores case: a URL indicator must still match the path, query and fragment exactly."""
+        definition = _conf("macros.conf").get("opencti_exact_url_indicator", "definition")
+        self.assertTrue(definition.startswith('(isnull(indicator_type) OR indicator_type != "url"'),
+                        "other indicator types pass")
+        self.assertIn("lower(value) == lower(indicator_value)", definition)
+        prefixes = re.findall(r'replace\((value|indicator_value), "([^"]*)", ""\)', definition)
+        self.assertEqual([side for side, _ in prefixes], ["value", "indicator_value"])
+        self.assertEqual(prefixes[0][1], prefixes[1][1], "both sides drop the same scheme and host")
+        prefix = re.compile(prefixes[0][1])
+
+        def hits(value, indicator_value):
+            return value.lower() == indicator_value.lower() and prefix.sub("", value) == prefix.sub("", indicator_value)
+
+        for value, indicator_value in (("http://EVIL.example/payload", "http://evil.example/payload"),
+                                       ("HTTPS://evil.example:8443/a/b?x=1", "https://evil.example:8443/a/b?x=1"),
+                                       ("EVIL.example/payload", "evil.example/payload")):
+            self.assertTrue(hits(value, indicator_value), value)
+        for value, indicator_value in (("http://evil.example/Payload", "http://evil.example/payload"),
+                                       ("http://evil.example/a?Q=1", "http://evil.example/a?q=1"),
+                                       ("http://evil.example/a#Top", "http://evil.example/a#top"),
+                                       ("evil.example/Payload", "evil.example/payload")):
+            self.assertFalse(hits(value, indicator_value), value)
 
     def test_hits_match_applies_once_per_row(self):
         # The macro yields one row per matching indicator: a second pass squares the rows of shared values
