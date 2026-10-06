@@ -44,6 +44,9 @@ EVIDENCE_INGESTION_DELAYS_SECONDS = (1, 2, 4, 8)
 EVIDENCE_PENDING_SECONDS = 86400
 # Far above one attachment (ingestion wait included): an older claim is stale.
 EVIDENCE_CLAIM_SECONDS = 600
+PENDING_PREFIX = "hunt_evidence_pending|"
+# Expired entries of other runs dropped by one report
+EVIDENCE_SWEEP_LIMIT = 100
 
 # Types a hunt evidence sighting can target (sighting_of_ref must be an SDO)
 HUNT_SIGHTABLE_TYPES = {
@@ -105,7 +108,7 @@ class HuntEvidenceDeferred(Exception):
 
 
 def _pending_prefix(hunt_run_id):
-    return f"hunt_evidence_pending|{hunt_run_id}|"
+    return f"{PENDING_PREFIX}{hunt_run_id}|"
 
 
 def _park(context, hunt_run_id, item):
@@ -129,6 +132,31 @@ def _claim(cache, claim):
     return take_over(cache, claim, {"claimed_at": utc_now_iso()}, _stale_claim)
 
 
+def _expired(item):
+    parked_at = parse_iso(item.get("parked_at"))
+    return parked_at is None or time.time() - parked_at.timestamp() > EVIDENCE_PENDING_SECONDS
+
+
+def _drop(context, key, item, hunt_run_id):
+    """Forget deferred evidence OpenCTI never ingested, with its claim and take-overs."""
+    context.logger.warning(
+        f"Hunt evidence {item.get('result_ids')} never ingested by OpenCTI: not attached to run {hunt_run_id}"
+    )
+    claim = f"{key}|claim"
+    context.cache.release(key)
+    context.cache.release(claim)
+    for takeover, _ in context.cache.items(f"{claim}|takeover|"):
+        context.cache.release(takeover)
+
+
+def _drop_expired_pending(context):
+    """Drop expired deferred evidence of every run: a run that never reports again would keep it for good."""
+    for key, item in context.cache.items(PENDING_PREFIX, limit=EVIDENCE_SWEEP_LIMIT):
+        run_and_entry = key[len(PENDING_PREFIX):].split("|")
+        if len(run_and_entry) == 2 and _expired(item):
+            _drop(context, key, item, run_and_entry[0])
+
+
 def _attach_pending(context, hunt_run_id):
     """Attach the evidence of earlier reports of this run that is now ingested."""
     prefix = _pending_prefix(hunt_run_id)
@@ -136,15 +164,8 @@ def _attach_pending(context, hunt_run_id):
         if "|" in key[len(prefix):]:
             continue
         claim = f"{key}|claim"
-        parked_at = parse_iso(item.get("parked_at"))
-        if parked_at is None or time.time() - parked_at.timestamp() > EVIDENCE_PENDING_SECONDS:
-            context.logger.warning(
-                f"Hunt evidence {item.get('result_ids')} never ingested by OpenCTI: not attached to run {hunt_run_id}"
-            )
-            context.cache.release(key)
-            context.cache.release(claim)
-            for takeover, _ in context.cache.items(f"{claim}|takeover|"):
-                context.cache.release(takeover)
+        if _expired(item):
+            _drop(context, key, item, hunt_run_id)
             continue
         takeovers = _claim(context.cache, claim)
         if takeovers is None:
@@ -190,6 +211,10 @@ def report_hunt_evidence(context, hunt_run_id, result_ids, hits_count, platform_
     """
     if not context.detector.require(FEATURE_HUNT_EVIDENCE, "Hunt evidence attachment to the run"):
         return False
+    try:
+        _drop_expired_pending(context)
+    except Exception as ex:
+        context.logger.warning(f"Expired deferred hunt evidence not dropped yet: {ex}")
     try:
         _attach_pending(context, hunt_run_id)
     except Exception as ex:

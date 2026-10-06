@@ -320,6 +320,20 @@ class ActionTest(unittest.TestCase):
         self.assertTrue(context.logger.has("warning", "never ingested"))
         self.assertEqual(context.cache.items("hunt_evidence_pending|run-1|"), [])
 
+    def test_expired_evidence_of_a_run_that_never_reports_again_is_dropped(self):
+        context = self._evidence_context({"sighting--2"})
+        old = {"result_ids": ["observed-data--lost"], "hits_count": 1, "parked_at": "2020-01-01T00:00:00.000Z"}
+        fresh = dict(old, parked_at=program_actions.utc_now_iso())
+        context.cache.set("hunt_evidence_pending|run-2|old", old)
+        context.cache.set("hunt_evidence_pending|run-2|old|claim", {"claimed_at": "2020-01-01T00:00:00.000Z"})
+        context.cache.set("hunt_evidence_pending|run-2|old|claim|takeover|x", {"claimed_at": "2020-01-01T00:00:00.000Z"})
+        context.cache.set("hunt_evidence_pending|run-3|fresh", fresh)
+        with mock.patch.object(program_actions.time, "sleep"):
+            program_actions.report_hunt_evidence(context, "run-1", ["sighting--2"], 1)
+        self.assertEqual(context.cache.items("hunt_evidence_pending|run-2|"), [])
+        self.assertEqual(context.cache.items("hunt_evidence_pending|run-3|"), [("hunt_evidence_pending|run-3|fresh", fresh)])
+        self.assertEqual(len(context.client.calls_of("SplunkHuntRunEvidence")), 1, "nothing of another run is attached")
+
     def test_hunt_targets_without_feature(self):
         context = FakeAlertContext(FakeAlertHelper(), detector=FakeDetector())
         self.assertEqual(program_actions.hunt_targets(context, "run-1"), ([], None))
