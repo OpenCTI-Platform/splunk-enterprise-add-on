@@ -1,0 +1,410 @@
+"""IOC validation proof (| openctivalidation).
+
+OpenCTI (innovation 10) asks OpenAEV to run benign tests built from
+indicators deployed on security platforms. For the requests that target the
+Splunk Security Platform, Splunk can prove the outcome from its own data: the
+"OpenCTI - Indicator hits" searches record every hit window per indicator in
+opencti_indicator_hits, and a test is
+
+- detected when a recorded hit falls in the test window (dispatch ->
+  completion, give or take the clock skew);
+- missed when the request is completed, the grace period (indexing lag) is
+  over and no hit can have happened in the window;
+- requested (no result yet) otherwise.
+
+Outcomes are written back once per request and indicator:
+``iocValidationReportResults`` when the platform has it (requested on
+OpenCTI-Platform/opencti#18680), otherwise a STIX bundle with the deployed-on
+relationship carrying validation_status / validation_run_id /
+last_validation_at and, for a miss, a sighting with x_opencti_negative.
+"""
+
+import logging
+from datetime import datetime, timedelta, timezone
+
+import stix2
+
+from addon_state import state_key, utc_now_iso
+from app_connector_helper import OpenCTIGraphQLError
+from hits import hit_history_key, load_windows, read_coverage
+from opencti_features import FEATURE_HITS, FEATURE_IOC_VALIDATION, FEATURE_IOC_VALIDATION_RESULTS
+from utils import generate_identity_id, generate_relation_id, generate_validation_sighting_id, to_epoch, to_iso
+
+OUTCOME_DETECTED = "detected"
+OUTCOME_MISSED = "missed"
+# Still waiting for a result: the OpenCTI validation status of the pair
+OUTCOME_PENDING = "requested"
+
+# Requests whose tests may be running or done
+ACTIVE_STATUSES = ("sent", "awaiting_approval", "running", "completed", "partial")
+TERMINAL_STATUSES = ("completed", "partial")
+MAX_PAGES = 5
+PAGE_SIZE = 100
+# iocValidationReportResults accepts at most 500 results per call
+RESULTS_PER_CALL = 500
+# Requests older than this are not examined again
+LOOKBACK_DAYS = 30
+# Clock skew tolerated before the dispatch time
+DISPATCH_SKEW_SECONDS = 300
+
+REQUESTS_QUERY = """
+query SplunkIocValidationRequests($first: Int, $after: ID, $filters: FilterGroup) {
+  iocValidationRequests(first: $first, after: $after, filters: $filters, orderBy: updated_at, orderMode: desc) {
+    pageInfo { hasNextPage endCursor }
+    edges {
+      node {
+        id
+        name
+        status
+        created_at
+        updated_at
+        dispatched_at
+        completed_at
+        platforms { id standard_id }
+        iocs { indicator_id observable_type value test_kind }
+        deployments {
+          id
+          validation_status
+          validation_run_id
+          %s
+          from { ... on Indicator { id standard_id } }
+          to { ... on SecurityPlatform { id standard_id } }
+        }
+      }
+    }
+  }
+}
+"""
+
+REPORT_RESULTS_MUTATION = """
+mutation SplunkIocValidationResults($id: ID!, $platformId: StixRef!, $results: [IocValidationPairResultInput!]!) {
+  iocValidationReportResults(id: $id, platformId: $platformId, results: $results) { id }
+}
+"""
+
+
+def _dt(value):
+    epoch = to_epoch(value)
+    return datetime.fromtimestamp(epoch, timezone.utc) if epoch is not None else None
+
+
+def validation_window(request, grace_minutes):
+    """
+    :param request: IocValidationRequest node
+    :param grace_minutes: indexing / hits search lag tolerated after completion
+    :return: (start, end_or_None, decide_after_or_None) as aware datetimes
+    """
+    start = _dt(request.get("dispatched_at")) or _dt(request.get("created_at"))
+    start = start - timedelta(seconds=DISPATCH_SKEW_SECONDS) if start else None
+    end = _dt(request.get("completed_at")) if request.get("status") in TERMINAL_STATUSES else None
+    grace = timedelta(minutes=grace_minutes)
+    decide_after = end + grace if end else None
+    return start, end, decide_after
+
+
+def history_covered_from(history, windows):
+    """
+    :param history: opencti_indicator_hits record
+    :param windows: its recent hit windows
+    :return: None when the windows hold every recorded hit, otherwise the
+        start of the oldest retained window (older ones were trimmed)
+    """
+    try:
+        total = int((history or {}).get("hit_count") or 0)
+    except (TypeError, ValueError):
+        total = 0
+    retained = sum(int(w[2] or 0) for w in windows)
+    if total <= retained:
+        return None
+    return min(float(w[0]) for w in windows) if windows else float("inf")
+
+
+def decide_outcome(start, end, decide_after, hit_windows, grace_minutes, now, platform_last_hit=None,
+                   covered_from=None, hits_coverage=None):
+    """
+    :param start: test window start (aware datetime)
+    :param end: completion time or None while running
+    :param decide_after: time after which a miss can be declared, or None
+    :param hit_windows: [[first_epoch, last_epoch, count], ...]
+    :param now: aware datetime
+    :param platform_last_hit: last hit OpenCTI recorded on the deployment
+        (epoch), the cross-check of the local hit history
+    :param covered_from: epoch from which hit_windows is complete, None when
+        it holds the whole history (see history_covered_from)
+    :param hits_coverage: (since, until) span the hit reporting searched
+        completely (hits.read_coverage); a miss needs it to hold the test window
+    :return: (outcome, first matching hit epoch or None)
+    """
+    if start is None:
+        return OUTCOME_PENDING, None
+    # Hits carry their event time: the grace period only delays the decision
+    # (indexing lag), the test window itself only tolerates clock skew.
+    upper = (end + timedelta(seconds=DISPATCH_SKEW_SECONDS)) if end else now
+    low, high = start.timestamp(), upper.timestamp()
+    # A window holds real hits at its two bounds only: one of them must fall
+    # in the test window to prove a hit during the test.
+    proven = [
+        float(bound) for w in hit_windows for bound in (w[0], w[1]) if low <= float(bound) <= high
+    ]
+    if proven:
+        return OUTCOME_DETECTED, min(proven)
+    if platform_last_hit is not None and low <= platform_last_hit <= high:
+        return OUTCOME_DETECTED, platform_last_hit
+    if any(float(w[0]) < low and float(w[1]) > high for w in hit_windows):
+        # Hits before and after the test in one window: a hit during the test
+        # can be neither proven nor ruled out.
+        return OUTCOME_PENDING, None
+    if decide_after is not None and now >= decide_after:
+        if platform_last_hit is not None and platform_last_hit > high and not any(
+            float(w[0]) <= platform_last_hit <= float(w[1]) for w in hit_windows
+        ):
+            # A later hit the local history does not hold: the history is
+            # incomplete (lost KV Store write), a miss cannot be proven.
+            return OUTCOME_PENDING, None
+        if covered_from is not None and covered_from > low:
+            # The windows of the test period were trimmed from the history.
+            return OUTCOME_PENDING, None
+        if hits_coverage is None or hits_coverage[0] > low or hits_coverage[1] < high:
+            # No proof that the hit reporting searched the whole test window
+            # (hits search disabled, failed or not caught up yet).
+            return OUTCOME_PENDING, None
+        return OUTCOME_MISSED, None
+    return OUTCOME_PENDING, None
+
+
+def _platform_matches(node, platform):
+    if not isinstance(node, dict):
+        return False
+    ids = {platform.get("id"), platform.get("standard_id")} - {None}
+    return bool(ids & {node.get("id"), node.get("standard_id")})
+
+
+class ValidationProver:
+    def __init__(self, client, detector, platform, hits_history, results, grace_minutes=30, writeback=True,
+                 logger=None, now=None, author_name="Splunk", cache=None):
+        """
+        :param client: SplunkAppConnectorHelper
+        :param detector: OpenCTIFeatureDetector
+        :param platform: Splunk Security Platform node (id, standard_id)
+        :param hits_history: KVCollection over opencti_indicator_hits
+        :param results: KVCollection over opencti_validation_results
+        :param cache: addon_state cache holding the hit coverage
+        """
+        self.cache = cache
+        self.client = client
+        self.detector = detector
+        self.platform = platform or {}
+        self.hits_history = hits_history
+        self.results = results
+        self.grace_minutes = int(grace_minutes)
+        self.writeback = bool(writeback)
+        self.logger = logger or logging.getLogger(__name__)
+        self.now = now or datetime.now(timezone.utc)
+        self.author = stix2.Identity(
+            id=generate_identity_id(author_name, "system"), name=author_name, identity_class="system"
+        )
+
+    def _request_filters(self):
+        """:return: FilterGroup scoping the requests to this platform (filter keys of IocValidation-Request)"""
+        if not self.platform.get("id"):
+            return None
+        return {
+            "mode": "and",
+            "filters": [
+                # platform_ids holds internal ids
+                {"key": ["platform_ids"], "values": [self.platform["id"]]},
+                {"key": ["status"], "values": list(ACTIVE_STATUSES)},
+            ],
+            "filterGroups": [],
+        }
+
+    def requests(self):
+        """Active requests targeting this platform, newest first, bounded."""
+        horizon = self.now - timedelta(days=LOOKBACK_DAYS)
+        after = None
+        filters = self._request_filters()
+        pages = 0
+        while pages < MAX_PAGES:
+            hit_fields = "last_hit_at" if self.detector.has(FEATURE_HITS) else ""
+            try:
+                data = self.client.graphql_query(
+                    REQUESTS_QUERY % hit_fields, {"first": PAGE_SIZE, "after": after, "filters": filters}
+                )
+            except OpenCTIGraphQLError as ex:
+                # Only a platform rejecting the filter keys is retried, unfiltered, from the first page.
+                if filters is None or after is not None or not ex.errors:
+                    raise
+                self.logger.info(f"IOC validation requests not filterable by platform, filtering them here: {ex}")
+                filters = None
+                continue
+            pages += 1
+            connection = data.get("iocValidationRequests") or {}
+            for edge in connection.get("edges") or []:
+                node = (edge or {}).get("node") or {}
+                updated = _dt(node.get("updated_at"))
+                if updated is not None and updated < horizon:
+                    return
+                if node.get("status") not in ACTIVE_STATUSES:
+                    continue
+                if any(_platform_matches(p, self.platform) for p in node.get("platforms") or []):
+                    yield node
+            page = connection.get("pageInfo") or {}
+            if not page.get("hasNextPage"):
+                return
+            after = page.get("endCursor")
+
+    def pairs(self, request):
+        """
+        :return: list of (indicator internal id, indicator STIX id, ioc,
+            deployment) for the pairs of this platform still waiting for a result
+        """
+        deployments = {}
+        for deployment in request.get("deployments") or []:
+            if not _platform_matches(deployment.get("to"), self.platform):
+                continue
+            source = deployment.get("from") or {}
+            # An IOC references its indicator by internal or by STIX id
+            for key in (source.get("id"), source.get("standard_id")):
+                if key:
+                    deployments[key] = (deployment, source.get("id"), source.get("standard_id"))
+        pairs = []
+        for ioc in request.get("iocs") or []:
+            entry = deployments.get(ioc.get("indicator_id"))
+            if entry is None:
+                continue
+            deployment, indicator_internal_id, standard_id = entry
+            if deployment.get("validation_status") not in (None, "requested"):
+                continue
+            pairs.append((indicator_internal_id, standard_id, ioc, deployment))
+        return pairs
+
+    def _report(self, request, decided):
+        """
+        :param decided: list of (standard_id, outcome, observed_epoch, ioc)
+        """
+        if self.detector.has(FEATURE_IOC_VALIDATION_RESULTS):
+            results = []
+            for standard_id, outcome, observed, ioc in decided:
+                entry = {"indicatorId": standard_id, "status": outcome}
+                entry["observedAt"] = to_iso(observed) if observed else to_iso(self.now)
+                if outcome == OUTCOME_MISSED:
+                    entry["evidence"] = "No matching event in Splunk during the test window"
+                results.append(entry)
+            for start in range(0, len(results), RESULTS_PER_CALL):
+                self.client.graphql_query(REPORT_RESULTS_MUTATION, {
+                    "id": request["id"], "platformId": self.platform["id"],
+                    "results": results[start:start + RESULTS_PER_CALL],
+                })
+            return "iocValidationReportResults"
+        objects = [self.author]
+        platform_ref = self.platform["standard_id"]
+        for standard_id, outcome, observed, ioc in decided:
+            validated_at = to_iso(observed) if observed else to_iso(self.now)
+            objects.append(stix2.Relationship(
+                id=generate_relation_id("deployed-on", standard_id, platform_ref),
+                relationship_type="deployed-on",
+                source_ref=standard_id,
+                target_ref=platform_ref,
+                created_by_ref=self.author.id,
+                allow_custom=True,
+                custom_properties={
+                    "validation_status": outcome,
+                    "validation_run_id": request["id"],
+                    "last_validation_at": validated_at,
+                },
+            ))
+            if outcome == OUTCOME_MISSED:
+                window_end = to_iso(self.now)
+                objects.append(stix2.Sighting(
+                    id=generate_validation_sighting_id(standard_id, platform_ref, request["id"]),
+                    created_by_ref=self.author.id,
+                    description=(
+                        f"IOC validation request '{request.get('name')}': no matching event in Splunk "
+                        f"for the {ioc.get('test_kind')} test of {ioc.get('value')}"
+                    ),
+                    sighting_of_ref=standard_id,
+                    first_seen=window_end,
+                    last_seen=window_end,
+                    count=1,
+                    where_sighted_refs=[platform_ref],
+                    allow_custom=True,
+                    custom_properties={"x_opencti_negative": True},
+                ))
+        self.client.register()
+        self.client.send_stix_bundle(stix2.Bundle(objects=objects, allow_custom=True).serialize())
+        return "bundle"
+
+    def run(self):
+        """
+        :return: list of output rows, one per (request, indicator) examined
+        """
+        if not self.platform.get("id"):
+            self.logger.info("IOC validation proof skipped: no Splunk Security Platform")
+            return []
+        if not self.detector.require(FEATURE_IOC_VALIDATION, "IOC validation proof"):
+            return []
+        rows = []
+        coverage = read_coverage(self.cache, self.platform["id"])
+        for request in self.requests():
+            start, end, decide_after = validation_window(request, self.grace_minutes)
+            decided = []
+            for internal_id, standard_id, ioc, deployment in self.pairs(request):
+                key = state_key(request["id"], standard_id, self.platform["id"])
+                previous = self.results.get(key) or {}
+                row = {
+                    "request_id": request["id"],
+                    "request_name": request.get("name"),
+                    "request_status": request.get("status"),
+                    "indicator_id": standard_id,
+                    "value": ioc.get("value"),
+                    "observable_type": ioc.get("observable_type"),
+                    "test_kind": ioc.get("test_kind"),
+                }
+                if previous.get("reported") in (True, "true", "1", 1):
+                    row.update({"outcome": previous.get("outcome"), "reported": "already"})
+                    rows.append(row)
+                    continue
+                history = self.hits_history.get(hit_history_key(self.platform["id"], standard_id)) or {}
+                windows = load_windows(history)
+                outcome, observed = decide_outcome(
+                    start, end, decide_after, windows, self.grace_minutes, self.now,
+                    platform_last_hit=to_epoch(deployment.get("last_hit_at")),
+                    covered_from=history_covered_from(history, windows),
+                    hits_coverage=coverage,
+                )
+                row["outcome"] = outcome
+                row["first_matching_hit"] = to_iso(observed) if observed else ""
+                row["hits_searched_until"] = to_iso(coverage[1]) if coverage else ""
+                if outcome != OUTCOME_PENDING:
+                    decided.append((standard_id, outcome, observed, ioc))
+                row["reported"] = "no"
+                rows.append(row)
+            if decided and self.writeback:
+                try:
+                    channel = self._report(request, decided)
+                except Exception as ex:
+                    self.logger.error(f"IOC validation results of request {request['id']} not reported: {ex}")
+                    channel = None
+                records = []
+                for standard_id, outcome, observed, ioc in decided:
+                    records.append({
+                        "_key": state_key(request["id"], standard_id, self.platform["id"]),
+                        "request_id": request["id"],
+                        "request_name": request.get("name") or "",
+                        "indicator_id": standard_id,
+                        "value": ioc.get("value") or "",
+                        "test_kind": ioc.get("test_kind") or "",
+                        "outcome": outcome,
+                        "first_matching_hit": to_iso(observed) if observed else "",
+                        "reported": channel is not None,
+                        "channel": channel or "",
+                        "decided_at": utc_now_iso(),
+                    })
+                for row in rows:
+                    if row["request_id"] == request["id"] and row.get("reported") == "no" and row["outcome"] != OUTCOME_PENDING:
+                        row["reported"] = channel or "error"
+                try:
+                    self.results.upsert(records)
+                except Exception as ex:
+                    self.logger.warning(f"Unable to store the validation outcomes in the KV Store: {ex}")
+        return rows
