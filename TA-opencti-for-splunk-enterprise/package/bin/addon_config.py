@@ -83,11 +83,19 @@ class AddonSettings:
         )
 
 
-def _stanza(conf, name):
+def _stanza(conf, name, missing):
+    """
+    :param missing: exception raised for a stanza never saved (solnlib ConfStanzaNotExistException)
+    :return: the stanza, {} when it was never saved
+    :raise RuntimeError: on any other read failure, where the defaults would replace saved
+        settings (another Security Platform, its creation)
+    """
     try:
         return conf.get(name) or {}
-    except Exception:
+    except missing:
         return {}
+    except Exception as ex:
+        raise RuntimeError(f"Add-on settings [{name}] unreadable, not connecting to OpenCTI: {ex}") from ex
 
 
 def load_settings(session_key, logger=None):
@@ -103,8 +111,8 @@ def load_settings(session_key, logger=None):
 
     cfm = conf_manager.ConfManager(session_key, ADDON_NAME, realm=SETTINGS_REALM)
     conf = cfm.get_conf(SETTINGS_CONF)
-    account = _stanza(conf, "account")
-    platform = _stanza(conf, PLATFORM_STANZA)
+    account = _stanza(conf, "account", conf_manager.ConfStanzaNotExistException)
+    platform = _stanza(conf, PLATFORM_STANZA, conf_manager.ConfStanzaNotExistException)
     # The proxy stanza always ships (its type has a default), so a read failure
     # means a configured proxy is unusable: never fall back to a direct connection.
     try:

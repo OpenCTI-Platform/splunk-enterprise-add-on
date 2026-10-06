@@ -250,16 +250,24 @@ class CommandContextTest(unittest.TestCase):
 
 
 class LoadSettingsTest(unittest.TestCase):
-    def _load(self, proxy):
+    def _load(self, proxy, stanzas=None):
         import logging
 
         import addon_config
         import utils
         from solnlib import conf_manager, splunkenv
 
+        stanzas = dict({"account": {"opencti_url": "https://opencti.example/", "opencti_api_key": "key"},
+                        "platform": {}}, **(stanzas or {}))
+
+        def stanza(name):
+            value = stanzas[name]
+            if isinstance(value, Exception):
+                raise value
+            return value
+
         conf = mock.Mock()
-        conf.get.side_effect = lambda name: {"account": {"opencti_url": "https://opencti.example/",
-                                                         "opencti_api_key": "key"}}.get(name, {})
+        conf.get.side_effect = stanza
         manager = mock.Mock()
         manager.get_conf.return_value = conf
         with mock.patch.object(conf_manager, "ConfManager", return_value=manager), \
@@ -278,6 +286,21 @@ class LoadSettingsTest(unittest.TestCase):
     def test_unreadable_proxy_settings_never_connect_directly(self):
         with self.assertRaisesRegex(RuntimeError, "Proxy settings unreadable"):
             self._load({"side_effect": Exception("Failed to fetch 'proxy'")})
+
+    def test_platform_tab_never_saved_uses_the_defaults(self):
+        from solnlib.conf_manager import ConfStanzaNotExistException
+
+        settings = self._load({"return_value": {}}, {"platform": ConfStanzaNotExistException("no platform stanza")})
+        self.assertTrue(settings.platform.auto_create)
+        self.assertEqual(settings.platform.platform_id, "")
+
+    def test_unreadable_platform_tab_never_falls_back_to_the_defaults(self):
+        with self.assertRaisesRegex(RuntimeError, r"settings \[platform\] unreadable, not connecting"):
+            self._load({"return_value": {}}, {"platform": Exception("HTTP 503 Service Unavailable")})
+
+    def test_unreadable_account_is_reported_as_such(self):
+        with self.assertRaisesRegex(RuntimeError, r"settings \[account\] unreadable"):
+            self._load({"return_value": {}}, {"account": Exception("HTTP 500")})
 
 
 if __name__ == "__main__":
