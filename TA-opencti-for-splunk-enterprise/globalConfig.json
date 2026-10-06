@@ -55,6 +55,68 @@
                     ]
                 },
                 {
+                    "name": "platform",
+                    "title": "Security Platform",
+                    "entity": [
+                        {
+                            "type": "text",
+                            "label": "Security Platform ID",
+                            "field": "security_platform_id",
+                            "help": "Id (internal or STIX) of the OpenCTI Security Platform representing this Splunk deployment; it must be of type SIEM. Leave empty to resolve or create it by name.",
+                            "required": false,
+                            "validators": [
+                                {
+                                    "type": "string",
+                                    "errorMsg": "Max length of text input is 8192",
+                                    "minLength": 0,
+                                    "maxLength": 8192
+                                }
+                            ]
+                        },
+                        {
+                            "type": "checkbox",
+                            "label": "Create the Security Platform",
+                            "field": "security_platform_auto_create",
+                            "help": "When no ID is set, find the Security Platform by name or create it (type SIEM).",
+                            "defaultValue": 1
+                        },
+                        {
+                            "type": "text",
+                            "label": "Security Platform name",
+                            "field": "security_platform_name",
+                            "help": "Name used to find or create the Security Platform. Default: Splunk <server name>.",
+                            "required": false,
+                            "validators": [
+                                {
+                                    "type": "string",
+                                    "errorMsg": "Max length of text input is 256",
+                                    "minLength": 0,
+                                    "maxLength": 256
+                                }
+                            ]
+                        },
+                        {
+                            "type": "text",
+                            "label": "Feature detection cache (minutes)",
+                            "field": "feature_cache_ttl",
+                            "help": "How long the OpenCTI capabilities read from the GraphQL schema are cached (1-1440).",
+                            "defaultValue": "60",
+                            "required": false,
+                            "validators": [
+                                {
+                                    "type": "number",
+                                    "range": [
+                                        1,
+                                        1440
+                                    ],
+                                    "isInteger": true,
+                                    "errorMsg": "Cache duration must be an integer between 1 and 1440"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
                     "name": "proxy",
                     "title": "Proxy",
                     "entity": [
@@ -481,6 +543,14 @@
                     "help": "Enable extraction of observables",
                     "required": false,
                     "defaultValue": "disable"
+                },
+                {
+                    "type": "text",
+                    "label": "Incident key",
+                    "field": "incident_key",
+                    "defaultValue": "",
+                    "required": false,
+                    "help": "Optional result field names, comma-separated, whose values identify each result (for example event_id, or user,src for a stats ... by user src search). Distinct values create distinct objects, the same values upsert."
                 }
             ]
         },
@@ -602,6 +672,14 @@
                     "help": "Enable extraction of observables",
                     "required": false,
                     "defaultValue": "disable"
+                },
+                {
+                    "type": "text",
+                    "label": "Incident key",
+                    "field": "incident_key",
+                    "defaultValue": "",
+                    "required": false,
+                    "help": "Optional result field names, comma-separated, whose values identify each result (for example event_id, or user,src for a stats ... by user src search). Distinct values create distinct objects, the same values upsert."
                 }
             ]
         },
@@ -626,37 +704,74 @@
                     "options": {
                         "items": [
                             {
+                                "value": "indicator_id",
+                                "label": "Indicator ID (STIX id of an existing indicator)"
+                            },
+                            {
+                                "value": "url_indicator",
+                                "label": "URL Indicator"
+                            },
+                            {
+                                "value": "domain_indicator",
+                                "label": "Domain Indicator"
+                            },
+                            {
+                                "value": "ipv4_indicator",
+                                "label": "IPV4 Indicator"
+                            },
+                            {
+                                "value": "ipv6_indicator",
+                                "label": "IPV6 Indicator"
+                            },
+                            {
+                                "value": "file_hash_indicator",
+                                "label": "File Hash Indicator (MD5, SHA-1, SHA-256, SHA-512)"
+                            },
+                            {
+                                "value": "email_indicator",
+                                "label": "Email Address Indicator"
+                            },
+                            {
                                 "value": "url_observable",
-                                "label": "URL Observable"
+                                "label": "URL Observable (legacy, sights the URL Indicator)"
                             },
                             {
                                 "value": "domain_observable",
-                                "label": "Domain Observable"
+                                "label": "Domain Observable (legacy, sights the Domain Indicator)"
                             },
                             {
                                 "value": "ipv4_observable",
-                                "label": "IPV4 Observable"
+                                "label": "IPV4 Observable (legacy, sights the IPV4 Indicator)"
                             },
                             {
                                 "value": "ipv6_observable",
-                                "label": "IPV6 Observable"
+                                "label": "IPV6 Observable (legacy, sights the IPV6 Indicator)"
                             },
                             {
                                 "value": "file_hash_observable",
-                                "label": "File Hash Observable (MD5, SHA-1, SHA-256, SHA-512)"
+                                "label": "File Hash Observable (legacy, sights the File Hash Indicator)"
                             }
                         ]
                     },
-                    "help": "Select any one option from the list. For File Hash, the algorithm is detected from the value",
+                    "help": "The sighting targets an OpenCTI indicator: by STIX id, or found or created from the value. Legacy Observable types sight the matching indicator and also send the observable. For File Hash, the algorithm is detected from the value",
                     "required": false,
-                    "defaultValue": "domain_observable"
+                    "defaultValue": "domain_indicator"
+                },
+                {
+                    "type": "text",
+                    "label": "Count",
+                    "field": "count",
+                    "defaultValue": "1",
+                    "required": false,
+                    "help": "Number of times the value was seen (for example $result.count$)."
                 },
                 {
                     "type": "text",
                     "label": "Where Sighted (value)",
                     "field": "where_sighted_value",
                     "defaultValue": "",
-                    "required": true
+                    "required": false,
+                    "help": "Optional System or Organization where the value was sighted, in addition to the Splunk Security Platform"
                 },
                 {
                     "type": "singleSelect",
@@ -677,6 +792,13 @@
                     "help": "Select any one option from the list",
                     "required": false,
                     "defaultValue": "system"
+                },
+                {
+                    "type": "checkbox",
+                    "label": "Sighted on the Splunk Security Platform",
+                    "field": "sighted_on_platform",
+                    "defaultValue": 1,
+                    "help": "Add the Splunk Security Platform (Configuration > Security Platform) to where the value was sighted."
                 },
                 {
                     "type": "text",

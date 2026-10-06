@@ -1,58 +1,49 @@
 # encoding = utf-8
-import json
-from app_connector_helper import SplunkAppConnectorHelper
-from stix_converter import convert_to_sighting
-from constants import CONNECTOR_NAME, CONNECTOR_ID, resolve_ssl_verify
-from utils import get_user_agent
+from alert_common import parse_labels, run_alert
+from program_actions import resolve_sighted_indicator
+from stix_converter import INDICATOR_SIGHTING_TYPES, SIGHTING_OF_INDICATOR_ID, convert_to_sighting, sighting_indicator_type
 from splunktaucclib.alert_actions_base import ModularAlertBase  # type: ignore
 
 
-def create_sighting(helper, event):
+def create_sighting(context, event):
     """
-    :param helper:
-    :param event:
-    :return:
+    :param context: alert_common.AlertContext
+    :param event: the Splunk result
+    :return: True on success
     """
-    if helper.get_param("labels"):
-        labels = [x.strip() for x in helper.get_param("labels").split(',')]
-    else:
-        labels = []
-    # remove potential empty labels
-    labels = list(filter(None, labels))
-
+    helper = context.helper
     params = {
         "sighting_of_value": helper.get_param("sighting_of_value"),
         "sighting_of_type": helper.get_param("sighting_of_type"),
         "where_sighted_value": helper.get_param("where_sighted_value"),
         "where_sighted_type": helper.get_param("where_sighted_type"),
-        "labels": labels,
+        "count": helper.get_param("count"),
+        "labels": parse_labels(helper.get_param("labels")),
         "tlp": helper.get_param("tlp"),
     }
-
     helper.log_debug(f"Alert params={params}")
 
-    opencti_url = helper.get_global_setting("opencti_url")
-    opencti_api_key = helper.get_global_setting("opencti_api_key")
-    ca_bundle_path = helper.get_global_setting("ca_bundle_path") or ""
-    ssl_verify = resolve_ssl_verify(ca_bundle_path)
-    proxy_settings = helper.get_proxy()
-    helper.log_debug(f"Proxy settings: {proxy_settings}")
-
-    splunk_app_connector = SplunkAppConnectorHelper(
-        connector_id=CONNECTOR_ID,
-        connector_name=CONNECTOR_NAME,
-        opencti_url=opencti_url,
-        opencti_api_key=opencti_api_key,
-        proxy_settings=proxy_settings,
-        verify=ssl_verify,
-        user_agent=get_user_agent(helper.session_key),
-    )
-
-    # convert to_stix
+    sighting_of_type = sighting_indicator_type(params["sighting_of_type"])
+    if sighting_of_type != (params["sighting_of_type"] or ""):
+        helper.log_info(f"Sighting of Type {params['sighting_of_type']} sights the indicator ({sighting_of_type})")
     try:
+        indicator = None
+        if sighting_of_type == SIGHTING_OF_INDICATOR_ID or sighting_of_type in INDICATOR_SIGHTING_TYPES:
+            indicator = resolve_sighted_indicator(
+                context,
+                sighting_of_type,
+                params["sighting_of_value"],
+                INDICATOR_SIGHTING_TYPES.get(sighting_of_type),
+            )
+        platform_ref = None
+        if context.flag("sighted_on_platform", True):
+            platform = context.platform
+            platform_ref = platform.get("standard_id") if platform else None
         bundle = convert_to_sighting(
             alert_params=params,
-            event=event
+            event=event,
+            platform_ref=platform_ref,
+            indicator=indicator,
         )
     except Exception as ex:
         helper.log_error(
@@ -60,12 +51,10 @@ def create_sighting(helper, event):
             "an exception occurred while converting event to STIX, "
             f"exception: {str(ex)}"
         )
-        return
+        return False
 
-    # going to register App as an OpenCTI connector
-    # TODO: Do this only on time (at first run)
     try:
-        splunk_app_connector.register()
+        context.client.register()
     except Exception as ex:
         helper.log_error(
             "Unable to create sighting, "
@@ -73,16 +62,17 @@ def create_sighting(helper, event):
             "connector, "
             f"exception: {str(ex)}"
         )
-        return
+        return False
 
     try:
-        splunk_app_connector.send_stix_bundle(bundle=bundle)
+        context.client.send_stix_bundle(bundle=bundle)
         helper.log_info("STIX bundle has been sent successfully")
     except Exception as ex:
         helper.log_error(f"Unable to create sighting, "
-                         f"an exception occurred while sending STIX bundle,"
+                         f"an exception occurred while sending STIX bundle, "
                          f"exception: {str(ex)}")
-        return
+        return False
+    return True
 
 
 def process_event(helper: ModularAlertBase, *args, **kwargs):
@@ -90,14 +80,6 @@ def process_event(helper: ModularAlertBase, *args, **kwargs):
     :param helper:
     :param args:
     :param kwargs:
-    :return:
+    :return: 0 when every result was sent, 2 otherwise (#18)
     """
-    helper.log_info("Alert action create_sighting started.")
-    helper.set_log_level(helper.log_level)
-
-    events = helper.get_events()
-    for event in events:
-        helper.log_debug("event={}".format(json.dumps(event)))
-        create_sighting(helper, event)
-
-    return 0
+    return run_alert(helper, "create_sighting", create_sighting)
