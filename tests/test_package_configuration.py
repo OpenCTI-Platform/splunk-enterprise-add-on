@@ -246,6 +246,25 @@ class DashboardTest(unittest.TestCase):
                 visualization = self.dashboard["visualizations"][item["item"]]
                 self.assertIn(visualization["dataSources"]["primary"], self.dashboard["dataSources"])
 
+    def test_tables_show_human_headers(self):
+        """Splunk shows the fields of the final table, renamed, as column headers: no raw names or IDs."""
+        checked = 0
+        for name, source in self.dashboard["dataSources"].items():
+            query = source.get("options", {}).get("query", "")
+            tables = re.findall(r"\|\s*table\s+([^|]+)", query)
+            if not tables or "_raw" in tables[-1].split():
+                continue  # the errors and warnings panels list raw log lines on purpose
+            checked += 1
+            renames = dict(re.findall(r'(\w+) AS "([^"]+)"', query.split("| table")[-1]))
+            for field in tables[-1].split():
+                shown = renames.get(field, field)
+                if shown.startswith("_"):
+                    continue  # hidden by Splunk tables
+                with self.subTest(source=name, field=field):
+                    self.assertIsNone(re.fullmatch(r"[a-z0-9_]+", shown), f"{shown} is a raw field name")
+                    self.assertNotRegex(shown.lower(), r"\bids?\b")
+        self.assertGreaterEqual(checked, 3)
+
     def test_iso_timestamps_parse_both_precisions(self):
         # KV Store rows hold second (utc_now_iso) and millisecond (to_iso) timestamps
         parsed = 0
