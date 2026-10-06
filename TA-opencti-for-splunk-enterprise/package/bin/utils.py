@@ -14,6 +14,66 @@ regex_sha512 = r"[0-9a-fA-F]{128}"
 regex_sha256 = r"[0-9a-fA-F]{64}"
 regex_sha1 = r"[0-9a-fA-F]{40}"
 regex_md5 = r"[0-9a-fA-F]{32}"
+_FRACTION_RE = re.compile(r"\.(\d+)")
+
+
+def to_iso(value):
+    """
+    :param value: datetime, epoch seconds (number or numeric string) or ISO string
+    :return: ISO 8601 UTC string with milliseconds ("...T10:00:00.000Z") or None
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime.datetime):
+        dt = value if value.tzinfo else value.replace(tzinfo=datetime.timezone.utc)
+        return dt.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    if isinstance(value, (int, float)):
+        return to_iso(datetime.datetime.fromtimestamp(float(value), datetime.timezone.utc))
+    text = str(value).strip()
+    try:
+        return to_iso(float(text))
+    except ValueError:
+        pass
+    parsed = parse_iso(text)
+    return to_iso(parsed) if parsed else None
+
+
+def parse_iso(value):
+    """
+    :param value: ISO 8601 string (STIX timestamps, "Z" or offset, 0-9 fraction digits)
+    :return: timezone-aware datetime, or None when unparseable
+    """
+    if not value or not isinstance(value, str):
+        return None
+    text = value.strip()
+    if text.endswith("Z") or text.endswith("z"):
+        text = text[:-1] + "+00:00"
+    # Python 3.7+ fromisoformat only reads 3 or 6 fraction digits
+    text = _FRACTION_RE.sub(lambda m: "." + (m.group(1) + "000000")[:6], text, count=1)
+    try:
+        dt = datetime.datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=datetime.timezone.utc)
+
+
+def to_epoch(value):
+    """
+    :param value: epoch (number / numeric string), ISO string or datetime
+    :return: float epoch seconds or None
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime.datetime):
+        dt = value if value.tzinfo else value.replace(tzinfo=datetime.timezone.utc)
+        return dt.timestamp()
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(str(value).strip())
+    except ValueError:
+        parsed = parse_iso(str(value))
+        return parsed.timestamp() if parsed else None
 
 def get_bool_val(value):
     """
@@ -196,6 +256,17 @@ def generate_case_incident_id(name, created):
     data = canonicalize(data, utf8=False)
     entity_id = str(uuid.uuid5(uuid.UUID("00abedb4-aa42-466c-9c01-fed23315a9b7"), data))
     return "case-incident--" + entity_id
+
+def generate_observed_data_id(object_ids):
+    """
+    :param object_ids: STIX ids of the observed objects
+    :return: the Observed-Data id OpenCTI derives from its objects (its only
+        key field: OpenCTI merges observations of the same objects)
+    """
+    data = {"objects": sorted(object_ids)}
+    data = canonicalize(data, utf8=False)
+    entity_id = str(uuid.uuid5(uuid.UUID("00abedb4-aa42-466c-9c01-fed23315a9b7"), data))
+    return "observed-data--" + entity_id
 
 def generate_sighting_id(
         sighting_of_ref,

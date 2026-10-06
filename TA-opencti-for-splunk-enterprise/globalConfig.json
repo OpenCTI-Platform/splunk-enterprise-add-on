@@ -55,6 +55,68 @@
                     ]
                 },
                 {
+                    "name": "platform",
+                    "title": "Security Platform",
+                    "entity": [
+                        {
+                            "type": "text",
+                            "label": "Security Platform ID",
+                            "field": "security_platform_id",
+                            "help": "Id (internal or STIX) of the OpenCTI Security Platform representing this Splunk deployment; it must be of type SIEM. Leave empty to resolve or create it by name.",
+                            "required": false,
+                            "validators": [
+                                {
+                                    "type": "string",
+                                    "errorMsg": "Max length of text input is 8192",
+                                    "minLength": 0,
+                                    "maxLength": 8192
+                                }
+                            ]
+                        },
+                        {
+                            "type": "checkbox",
+                            "label": "Create the Security Platform",
+                            "field": "security_platform_auto_create",
+                            "help": "When no ID is set, find the Security Platform by name or create it (type SIEM).",
+                            "defaultValue": 1
+                        },
+                        {
+                            "type": "text",
+                            "label": "Security Platform name",
+                            "field": "security_platform_name",
+                            "help": "Name used to find or create the Security Platform. Default: Splunk <server name>.",
+                            "required": false,
+                            "validators": [
+                                {
+                                    "type": "string",
+                                    "errorMsg": "Max length of text input is 256",
+                                    "minLength": 0,
+                                    "maxLength": 256
+                                }
+                            ]
+                        },
+                        {
+                            "type": "text",
+                            "label": "Feature detection cache (minutes)",
+                            "field": "feature_cache_ttl",
+                            "help": "How long the OpenCTI capabilities read from the GraphQL schema are cached (1-1440).",
+                            "defaultValue": "60",
+                            "required": false,
+                            "validators": [
+                                {
+                                    "type": "number",
+                                    "range": [
+                                        1,
+                                        1440
+                                    ],
+                                    "isInteger": true,
+                                    "errorMsg": "Cache duration must be an integer between 1 and 1440"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
                     "name": "proxy",
                     "title": "Proxy",
                     "entity": [
@@ -677,6 +739,94 @@
                     "help": "Select any one option from the list",
                     "required": false,
                     "defaultValue": "system"
+                },
+                {
+                    "type": "text",
+                    "label": "Labels",
+                    "field": "labels",
+                    "defaultValue": "",
+                    "required": false
+                },
+                {
+                    "type": "singleSelect",
+                    "label": "TLP",
+                    "field": "tlp",
+                    "options": {
+                        "items": [
+                            {
+                                "value": "tlp_clear",
+                                "label": "TLP:CLEAR"
+                            },
+                            {
+                                "value": "tlp_green",
+                                "label": "TLP:GREEN"
+                            },
+                            {
+                                "value": "tlp_amber",
+                                "label": "TLP:AMBER"
+                            },
+                            {
+                                "value": "tlp_amber_strict",
+                                "label": "TLP:AMBER+STRICT"
+                            },
+                            {
+                                "value": "tlp_red",
+                                "label": "TLP:RED"
+                            }
+                        ]
+                    },
+                    "help": "Select any one option from the list",
+                    "required": false,
+                    "defaultValue": "tlp_amber"
+                }
+            ]
+        },
+        {
+            "name": "opencti_report_hunt_evidence",
+            "label": "OpenCTI - Report hunt evidence",
+            "description": "Report the results of a hunt search as evidence of an OpenCTI hunt run",
+            "iconFileName": "alert_icon.png",
+            "customScript": "alert_report_hunt_evidence_helper",
+            "entity": [
+                {
+                    "type": "text",
+                    "label": "Hunt run ID",
+                    "field": "hunt_run_id",
+                    "defaultValue": "$result.hunt_run_id$",
+                    "required": true,
+                    "help": "Id of the OpenCTI hunt run, usually passed as a token of the search ($result.hunt_run_id$)."
+                },
+                {
+                    "type": "text",
+                    "label": "Count",
+                    "field": "count",
+                    "defaultValue": "$result.count$",
+                    "required": false,
+                    "help": "Number of matching events of this result (for example $result.count$)."
+                },
+                {
+                    "type": "singleSelect",
+                    "label": "Observables Extraction",
+                    "field": "observables_extraction",
+                    "options": {
+                        "items": [
+                            {
+                                "value": "cim_model",
+                                "label": "CIM Model"
+                            },
+                            {
+                                "value": "field_mapping",
+                                "label": "Field Mapping"
+                            },
+                            {
+                                "value": "disable",
+                                "label": "Disable"
+                            }
+                        ]
+                    },
+                    "help": "Observables of the result recorded as Observed-Data of the hunt run",
+                    "required": false,
+                    "defaultValue": "cim_model"
                 },
                 {
                     "type": "text",

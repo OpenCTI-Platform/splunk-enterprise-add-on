@@ -2,8 +2,9 @@ import stix2
 from datetime import datetime, timezone
 
 from stix_constants import CustomObservableUserAgent, CustomObservableText, CustomObjectCaseIncident
-from utils import get_hash_type, is_ipv6, is_ipv4, disambiguate_created
+from utils import get_hash_type, is_ipv6, is_ipv4, disambiguate_created, to_epoch
 from utils import generate_incident_id, generate_identity_id, generate_relation_id, generate_case_incident_id, generate_sighting_id
+from utils import generate_observed_data_id
 
 FAKE_INDICATOR_ID = "indicator--51b92778-cef0-4a90-b7ec-ebd620d01ac8"
 
@@ -432,6 +433,49 @@ def convert_to_incident(alert_params, event):
     return bundle.serialize()
 
 
+def _event_date(event):
+    if "_time" in event and event.get("_time"):
+        return datetime.fromtimestamp(float(event.get("_time")), timezone.utc)
+    return datetime.now(timezone.utc)
+
+
+def _optional_date(value):
+    """
+    :param value: epoch (number or numeric string) or ISO 8601 string
+    :return: aware datetime, or None
+    """
+    epoch = to_epoch(value)
+    if epoch is None:
+        return None
+    return datetime.fromtimestamp(epoch, timezone.utc)
+
+
+def _sighting_window(event):
+    """first_seen / last_seen of a sighting: the result's first_seen / last_seen
+    fields (for example from `stats min(_time) max(_time)`), else _time."""
+    event_date = _event_date(event)
+    first_seen = _optional_date(event.get("first_seen")) or event_date
+    last_seen = _optional_date(event.get("last_seen")) or event_date
+    if last_seen < first_seen:
+        first_seen, last_seen = last_seen, first_seen
+    return first_seen, last_seen
+
+
+def sighting_count(value):
+    try:
+        return max(1, int(float(str(value).strip())))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _author(event):
+    return stix2.Identity(
+        id=generate_identity_id(event.get("host", "Splunk"), "system"),
+        name=event.get("host", "Splunk"),
+        identity_class="system"
+    )
+
+
 def convert_to_sighting(alert_params, event):
     """
     :param alert_params:
@@ -535,3 +579,91 @@ def convert_to_sighting(alert_params, event):
 
     bundle = stix2.Bundle(objects=bundle_objects, allow_custom=True)
     return bundle.serialize()
+
+
+def _hunt_observables(alert_params, event, marking_id, author):
+    extraction = alert_params.get("observables_extraction") or "cim_model"
+    if extraction == "cim_model":
+        return _extract_observables_from_cim_model(event=event, marking=marking_id, creator=author)
+    if extraction == "field_mapping":
+        return _extract_observables_from_key_model(event=event, marking=marking_id, creator=author)
+    return []
+
+
+def convert_to_hunt_evidence(alert_params, event, hunt_run_id, platform_ref=None, targets=None):
+    """
+    Evidence of a hunt run found by a Splunk search.
+
+    - Observed-Data over the observables extracted from the result (CIM or
+      field mapping), number_observed = count;
+    - one sighting per hunt target (Indicators, Attack Patterns, threats of
+      the hunt) on the Splunk Security Platform.
+    Every object carries x_opencti_hunt_run_id.
+
+    :param alert_params: action parameters (tlp, labels, observables_extraction, count)
+    :param event: the Splunk result
+    :param hunt_run_id: id of the OpenCTI hunt run
+    :param platform_ref: STIX id of the Splunk Security Platform, or None
+    :param targets: STIX ids of the hunt targets (may be empty)
+    :return: (serialized bundle, list of STIX ids of the evidence objects)
+    :raise ValueError: when the result holds no evidence at all
+    """
+    if not hunt_run_id or not str(hunt_run_id).strip():
+        raise ValueError("Hunt run id is empty: pass it with the hunt_run_id token ($result.hunt_run_id$)")
+    hunt_run_id = str(hunt_run_id).strip()
+    first_seen, last_seen = _sighting_window(event)
+    count = sighting_count(alert_params.get("count"))
+    labels = alert_params.get("labels") or None
+    search_name = alert_params.get("search_name") or "Splunk search"
+    description = f"Evidence of OpenCTI hunt run {hunt_run_id} found by the Splunk search '{search_name}'"
+
+    marking_id = _get_stix_marking_id(alert_params.get("tlp"))
+    author = _author(event)
+    bundle_objects = [marking_id, author]
+    hunt_properties = {"x_opencti_hunt_run_id": hunt_run_id}
+    result_ids = []
+
+    observables = _hunt_observables(alert_params, event, marking_id, author)
+    bundle_objects.extend(observables)
+    if observables:
+        object_ids = sorted({observable.id for observable in observables})
+        observed_data = stix2.ObservedData(
+            id=generate_observed_data_id(object_ids),
+            created_by_ref=author.id,
+            first_observed=first_seen,
+            last_observed=last_seen,
+            number_observed=count,
+            object_refs=object_ids,
+            object_marking_refs=[marking_id],
+            labels=labels,
+            allow_custom=True,
+            custom_properties=dict(hunt_properties, x_opencti_description=description),
+        )
+        bundle_objects.append(observed_data)
+        result_ids.append(observed_data.id)
+
+    where_sighted_refs = [platform_ref] if platform_ref else [author.id]
+    for target in sorted(set(targets or [])):
+        sighting = stix2.Sighting(
+            id=generate_sighting_id(target, sorted(where_sighted_refs), first_seen, last_seen),
+            created_by_ref=author.id,
+            description=description,
+            sighting_of_ref=target,
+            first_seen=first_seen,
+            last_seen=last_seen,
+            count=count,
+            where_sighted_refs=where_sighted_refs,
+            object_marking_refs=[marking_id],
+            labels=labels,
+            allow_custom=True,
+            custom_properties=hunt_properties,
+        )
+        bundle_objects.append(sighting)
+        result_ids.append(sighting.id)
+
+    if not result_ids:
+        raise ValueError(
+            "No evidence in this result: no observable could be extracted and the hunt has no target"
+        )
+    bundle = stix2.Bundle(objects=bundle_objects, allow_custom=True)
+    return bundle.serialize(), result_ids
