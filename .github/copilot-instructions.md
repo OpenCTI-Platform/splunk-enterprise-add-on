@@ -89,6 +89,22 @@ TA-opencti-for-splunk-enterprise/
 └── lib/                               # Vendored Python dependencies
 ```
 
+### OpenCTI defense matrix modules
+
+| Module (`package/bin/`) | Role |
+|---|---|
+| `opencti_features.py` | `OpenCTIFeatureDetector`: cached GraphQL introspection; every program call is gated with `detector.require(FEATURE_*, "<action>")` |
+| `security_platform.py` | Resolves / creates the Splunk Security Platform (SIEM); cache shared across search heads |
+| `addon_config.py`, `addon_state.py` | Settings loader (commands) and KV Store state collections |
+| `provides.py` | Engine of the `openctiprovides` search command (telemetry inventory -> provides relationships) |
+
+Rules for these modules:
+- Never call a program mutation without a feature check; on a missing feature, skip and log once.
+- Pure logic stays testable without Splunk (fakes in `tests/program_fakes.py`); command scripts are thin.
+- Write-back calls are rate limited, failures are logged and stored in the KV Store state.
+- Shipped detection searches carry `action.correlationsearch.annotations` with `mitre_attack` ids;
+  maintenance searches declare no technique and no alert action.
+
 ---
 
 ## Key Technical Details

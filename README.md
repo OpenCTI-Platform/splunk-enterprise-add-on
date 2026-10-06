@@ -16,6 +16,11 @@ It enables analysts to collect, normalize, and enrich OpenCTI indicators and obs
 - Modular inputs for ingesting OpenCTI data via the OpenCTI Stream API.
 - Ability to trigger OpenCTI actions in response of Alerts and to investigate them directly in OpenCTI
 - Support for multiple object types (Indicators, Observables, Relationships, Sightings).
+- Defense matrix: ATT&CK-annotated detection searches match the OpenCTI indicators against CIM data, and
+  the add-on declares which telemetry Splunk holds, as `provides` relationships of a named Splunk Security
+  Platform. See [OpenCTI program compatibility](#opencti-program-compatibility).
+- Every program feature is detected from the OpenCTI schema: on OpenCTI releases without it the add-on
+  behaves as before and logs why the feature is skipped.
 
 ---
 
@@ -71,6 +76,28 @@ If a proxy configuration is required to connect to OpenCTI platform, you can con
 | `Proxy Port`     | The proxy port                                                              |
 | `Proxy Username` | An optional proxy username                                                  |
 | `Proxy Password` | An optional proxy password                                                  |
+
+### Security Platform settings
+
+The add-on identifies this Splunk deployment in OpenCTI as a **Security Platform** of type SIEM. The
+telemetry the add-on declares to the defense matrix is attached to it. Configure it on the
+"Security Platform" tab of the Configuration page:
+
+| Parameter                                | Description                                                                                                                                  | Default            |
+|------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------|--------------------|
+| `Security Platform ID`                   | Id (internal or STIX) of an existing OpenCTI Security Platform. Takes precedence over the name                                               | empty              |
+| `Create the Security Platform`           | When no id is set, find the Security Platform by name, or create it (type SIEM)                                                               | enabled            |
+| `Security Platform name`                 | Name used to find or create it. Use the same name as the `platform_name` of the OpenCTI `splunk-saved-searches` connector (see below)        | `Splunk <server>`  |
+| `Feature detection cache (minutes)`      | How long the capabilities read from the OpenCTI GraphQL schema are cached                                                                     | 60                 |
+
+The resolved Security Platform is cached in the KV Store (`opencti_addon_state`) and shared by every
+search head of a cluster, so members with different server names keep one Security Platform. Without a
+configured name, the first default name recorded in that collection is used by every member, so members
+resolving it for the first time at the same moment create one platform, not one each.
+
+**OpenCTI account permissions.** The account of the add-on needs the capabilities of a connector service
+account (bundle push and connector registration) plus "Knowledge: create / update" for the provides
+relationships and the Security Platform creation.
 
 ## OpenCTI Data Inputs Configuration
 
@@ -395,3 +422,94 @@ Logs related to OpenCTI customer alerts are available in the following two log f
 ```$SPLUNK_HOME/var/log/splunk/opencti_create_incident_modalert.log```
 
 ```$SPLUNK_HOME/var/log/splunk/opencti_create_incident_response_modalert.log```
+
+---
+
+## OpenCTI program compatibility
+
+The add-on feeds the defense matrix of OpenCTI: its detection searches declare the ATT&CK techniques they
+cover, and the Splunk telemetry is declared as data components the named Splunk Security Platform provides.
+
+### Compatibility matrix
+
+The add-on reads the OpenCTI GraphQL schema once per platform (cached in the KV Store, see
+`Feature detection cache`) and enables each capability only where the platform provides it. Missing
+capabilities are skipped with one log line such as
+`Telemetry provides declaration: skipped, the OpenCTI platform (<version>) does not provide the provides relationship (defense matrix telemetry)`.
+
+| Add-on capability                                            | OpenCTI capability (detected)                                    | OpenCTI releases without it          |
+|--------------------------------------------------------------|------------------------------------------------------------------|--------------------------------------|
+| Ingestion, enrichment, Create Incident / Case / Sighting     | live streams, `stixBundlePush`                                   | always available                     |
+| ATT&CK-annotated detection searches                          | none (Splunk alerts)                                              | always available                     |
+| Splunk Security Platform (configured or auto-created)        | `securityPlatformAdd`, `securityPlatforms`                       | telemetry inventory skipped          |
+| Telemetry inventory (`provides`)                             | `provides` relationship (Security Platform -> Data Component)    | skipped                              |
+
+The `openctiprovides` custom search command declares `python.required = 3.13`, the Python runtime of Splunk
+Enterprise 10: the libraries the add-on ships (stix2 3.0.2) need Python 3.10 or later, so the Python 3.9
+runtime is not supported.
+
+### Detection searches and the defense matrix
+
+#### ATT&CK-annotated detections
+
+The add-on ships detections matching the OpenCTI indicators against CIM data, disabled by default:
+
+| Saved search                                            | Data                                        | MITRE ATT&CK                     |
+|---------------------------------------------------------|---------------------------------------------|----------------------------------|
+| `OpenCTI - Network traffic with an indicator IP`        | `Network_Traffic` source / destination IP   | T1071, T1095, T1571              |
+| `OpenCTI - DNS resolution of an indicator domain`       | `Network_Resolution` DNS query              | T1071.004, T1568                 |
+| `OpenCTI - Web request to an indicator URL`             | `Web` URL                                   | T1071.001, T1189, T1566.002      |
+| `OpenCTI - File or process matching an indicator hash`  | `Endpoint` file and process hashes          | T1204.002, T1105                 |
+| `OpenCTI - Email from an indicator sender`              | `Email` sender                              | T1566.001, T1566.002             |
+
+Each one is a scheduled alert (tracked, throttled per indicator for one hour) whose rows carry
+`indicator_id`, `value`, `count`, `first_seen` and `last_seen`. The techniques are
+declared in `action.correlationsearch.annotations` (`{"mitre_attack": [...]}`), the convention read by
+Splunk Enterprise Security and by the OpenCTI `splunk-saved-searches` connector, which imports them as
+detection rules indicating the techniques and deployed on the Splunk Security Platform. Maintenance
+searches (KV Store sync, telemetry inventory) declare no technique and trigger no alert action, so the
+connector does not import them with its default `alerts` scope.
+
+To make the connector and the add-on target the same Security Platform, set the connector `platform_id`
+(`SPLUNK_SAVED_SEARCHES_PLATFORM_ID`) to the id of the add-on Security Platform: the connector then references
+that platform and never rewrites it. Without it, set the connector `platform_name` to the add-on Security
+Platform name and keep its `platform_type` at `SIEM` (both derive the same identity from name and type).
+
+#### Telemetry inventory (provides)
+
+`OpenCTI - Telemetry inventory` (daily, over 7 days) lists the CIM data models (`tstats`) and the
+sourcetypes (`metadata`) holding data, maps them to MITRE Data Components through the
+`opencti_cim_data_components` lookup and pipes one row per data component into `| openctiprovides`, which
+declares `provides` relationships Splunk Security Platform -> Data Component in OpenCTI. The defense
+matrix then knows which techniques Splunk has telemetry for.
+
+The lookup (`lookups/opencti_cim_data_components.csv`) is editable: one row per `source`
+(`datamodel:<Model>[.<Dataset>]` or `sourcetype:<sourcetype>`, wildcards allowed) and `data_component`
+(the MITRE Data Component name, as imported in OpenCTI). Data components unknown to OpenCTI are reported
+with the status `unmatched_data_component`. `| openctiprovides prune=true` also deletes the provides
+relationships the add-on declared earlier for data components absent from the inventory; nothing is
+pruned when the inventory is empty or when a declaration of the run failed. With the
+default `opencti_inventory_summariesonly` (`summariesonly=true`), only accelerated data models count.
+
+### Custom search commands
+
+| Command                                                       | Type       | Purpose                                                                 |
+|---------------------------------------------------------------|------------|-------------------------------------------------------------------------|
+| `openctiprovides [prune=<bool>]`                               | eventing (search head) | Declare telemetry as provides relationships                 |
+
+The command runs on the search head with the OpenCTI account of the add-on, so the user running it
+needs the `list_storage_passwords` capability (the shipped scheduled search runs as the app owner).
+It writes to OpenCTI, so it never runs on search preview results (`run_in_preview = false`): an
+interactive search reports once, on its final results. Its logs are in `$SPLUNK_HOME/var/log/splunk/ta-opencti-for-splunk-enterprise_openctiprovides.log`.
+
+### Monitoring
+
+The Monitoring dashboard has a **Defense matrix** tab: data components declared to OpenCTI (provides) and
+the telemetry inventory.
+
+### Program saved searches (all shipped disabled)
+
+| Saved search                                   | Schedule            | Purpose                                  |
+|------------------------------------------------|---------------------|------------------------------------------|
+| `OpenCTI - Network traffic with an indicator IP`, `OpenCTI - DNS resolution of an indicator domain`, `OpenCTI - Web request to an indicator URL`, `OpenCTI - File or process matching an indicator hash`, `OpenCTI - Email from an indicator sender` | every 15 minutes | ATT&CK-annotated detections (alerts) |
+| `OpenCTI - Telemetry inventory`                | daily               | Defense matrix telemetry (provides)      |
