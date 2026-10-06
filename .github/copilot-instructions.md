@@ -172,7 +172,7 @@ This enrichment is done via `app_connector_helper.py`.
 
 ### Python
 
-- **Target**: Python 3.7+ (Splunk's embedded Python)
+- **Target**: Python 3.10 to 3.13 (the pinned libraries need 3.10 or later; Splunk Enterprise 10 embeds 3.13), tested in CI on 3.10, 3.12 and 3.13
 - Use `solnlib` for configuration management, logging, and checkpointing
 - Use `splunklib` for KV Store operations and event writing
 - Always use `logger_for_input()` for per-input logging — never `print()`
