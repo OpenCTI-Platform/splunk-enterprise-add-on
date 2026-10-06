@@ -197,6 +197,35 @@ class StreamInputTest(unittest.TestCase):
         self.assertEqual(reporter.reports, [])
 
 
+class LoadSettingsTest(unittest.TestCase):
+    def _load(self, proxy):
+        import addon_config
+        import utils
+        from solnlib import conf_manager, splunkenv
+
+        conf = mock.Mock()
+        conf.get.side_effect = lambda name: {"account": {"opencti_url": "https://opencti.example/",
+                                                         "opencti_api_key": "key"}}.get(name, {})
+        manager = mock.Mock()
+        manager.get_conf.return_value = conf
+        with mock.patch.object(conf_manager, "ConfManager", return_value=manager), \
+                mock.patch.object(conf_manager, "get_proxy_dict", **proxy), \
+                mock.patch.object(splunkenv, "get_splunk_host_info", return_value=("sh1", "sh1")), \
+                mock.patch.object(utils, "get_user_agent", return_value="ua"):
+            return addon_config.load_settings("session", logging.getLogger("settings-test"))
+
+    def test_reads_the_proxy_settings(self):
+        proxy = {"proxy_enabled": "1", "proxy_url": "proxy.example", "proxy_port": "3128"}
+        settings = self._load({"return_value": proxy})
+        self.assertEqual(settings.proxy_settings, proxy)
+        self.assertEqual(settings.opencti_url, "https://opencti.example")
+        self.assertEqual(settings.server_name, "sh1")
+
+    def test_unreadable_proxy_settings_never_connect_directly(self):
+        with self.assertRaisesRegex(RuntimeError, "Proxy settings unreadable"):
+            self._load({"side_effect": Exception("Failed to fetch 'proxy'")})
+
+
 class ReportIndicatorStateTest(unittest.TestCase):
     def test_no_reporter(self):
         self.assertIsNone(stream.report_indicator_state(None, "create", {"id": STIX_ID}, "x"))
