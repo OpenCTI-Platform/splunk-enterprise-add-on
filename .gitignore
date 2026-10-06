@@ -13,6 +13,11 @@ output
 .idea/
 
 venv/
+.venv/
+.pytest_cache/
+
+# AppInspect reports produced locally
+appinspect-report*
 
 .DS_Store
 
