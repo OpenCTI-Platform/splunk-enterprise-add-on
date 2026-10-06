@@ -157,6 +157,8 @@ class FollowupTest(unittest.TestCase):
         query = [s["options"]["query"] for s in sources.values() if "Case Autopilot run" in s["options"].get("query", "")][0]
         pattern = re.search(r'\| rex "((?:[^"\\]|\\.)*)"', query).group(1).replace('\\"', '"').replace("(?<", "(?P<")
         self.assertEqual(re.search(pattern, line).groupdict(), {"container": "Brute force on 'vpn'", "alert": "Brute force detection"})
+        self.assertIn('container = if(isnull(container) OR container=="", "(unnamed)", container)', query,
+                      "a container without a name reads as unnamed")
 
     def test_case_autopilot_stale_reservation_is_retried(self):
         context, client, marker = self._autopilot_context()
