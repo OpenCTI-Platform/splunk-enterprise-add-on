@@ -49,9 +49,15 @@ class GraphQLClientTest(unittest.TestCase):
         self.assertTrue(caught.exception.mentions("forbidden"))
 
     def test_bundle_push_without_acknowledgement_raises(self):
-        with self._post(self._response({"data": {}})):
-            with self.assertRaises(OpenCTIGraphQLError):
-                self.connector.send_stix_bundle("{}")
+        for data in ({}, {"stixBundlePush": None}, {"stixBundlePush": False}):
+            with self.subTest(data=data), self._post(self._response({"data": data})):
+                with self.assertRaises(OpenCTIGraphQLError) as caught:
+                    self.connector.send_stix_bundle("{}")
+                self.assertIn("did not acknowledge", str(caught.exception))
+
+    def test_bundle_push_returns_the_acknowledgement(self):
+        with self._post(self._response({"data": {"stixBundlePush": True}})):
+            self.assertIs(self.connector.send_stix_bundle("{}"), True)
 
     def test_register_with_graphql_errors_raises(self):
         with self._post(self._response({"errors": [{"message": "denied"}]})):

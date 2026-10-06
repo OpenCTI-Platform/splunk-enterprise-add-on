@@ -254,8 +254,9 @@ class SplunkAppConnectorHelper:
     def send_stix_bundle(self, bundle):
         """
         :param bundle: serialized STIX 2.1 bundle
-        :return: the stixBundlePush result
-        :raise OpenCTIGraphQLError:
+        :return: the stixBundlePush acknowledgement
+        :raise OpenCTIGraphQLError: also when the acknowledgement is missing,
+            null or false
         """
         query = """
             mutation stixBundle($id: String!, $bundle: String!) {
@@ -265,8 +266,9 @@ class SplunkAppConnectorHelper:
 
         variables = {"id": self.connector_id, "bundle": bundle}
         data = self.graphql_query(query, variables)
-        if "stixBundlePush" not in data:
+        acknowledgement = data.get("stixBundlePush")
+        if not acknowledgement:
             raise OpenCTIGraphQLError(
                 f"OpenCTI did not acknowledge the STIX bundle (response: {data!r})"
             )
-        return data.get("stixBundlePush")
+        return acknowledgement
