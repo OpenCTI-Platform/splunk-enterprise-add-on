@@ -7,11 +7,9 @@ import solnlib.conf_manager as conf_manager  # type: ignore
 import solnlib.log as log  # type: ignore
 import solnlib.modular_input.checkpointer as checkpointer  # type: ignore
 import splunklib.modularinput as smi  # type: ignore
-import utils
 
-from app_connector_helper import SplunkAppConnectorHelper
+from addon_config import load_settings
 from constants import (
-    resolve_ssl_verify,
     INDICATORS_KVSTORE_NAME,
     REPORTS_KVSTORE_NAME,
     MARKINGS_KVSTORE_NAME,
@@ -23,6 +21,7 @@ from stix2patterns.v21.pattern import Pattern  # type: ignore
 import six  # type: ignore
 from datetime import datetime, timedelta, timezone
 import sys
+import utils
 
 MARKING_DEFs = {}
 IDENTITY_DEFs = {}
@@ -86,11 +85,17 @@ def validate_input(definition):
 
 
 def exist_in_kvstore(kv_store, key_id):
+    """
+    :return: True when the KV Store holds key_id, False when it does not
+    :raise: any other KV Store failure: the entry may still be there
+    """
     try:
         kv_store.query_by_id(key_id)
         return True
-    except Exception:
-        return False
+    except Exception as ex:
+        if getattr(ex, "status", None) == 404 or "404" in str(ex):
+            return False
+        raise
 
 
 def parse_stix_pattern(stix_pattern):
@@ -271,6 +276,19 @@ def get_kvstore_name_for_entity(entity_type, data):
 
     return ENTITY_KVSTORE_MAP.get(entity_type)
 
+def indexed_indicator_kv_keys(indicator):
+    """
+    :return: the opencti_indicators keys an indicator streamed in index mode
+        can have: its STIX id (the "Update OpenCTI Indicators Lookup" searches
+        set _key = id) and its OpenCTI internal id (KV Store mode)
+    """
+    keys = []
+    for key in (indicator.get("id"), indicator.get("_key")):
+        if key and key not in keys:
+            keys.append(key)
+    return keys
+
+
 def stream_events(inputs, event_writer):
     # inputs.inputs is a Python dictionary object like:
     # {
@@ -297,16 +315,10 @@ def stream_events(inputs, event_writer):
             )
             logger.setLevel(log_level)
 
-            cfm = conf_manager.ConfManager(
-                session_key,
-                ADDON_NAME,
-                realm=f"__REST_CREDENTIAL__#{ADDON_NAME}#configs/conf-ta-opencti-for-splunk-enterprise_settings",
-            )
-            conf = cfm.get_conf("ta-opencti-for-splunk-enterprise_settings")
-            opencti_url = conf.get("account").get("opencti_url")
-            opencti_api_key = conf.get("account").get("opencti_api_key")
-            ca_bundle_path = conf.get("account").get("ca_bundle_path", "")
-            ssl_verify = resolve_ssl_verify(ca_bundle_path)
+            settings = load_settings(session_key, logger)
+            opencti_url = settings.opencti_url
+            opencti_api_key = settings.opencti_api_key
+            ssl_verify = settings.ssl_verify
 
             log.modular_input_start(logger, normalized_input_name)
             logger.info("OpenCTI data input module start")
@@ -319,28 +331,15 @@ def stream_events(inputs, event_writer):
             logger.info(f"OpenCTI URL: {opencti_url}")
             logger.info(f"Fetching data from OpenCTI stream.id: {stream_id}")
             logger.info(f"Selected input type: {input_type}")
+            logger.info(f"Proxy settings: {utils.redact_proxy_settings(settings.proxy_settings)}")
 
-            # resolve proxy configurations
-            proxy_settings = conf_manager.get_proxy_dict(
-                logger=logger,
-                session_key=session_key,
-                app_name=ADDON_NAME,
-                conf_name="ta-opencti-for-splunk-enterprise_settings",
-            )
-            logger.info(f"Proxy settings: {proxy_settings}")
-
-            user_agent = utils.get_user_agent(session_key)
+            user_agent = settings.user_agent
             logger.debug(f"User-Agent: {user_agent}")
 
             # Create Splunk App Connector Helper
-            connector_helper = SplunkAppConnectorHelper(
+            connector_helper = settings.build_client(
                 connector_id="splunk-stream-input",
                 connector_name="Splunk Stream Input",
-                opencti_url=opencti_url,
-                opencti_api_key=opencti_api_key,
-                proxy_settings=proxy_settings,
-                verify=ssl_verify,
-                user_agent=user_agent,
             )
 
             kvstore_checkpointer = checkpointer.KVStoreCheckpointer(
@@ -384,7 +383,7 @@ def stream_events(inputs, event_writer):
                 logger.error(f"Failed to connect to Splunk service: {e}")
                 return
 
-            proxies = utils.get_proxy_config(proxy_settings=proxy_settings)
+            proxies = utils.get_proxy_config(proxy_settings=settings.proxy_settings)
             try:
                 messages = SSEClient(
                     live_stream_url,
@@ -416,7 +415,7 @@ def stream_events(inputs, event_writer):
                     parsed_stix = None
                     if entity_type == "indicator" and data.get("pattern_type") == "stix":
                         parsed_stix = enrich_payload(stream_id, input_name, data, msg.event)
-                        if parsed_stix is not None:
+                        if parsed_stix is not None and msg.event != "delete":
                             try:
                                 enrich_row = connector_helper.get_indicator_enrichment(
                                     data["id"]
@@ -505,17 +504,16 @@ def stream_events(inputs, event_writer):
                                     )
 
                                 kv_indicators = kvstore_handles[INDICATORS_KVSTORE_NAME]
-                                key_id = parsed_stix.get("id")
-
-                                if key_id and exist_in_kvstore(kv_indicators, key_id):
-                                    kv_indicators.delete_by_id(key_id)
-                                    logger.info(
-                                        f"KV Store [{INDICATORS_KVSTORE_NAME}]: Deleted {key_id} on delete event"
-                                    )
-                                else:
-                                    logger.debug(
-                                        f"No existing KV entry for {key_id} in [{INDICATORS_KVSTORE_NAME}]"
-                                    )
+                                for key_id in indexed_indicator_kv_keys(parsed_stix):
+                                    if exist_in_kvstore(kv_indicators, key_id):
+                                        kv_indicators.delete_by_id(key_id)
+                                        logger.info(
+                                            f"KV Store [{INDICATORS_KVSTORE_NAME}]: Deleted {key_id} on delete event"
+                                        )
+                                    else:
+                                        logger.debug(
+                                            f"No existing KV entry for {key_id} in [{INDICATORS_KVSTORE_NAME}]"
+                                        )
                             except Exception as e:
                                 logger.warning(
                                     f"Failed to delete indicator from KV store [{INDICATORS_KVSTORE_NAME}]: {e}"

@@ -84,7 +84,30 @@ class EventIdentityKeyTest(unittest.TestCase):
 
     def test_falls_back_to_raw(self):
         ev = {"_time": WHOLE_SECOND, "_raw": "hello"}
-        self.assertEqual(event_identity_key(ev), "raw|hello")
+        self.assertEqual(event_identity_key(ev), 'raw|["", "", "", "", "hello"]')
+        ev.update({"index": "main", "host": "fw01", "source": "/var/log/fw.log", "sourcetype": "pan:traffic"})
+        self.assertEqual(event_identity_key(ev), 'raw|["main", "fw01", "/var/log/fw.log", "pan:traffic", "hello"]')
+
+    def test_separators_inside_origin_values_never_merge_events(self):
+        a = {"_time": WHOLE_SECOND, "_raw": "hello", "host": "fw01|fw02", "source": ""}
+        b = {"_time": WHOLE_SECOND, "_raw": "hello", "host": "fw01", "source": "fw02|"}
+        self.assertNotEqual(event_identity_key(a), event_identity_key(b))
+
+    def test_same_raw_text_from_two_hosts_is_two_events(self):
+        a = _raw_event(1, host="fw01")
+        b = _raw_event(1, host="fw02")
+        for ev in (a, b):
+            del ev["_cd"]
+        self.assertNotEqual(event_identity_key(a), event_identity_key(b))
+        ids = {_object(convert_to_incident(ALERT_PARAMS, ev), "incident")["id"] for ev in (a, b)}
+        self.assertEqual(len(ids), 2)
+
+    def test_raw_key_is_stable_across_runs_and_peers(self):
+        ev = _raw_event(1)
+        del ev["_cd"]
+        later = _run_view(dict(ev, splunk_server="idx02"), "scheduler__a_at_1727000400", 3)
+        self.assertEqual(event_identity_key(ev), event_identity_key(_run_view(ev, "scheduler__a_at_1727000100", 0)))
+        self.assertEqual(event_identity_key(ev), event_identity_key(later))
 
     def test_transforming_search_row_has_no_identity(self):
         row = {"_time": WHOLE_SECOND, "user": "bob", "count": "12"}
@@ -177,6 +200,30 @@ class ConverterTest(unittest.TestCase):
         ev = {"_time": WHOLE_SECOND, "rid": "0"}
         inc = _object(convert_to_incident(ALERT_PARAMS, ev), "incident")
         self.assertTrue(inc["created"].startswith("2024-09-22T10:13:20.000"))
+
+    def test_row_without_time_takes_the_alert_dispatch_time(self):
+        # stats rows carry no _time: the id must not change between retries of one alert run
+        row = {"user": "alice", "count": "3"}
+        params = dict(ALERT_PARAMS, sid="scheduler__admin__search__RMD5ab_at_1727000400_17", incident_key="user")
+        first = _object(convert_to_incident(params, dict(row)), "incident")
+        retry = _object(convert_to_incident(params, dict(row)), "incident")
+        self.assertEqual(first["id"], retry["id"])
+        self.assertTrue(first["created"].startswith("2024-09-22T10:20:00"))
+        response = _object(convert_to_incident_response(params, dict(row)), "case-incident")
+        self.assertTrue(response["created"].startswith("2024-09-22T10:20:00"))
+        later = _object(convert_to_incident(dict(params, sid="scheduler__admin__search__RMD5ab_at_1727000700_18"),
+                                            dict(row)), "incident")
+        self.assertNotEqual(first["id"], later["id"], "a later scheduled run is a new detection")
+
+    def test_ad_hoc_sid_and_unknown_sid(self):
+        for sid in ("1727000400.42", "rt_1727000400.42", "1727000400.42_7E5C5F5F-1B2C-4D3E-8F90-0A1B2C3D4E5F",
+                    "scheduler__nobody__search__RMD5ab_at_1727000400_9_7E5C5F5F-1B2C-4D3E-8F90-0A1B2C3D4E5F"):
+            with self.subTest(sid=sid):
+                incident = _object(convert_to_incident(dict(ALERT_PARAMS, sid=sid), {"user": "alice"}), "incident")
+                self.assertTrue(incident["created"].startswith("2024-09-22T10:20:00"))
+        before = datetime.now(timezone.utc).replace(microsecond=0)
+        unknown = _object(convert_to_incident(dict(ALERT_PARAMS, sid="custom"), {"user": "alice"}), "incident")
+        self.assertGreaterEqual(datetime.fromisoformat(unknown["created"].replace("Z", "+00:00")), before)
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@ import datetime
 import functools
 import hashlib
 import ipaddress
+import json
 import re
 import uuid
 
@@ -14,6 +15,66 @@ regex_sha512 = r"[0-9a-fA-F]{128}"
 regex_sha256 = r"[0-9a-fA-F]{64}"
 regex_sha1 = r"[0-9a-fA-F]{40}"
 regex_md5 = r"[0-9a-fA-F]{32}"
+_FRACTION_RE = re.compile(r"\.(\d+)")
+
+
+def to_iso(value):
+    """
+    :param value: datetime, epoch seconds (number or numeric string) or ISO string
+    :return: ISO 8601 UTC string with milliseconds ("...T10:00:00.000Z") or None
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime.datetime):
+        dt = value if value.tzinfo else value.replace(tzinfo=datetime.timezone.utc)
+        return dt.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    if isinstance(value, (int, float)):
+        return to_iso(datetime.datetime.fromtimestamp(float(value), datetime.timezone.utc))
+    text = str(value).strip()
+    try:
+        return to_iso(float(text))
+    except ValueError:
+        pass
+    parsed = parse_iso(text)
+    return to_iso(parsed) if parsed else None
+
+
+def parse_iso(value):
+    """
+    :param value: ISO 8601 string (STIX timestamps, "Z" or offset, 0-9 fraction digits)
+    :return: timezone-aware datetime, or None when unparseable
+    """
+    if not value or not isinstance(value, str):
+        return None
+    text = value.strip()
+    if text.endswith("Z") or text.endswith("z"):
+        text = text[:-1] + "+00:00"
+    # Python 3.7+ fromisoformat only reads 3 or 6 fraction digits
+    text = _FRACTION_RE.sub(lambda m: "." + (m.group(1) + "000000")[:6], text, count=1)
+    try:
+        dt = datetime.datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=datetime.timezone.utc)
+
+
+def to_epoch(value):
+    """
+    :param value: epoch (number / numeric string), ISO string or datetime
+    :return: float epoch seconds or None
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime.datetime):
+        dt = value if value.tzinfo else value.replace(tzinfo=datetime.timezone.utc)
+        return dt.timestamp()
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(str(value).strip())
+    except ValueError:
+        parsed = parse_iso(str(value))
+        return parsed.timestamp() if parsed else None
 
 def get_bool_val(value):
     """
@@ -110,6 +171,17 @@ def get_proxy_config(proxy_settings):
         # environment-sourced proxies even when trust_env=True (the default).
         return {"http": None, "https": None}
 
+def redact_proxy_settings(proxy_settings):
+    """
+    :param proxy_settings: proxy dict (either shape, see get_proxy_config)
+    :return: copy safe for logs (password masked)
+    """
+    redacted = dict(proxy_settings or {})
+    for key in ("proxy_password", "password"):
+        if redacted.get(key):
+            redacted[key] = "********"
+    return redacted
+
 def is_ipv6(value: str):
     """
     :param value:
@@ -169,33 +241,82 @@ def generate_identity_id(name: str, identity_class: str):
     entity_id = str(uuid.uuid5(uuid.UUID("00abedb4-aa42-466c-9c01-fed23315a9b7"), data))
     return "identity--" + entity_id
 
-def generate_incident_id(name: str, created: str):
-    """
-    :param name:
-    :param created:
-    :return:
-    """
+def _container_seed(name, created, event_key=None):
     name = name.lower().strip()
     if isinstance(created, datetime.datetime):
         created = created.isoformat()
     data = {"name": name, "created": created}
-    data = canonicalize(data, utf8=False)
+    # Without an event key the seed is the historical one, so results that
+    # carry no identity keep upserting onto the incidents created by 1.1.x.
+    if event_key:
+        data["event"] = event_key
+    return canonicalize(data, utf8=False)
+
+
+def generate_incident_id(name: str, created: str, event_key=None):
+    """
+    :param name:
+    :param created:
+    :param event_key: identity of the Splunk result (see incident_event_key);
+        distinct results with the same name and created stay distinct (#47)
+    :return:
+    """
+    data = _container_seed(name, created, event_key)
     entity_id = str(uuid.uuid5(uuid.UUID("00abedb4-aa42-466c-9c01-fed23315a9b7"), data))
     return "incident--" + entity_id
 
-def generate_case_incident_id(name, created):
+def generate_case_incident_id(name, created, event_key=None):
     """
     :param name:
     :param created:
+    :param event_key: see generate_incident_id
     :return:
     """
-    name = name.lower().strip()
-    if isinstance(created, datetime.datetime):
-        created = created.isoformat()
-    data = {"name": name, "created": created}
-    data = canonicalize(data, utf8=False)
+    data = _container_seed(name, created, event_key)
     entity_id = str(uuid.uuid5(uuid.UUID("00abedb4-aa42-466c-9c01-fed23315a9b7"), data))
     return "case-incident--" + entity_id
+
+
+def incident_event_key(event, explicit_key=None):
+    """
+    Identity of a Splunk result folded into the Incident / Case-Incident id (#47).
+
+    Resolution order:
+      1. the "Incident key" alert parameter: comma-separated names of result
+         fields read on every row (for example ``event_id`` for ES notables, or
+         ``user,src`` for a ``stats ... by user src`` search). Splunk resolves
+         $result.<field>$ tokens against the first result only, so a value
+         naming no field of the row is used as is (the same for every row).
+      2. event_identity_key(): the address of the indexed event (_bkt/_cd) or
+         its _raw text and origin, stable across overlapping scheduled runs
+
+    Rows of transforming searches without an incident key keep the historical
+    name + created id on purpose: their row index and field values change
+    between overlapping runs, and the same logical row must keep upserting.
+
+    :param event: the current result dict
+    :param explicit_key: value of the incident_key alert parameter
+    :return: str key ("" when the historical name + created id applies)
+    """
+    explicit_key = str(explicit_key or "").strip()
+    if explicit_key:
+        names = [name.strip() for name in explicit_key.split(",") if name.strip()]
+        if any(name in event for name in names):
+            # JSON keeps values holding "|" or "=" from reading as other fields
+            return "fields|" + json.dumps([[name, str(event.get(name, ""))] for name in names])
+        return "key|" + explicit_key
+    return event_identity_key(event)
+
+def generate_indicator_id(pattern):
+    """
+    :param pattern: STIX pattern
+    :return: the deterministic id OpenCTI gives an Indicator with this
+        pattern (pycti Indicator.generate_id), so a sighted indicator built by
+        the add-on upserts onto the existing one
+    """
+    data = canonicalize({"pattern": pattern.strip()}, utf8=False)
+    entity_id = str(uuid.uuid5(uuid.UUID("00abedb4-aa42-466c-9c01-fed23315a9b7"), data))
+    return "indicator--" + entity_id
 
 def generate_sighting_id(
         sighting_of_ref,
@@ -300,7 +421,8 @@ def event_identity_key(event):
 
     Resolution order:
       1. _bkt (or index + splunk_server) + _cd  Splunk's address of an indexed event
-      2. _raw                         raw event text when _cd was dropped
+      2. index + host + source + sourcetype + _raw  when _cd was dropped: the
+         same text indexed from two hosts or sources is two events
 
     Rows from transforming searches (stats, table, ...) carry neither, and are
     deliberately not keyed: their field values (counts, etc.) can change between
@@ -321,7 +443,10 @@ def event_identity_key(event):
         return "cd|{}|{}|{}".format(event.get("index", ""), event.get("splunk_server", ""), cd)
     raw = event.get("_raw")
     if raw:
-        return "raw|{}".format(raw)
+        # splunk_server is left out: replicated buckets are served by any peer.
+        # JSON keeps a separator inside a value from shifting the other fields.
+        origin = [str(event.get(field) or "") for field in ("index", "host", "source", "sourcetype")]
+        return "raw|" + json.dumps(origin + [str(raw)])
     return ""
 
 

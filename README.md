@@ -16,6 +16,10 @@ It enables analysts to collect, normalize, and enrich OpenCTI indicators and obs
 - Modular inputs for ingesting OpenCTI data via the OpenCTI Stream API.
 - Ability to trigger OpenCTI actions in response of Alerts and to investigate them directly in OpenCTI
 - Support for multiple object types (Indicators, Observables, Relationships, Sightings).
+- Splunk is a named Security Platform (type SIEM) in OpenCTI, and the sightings of the alert actions
+  reference OpenCTI indicators (STIX 2.1). See [Security Platform settings](#security-platform-settings).
+- The Security Platform is detected from the OpenCTI schema: on OpenCTI releases without it the add-on
+  behaves as before and logs why it is skipped.
 
 ---
 
@@ -71,6 +75,28 @@ If a proxy configuration is required to connect to OpenCTI platform, you can con
 | `Proxy Port`     | The proxy port                                                              |
 | `Proxy Username` | An optional proxy username                                                  |
 | `Proxy Password` | An optional proxy password                                                  |
+
+### Security Platform settings
+
+The add-on identifies this Splunk deployment in OpenCTI as a **Security Platform** of type SIEM. The
+sightings of the "OpenCTI - Create Sighting" alert action are made on it. Configure it on the
+"Security Platform" tab of the Configuration page:
+
+| Parameter                                | Description                                                                                                                                  | Default            |
+|------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------|--------------------|
+| `Security Platform ID`                   | Id (internal or STIX) of an existing OpenCTI Security Platform. Takes precedence over the name                                               | empty              |
+| `Create the Security Platform`           | When no id is set, find the Security Platform by name, or create it (type SIEM)                                                               | enabled            |
+| `Security Platform name`                 | Name used to find or create it                                                                                                               | `Splunk <server>`  |
+| `Feature detection cache (minutes)`      | How long the capabilities read from the OpenCTI GraphQL schema are cached                                                                     | 60                 |
+
+The resolved Security Platform is cached in the KV Store (`opencti_addon_state`) and shared by every
+search head of a cluster, so members with different server names keep one Security Platform. Without a
+configured name, the first default name recorded in that collection is used by every member, so members
+resolving it for the first time at the same moment create one platform, not one each.
+
+**OpenCTI account permissions.** The account of the add-on needs the capabilities of a connector service
+account (bundle push and connector registration) plus "Knowledge: create / update" for the Security
+Platform creation.
 
 ## OpenCTI Data Inputs Configuration
 
@@ -317,17 +343,52 @@ You can create an incident or an incident response case in OpenCTI from a custom
 | `Labels`                 | Labels (separated by a comma) to be applied           | Incident & Incident response case | 
 | `TLP`                    | Markings to be applied                                | Incident & Incident response case | 
 | `Observables extraction` | Method for extracting observables                     | Incident & Incident response case | 
+| `Incident key`           | Optional result field names, comma-separated, read on every result (for example `event_id` for an ES notable, or `user,src` for a `stats ... by user src` search). Distinct values always create distinct objects, the same values upsert. Use field names, not `$result.<field>$` tokens: Splunk resolves those against the first result only | Incident & Incident response case |
+
+Incidents and cases created from indexed events (results carrying `_cd` / `_raw`) get an id derived from
+the event itself (its Splunk address, or its raw text with its `index`, `host`, `source` and `sourcetype`
+when the search dropped `_cd`), so distinct events firing in the same second never merge (#47), while the same event
+returned by overlapping scheduled runs keeps upserting onto one object. Rows of transforming searches
+(`stats`, `table`...) should name their split-by fields in `Incident key`. Without it they keep the
+historical name + time id; when several of them share that id in one run, the second and following rows
+get distinct ids in row order, which only stays stable while the row order does (the action logs a
+warning when this happens). A result without `_time` takes the time its alert was dispatched, read from
+the alert's search id, so every retry of one triggered alert upserts the same object and a later run of
+the alert creates a new one.
+
+> Upgrading from 1.1.x: indexed events get new ids. An event already sent by 1.1.x and returned again by
+> an overlapping scheduled run just after the upgrade creates a second object, once.
 
 7. To create a sighting, complete the form with the following settings:
 
 | Parameter                | Description                                                   | Scope      |
 |--------------------------|---------------------------------------------------------------|------------|
 | `Sighting Of (value)`    | Value of what was sighted                                     | Sighting   |
-| `Sighting Of (type)`     | Type of what was sighted (URL, Domain, IPV4, IPV6, File Hash) | Sighting   |                              
-| `Where Sighted (value)`  | Value of the 'System' or 'Organization' that saw the sighting | Sighting   |                              
+| `Sighting Of (type)`     | Type of what was sighted: an Indicator (`Indicator ID`, or `URL`, `Domain`, `IPV4`, `IPV6`, `File Hash`, `Email Address` Indicator, default `Domain Indicator`); the legacy `<type> Observable` types sight the matching Indicator | Sighting   |
+| `Count`                  | Number of times the value was seen (for example `$result.count$`), default 1 | Sighting   |
+| `Where Sighted (value)`  | Optional 'System' or 'Organization' that saw the sighting, in addition to the Splunk Security Platform | Sighting   |                              
 | `Where Sighted (type)`   | 'System' or 'Organization' that saw the sighting              | Sighting   | 
+| `Sighted on the Splunk Security Platform` | Adds the Splunk Security Platform (Configuration > Security Platform) to where the value was sighted (default) | Sighting |
 | `Labels`                 | Labels (separated by a comma) to be applied                   | Sighting   | 
 | `TLP`                    | Markings to be applied                                        | Sighting   | 
+
+**Sightings of indicators (#57, #67).** STIX 2.1 sightings reference an Indicator: OpenCTI rules such as
+"Raise incident based on sighting" and the sighting propagation only apply to them.
+- `Indicator ID`: pass the STIX id of an indicator imported by the add-on, for example
+  `... | lookup opencti_indicators value AS dest OUTPUT id AS indicator_id | where isnotnull(indicator_id)` and
+  `Sighting of Value = $result.indicator_id$`. The sighting references this indicator directly; a revoked
+  indicator is not sighted and the action fails with a message naming it.
+- `<type> Indicator`: pass a raw value. The add-on looks for a non-revoked indicator in `opencti_indicators`, then in
+  OpenCTI by its exact STIX pattern, and otherwise creates the indicator from this single value (for
+  example `[domain-name:value = 'example.com']`), with the id OpenCTI gives this pattern.
+- `<type> Observable` types are kept for existing alerts only (the default is now `Domain Indicator`).
+  Current OpenCTI rejects a sighting of an observable, so such an alert sights the matching
+  `<type> Indicator`, resolved the same way. The observable is still sent, linked to that
+  indicator by a `based-on` relationship.
+
+The sighting `first_seen` / `last_seen` come from the `first_seen` / `last_seen` fields of the result when
+present (epoch or ISO 8601, for example from `stats min(_time) AS first_seen max(_time) AS last_seen`),
+otherwise from `_time`.
 
 You can use [Splunk "tokens"](https://docs.splunk.com/Documentation/Splunk/9.2.2/Alert/EmailNotificationTokens#Result_tokens) as variables in the form to contextualize the data imported into OpenCTI.
 Tokens represent data that a search generates. They work as placeholders or variables for data values that populate when the search completes.
@@ -390,8 +451,29 @@ Example:
 ```sourcetype=* | lookup opencti_indicators value as url_domain OUTPUT id as match_ioc_id | search match_ioc_id=* | eval octi_domain=url_domain | eval octi_url=url ```
 
 
-Logs related to OpenCTI customer alerts are available in the following two log file:
+Logs related to OpenCTI custom alerts are available in the following log files:
 
 ```$SPLUNK_HOME/var/log/splunk/opencti_create_incident_modalert.log```
 
 ```$SPLUNK_HOME/var/log/splunk/opencti_create_incident_response_modalert.log```
+
+```$SPLUNK_HOME/var/log/splunk/opencti_create_sighting_modalert.log```
+
+An alert action exits with a non-zero code when at least one result could not be sent (#18), so failures
+show in the Splunk alert action status (`index=_internal sourcetype=splunkd component=sendmodalert`).
+
+---
+
+## OpenCTI program compatibility
+
+### Compatibility matrix
+
+The add-on reads the OpenCTI GraphQL schema once per platform (cached in the KV Store, see
+`Feature detection cache`) and enables each capability only where the platform provides it. Missing
+capabilities are skipped with one log line such as
+`Splunk Security Platform resolution: skipped, the OpenCTI platform (<version>) does not provide the Security Platform entity`.
+
+| Add-on capability                                            | OpenCTI capability (detected)                                    | OpenCTI releases without it          |
+|--------------------------------------------------------------|------------------------------------------------------------------|--------------------------------------|
+| Ingestion, enrichment, Create Incident / Case / Sighting     | live streams, `stixBundlePush`                                   | always available                     |
+| Splunk Security Platform (configured or auto-created)        | `securityPlatformAdd`, `securityPlatforms`                       | sightings use the selected System / Organization only |

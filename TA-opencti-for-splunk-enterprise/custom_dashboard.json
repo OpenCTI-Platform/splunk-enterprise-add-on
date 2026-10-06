@@ -284,7 +284,7 @@
     "ds_YI12Xgn7": {
       "name": "OpenCTI added IOCs over time",
       "options": {
-        "query": "| inputlookup opencti_indicators | eval added_at = strptime(added_at, \"%Y-%m-%dT%H:%M:%SZ\") | eval _time = added_at | timechart count AS Count",
+        "query": "| inputlookup opencti_indicators | eval added_at = coalesce(strptime(added_at, \"%Y-%m-%dT%H:%M:%S.%3NZ\"), strptime(added_at, \"%Y-%m-%dT%H:%M:%SZ\")) | eval _time = added_at | timechart count AS Count",
         "queryParameters": {
           "earliest": "$global_time.earliest$",
           "latest": "$global_time.latest$"
