@@ -463,7 +463,9 @@ The add-on ships detections matching the OpenCTI indicators against CIM data, di
 | `OpenCTI - Email from an indicator sender`              | `Email` sender                              | T1566.001, T1566.002             |
 
 Each one is a scheduled alert (tracked, throttled per indicator for one hour) whose rows carry
-`indicator_id`, `value`, `count`, `first_seen` and `last_seen`. The techniques are
+`indicator_id`, `value`, `count`, `first_seen` and `last_seen`. Each one matches its values against the
+indicators of the same kind only (IP addresses, domains and hostnames, URLs, file hashes, email
+addresses), and revoked or expired indicators never match. The techniques are
 declared in `action.correlationsearch.annotations` (`{"mitre_attack": [...]}`), the convention read by
 Splunk Enterprise Security and by the OpenCTI `splunk-saved-searches` connector, which imports them as
 detection rules indicating the techniques and deployed on the Splunk Security Platform. Maintenance
