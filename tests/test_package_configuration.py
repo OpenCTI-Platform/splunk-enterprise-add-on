@@ -35,6 +35,15 @@ class SavedSearchesTest(unittest.TestCase):
         for stanza in self.searches.sections():
             self.assertEqual(self.searches.get(stanza, "disabled"), "1", stanza)
 
+    def test_kv_sync_searches_read_both_timestamp_precisions(self):
+        """A whole-second update must never lose the delete tie-break to an older delete."""
+        for stanza in ("Update OpenCTI Indicators Lookup", "Nightly Rebuild OpenCTI Indicators Lookup"):
+            search = self.searches.get(stanza, "search")
+            with self.subTest(stanza=stanza):
+                for field in ("modified", "updated_at", "created_at"):
+                    self.assertIn(f'strptime({field}, "%Y-%m-%dT%H:%M:%S.%3NZ"), strptime({field}, "%Y-%m-%dT%H:%M:%SZ")', search)
+                self.assertNotIn("case( match(modified", " ".join(search.split()))
+
     def test_kv_sync_searches_never_restore_deleted_indicators(self):
         for stanza in ("Update OpenCTI Indicators Lookup", "Nightly Rebuild OpenCTI Indicators Lookup"):
             search = self.searches.get(stanza, "search")
