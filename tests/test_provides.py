@@ -129,6 +129,27 @@ class ProvidesTest(unittest.TestCase):
         self.assertEqual(state.records["old"]["status"], STATUS_DECLARED)
         self.assertEqual(state.records["old"]["relationship_ids"], "rel-b", "only the relationship left is retried")
 
+    def test_unacknowledged_declaration_is_a_failure(self):
+        client = FakeClient({"SplunkDataComponents": self._dc, "SplunkProvides": {"stixCoreRelationshipAdd": None}})
+        state = FakeKV()
+        rows = ProvidesPublisher(client, FakeDetector((FEATURE_PROVIDES,)), PLATFORM, state, logger=FakeLogger()).publish(
+            self.INVENTORY[:1])
+        self.assertEqual(rows[0]["status"], STATUS_ERROR)
+        self.assertIn("no provides relationship", rows[0]["message"])
+        record = state.records[state_key("platform-internal", "process creation")]
+        self.assertEqual((record["status"], record.get("relationship_ids", "")), (STATUS_ERROR, ""))
+
+    def test_unacknowledged_delete_keeps_the_relationship_declared(self):
+        client = FakeClient({"SplunkDataComponents": self._dc,
+                             "SplunkProvides": {"stixCoreRelationshipAdd": {"id": "rel"}},
+                             "SplunkProvidesDelete": {"stixCoreRelationshipEdit": None}})
+        state = FakeKV([{"_key": "old", "platform_id": "platform-internal", "data_component": "Module Load",
+                         "relationship_ids": "rel-old", "status": STATUS_DECLARED}])
+        rows = ProvidesPublisher(client, FakeDetector((FEATURE_PROVIDES,)), PLATFORM, state).publish(self.INVENTORY[:1], prune=True)
+        self.assertIn("did not confirm", [r for r in rows if r["data_component"] == "Module Load"][0]["message"])
+        self.assertEqual((state.records["old"]["status"], state.records["old"]["relationship_ids"]),
+                         (STATUS_DECLARED, "rel-old"))
+
     def test_empty_inventory_is_never_pruned(self):
         client = FakeClient({"SplunkDataComponents": self._dc})
         state = FakeKV([{"_key": "old", "platform_id": "platform-internal", "data_component": "Module Load",

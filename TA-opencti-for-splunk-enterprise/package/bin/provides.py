@@ -185,7 +185,10 @@ class ProvidesPublisher:
                         "relationship_type": "provides",
                         "description": provides_description(entry["sources"]),
                     }})
-                    relationship_ids.append((data.get("stixCoreRelationshipAdd") or {}).get("id") or "")
+                    relationship_id = (data.get("stixCoreRelationshipAdd") or {}).get("id")
+                    if not relationship_id:
+                        raise OpenCTIGraphQLError(f"OpenCTI returned no provides relationship to {data_component_id}")
+                    relationship_ids.append(relationship_id)
                 row.update({"status": STATUS_DECLARED, "message": ""})
             except OpenCTIGraphQLError as ex:
                 self.logger.error(f"provides {entry['name']} failed: {ex}")
@@ -286,7 +289,9 @@ class ProvidesPublisher:
             for relationship_id in [r for r in (record.get("relationship_ids") or "").split(",") if r]:
                 try:
                     self.limiter.acquire()
-                    self.client.graphql_query(PROVIDES_DELETE_MUTATION, {"id": relationship_id})
+                    data = self.client.graphql_query(PROVIDES_DELETE_MUTATION, {"id": relationship_id})
+                    if not (data.get("stixCoreRelationshipEdit") or {}).get("delete"):
+                        raise OpenCTIGraphQLError(f"OpenCTI did not confirm the deletion of {relationship_id}")
                 except OpenCTIGraphQLError as ex:
                     self.logger.warning(f"provides {relationship_id} not deleted: {ex}")
                     remaining.append(relationship_id)
