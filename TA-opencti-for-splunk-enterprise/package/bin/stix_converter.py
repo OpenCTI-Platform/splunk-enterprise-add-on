@@ -68,8 +68,10 @@ def _extract_observables_from_cim_model(event, marking, creator):
     if "http_user_agent" in event and event.get("http_user_agent") != "":
         observables.append({"type": "user_agent", "value": event.get("http_user_agent")})
     if "query" in event and event.get("query") != "":
-        # Network_Resolution.DNS: the name or address looked up
-        query = str(event.get("query")).strip().rstrip(".")
+        # Network_Resolution.DNS: the name or address looked up; a fully qualified name ends with one dot (the root)
+        query = str(event.get("query")).strip()
+        if query.endswith("."):
+            query = query[:-1]
         if is_ipv4(query):
             observables.append({"type": "ipv4", "value": query})
         elif is_ipv6(query):

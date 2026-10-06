@@ -71,6 +71,7 @@ class ConverterTest(unittest.TestCase):
     def test_query_that_is_not_a_host_name_is_not_a_domain(self):
         for query in ("select * from users", "wpad", "10.9.8.7", "host.-ab", "host.ab-", "-host.example.com",
                       "host-.example.com", "999.1.1.12", "host.123", "a..example.com", "host.c", "under_.example.com",
+                      "beacon.example.com..", ".example.com", "10.9.8.7..",
                       "a" * 64 + ".example.com", ("abc." * 63) + "com"):
             with self.subTest(query=query):
                 bundle, _ = convert_to_hunt_evidence(PARAMS, dict(EVENT, query=query), "run-1", PLATFORM["standard_id"], [TECHNIQUE])
