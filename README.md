@@ -462,8 +462,10 @@ same or another run, into one object.
 When the platform supports it, the objects are attached to the hunt run (`huntRunEvidenceAdd`, which
 carries the hit count and time of each report), so each run lists its own evidence even when it shares
 an object with another run. The bundle is ingested asynchronously by the OpenCTI workers: the action
-waits up to 15 seconds for the objects of a result, and 60 seconds at most over all the results of one
-alert run (later results are checked once). The objects still not ingested are attached by the next
+waits up to 15 seconds for the objects of a result, and stops waiting once 60 seconds of the alert run,
+over all its results, went to these waits, to the ingestion checks (one request per object) and to
+retrying earlier reports: the later results check their objects once and park them, and the retries are
+left to the next alert run. The objects still not ingested are attached by the next
 evidence reports of the same run, the least recently tried first (within a day; evidence OpenCTI never
 ingests is dropped after a day by the next evidence report of any run); that deferral is not a failure.
 Attaching an object again is harmless (OpenCTI keeps one link per object). A link OpenCTI rejects

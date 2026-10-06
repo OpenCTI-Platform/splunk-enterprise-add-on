@@ -194,16 +194,65 @@ class ActionTest(unittest.TestCase):
         self.assertEqual(len(evidence), 1)
         self.assertEqual(evidence[0]["input"]["result_ids"], ["observed-data--1", "sighting--1"])
 
+    def _clock(self, check_seconds=0):
+        """A clock moved by the waits and by every ingestion check (check_seconds per request)."""
+        clock = {"now": 1000.0, "waits": []}
+
+        def sleep(delay):
+            clock["waits"].append(delay)
+            clock["now"] += delay
+
+        def ingested(variables):
+            clock["now"] += check_seconds
+            return NOT_INGESTED
+
+        patches = (mock.patch.object(program_actions.time, "sleep", side_effect=sleep),
+                   mock.patch.object(program_actions.time, "monotonic", side_effect=lambda: clock["now"]))
+        return clock, ingested, patches
+
     def test_one_alert_run_waits_within_its_budget(self):
         context = self._evidence_context(set())
-        waits = []
-        with mock.patch.object(program_actions, "EVIDENCE_WAIT_BUDGET_SECONDS", 3), \
-                mock.patch.object(program_actions.time, "sleep", side_effect=waits.append):
+        clock, _, (sleep, monotonic) = self._clock()
+        with mock.patch.object(program_actions, "EVIDENCE_WAIT_BUDGET_SECONDS", 3), sleep, monotonic:
             for object_id in ("observed-data--1", "observed-data--2"):
                 with self.assertRaises(program_actions.HuntEvidenceDeferred):
                     program_actions.report_hunt_evidence(context, "run-1", [object_id], 1)
-        self.assertEqual(waits, [1, 2], "the second result checks once and parks without waiting")
+        self.assertEqual(clock["waits"], [1, 2], "the second result checks once and parks without waiting")
         self.assertEqual(len(context.cache.items("hunt_evidence_pending|run-1|")), 2)
+
+    def test_slow_ingestion_checks_count_against_the_budget(self):
+        context = self._evidence_context(set())
+        clock, ingested, (sleep, monotonic) = self._clock(check_seconds=2)
+        context.client.handlers["SplunkEvidenceIngested"] = ingested
+        objects = [f"sighting--{number}" for number in range(5)]
+        with mock.patch.object(program_actions, "EVIDENCE_WAIT_BUDGET_SECONDS", 15), sleep, monotonic:
+            for _ in range(3):
+                with self.assertRaises(program_actions.HuntEvidenceDeferred):
+                    program_actions.report_hunt_evidence(context, "run-1", objects, 1)
+        self.assertEqual(clock["waits"], [1], "the 10 seconds of checks of each poll are part of the 15")
+        self.assertEqual(len(context.client.calls_of("SplunkEvidenceIngested")), 2 * 5 + 5 + 5,
+                         "beyond the budget, each result checks its own objects once and retries no parked report")
+        self.assertEqual(len(context.cache.items("hunt_evidence_pending|run-1|")), 3)
+
+    def test_parked_reports_beyond_the_budget_are_left_to_the_next_run(self):
+        context = self._evidence_context(set())
+        clock, ingested, (sleep, monotonic) = self._clock(check_seconds=2)
+        context.client.handlers["SplunkEvidenceIngested"] = ingested
+        for number in range(5):
+            program_actions._park(context, "run-1", {"result_ids": [f"observed-data--{number}"], "hits_count": 1,
+                                                     "source": "splunk-alert-action",
+                                                     "parked_at": program_actions.utc_now_iso()})
+        with mock.patch.object(program_actions, "EVIDENCE_WAIT_BUDGET_SECONDS", 3), sleep, monotonic:
+            with self.assertRaises(program_actions.HuntEvidenceDeferred):
+                program_actions.report_hunt_evidence(context, "run-1", ["sighting--new"], 1)
+            first = [call["id"] for call in context.client.calls_of("SplunkEvidenceIngested")]
+            self.assertEqual(first, ["observed-data--0", "observed-data--1", "sighting--new"],
+                             "the retries stop once the budget is spent, the result is still checked once")
+            del context.evidence_deadline
+            with self.assertRaises(program_actions.HuntEvidenceDeferred):
+                program_actions.report_hunt_evidence(context, "run-1", ["sighting--next"], 1)
+        second = [call["id"] for call in context.client.calls_of("SplunkEvidenceIngested")][len(first):]
+        self.assertEqual(second[:2], ["observed-data--2", "observed-data--3"], "the next run starts where this one stopped")
 
     def test_parked_reports_beyond_one_listing_are_attached_in_turn(self):
         ingested = set()

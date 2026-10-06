@@ -39,8 +39,12 @@ query SplunkEvidenceIngested($id: String!) {
 # The OpenCTI workers ingest a pushed bundle asynchronously: the evidence is
 # attached to the run once it exists, after at most these waits.
 EVIDENCE_INGESTION_DELAYS_SECONDS = (1, 2, 4, 8)
-# Seconds one alert run spends waiting, over all its results: once spent, the
-# evidence of the later results is checked once and parked if not ingested yet.
+# Seconds of one alert run, over all its results, after which hunt evidence stops
+# waiting. The waits for ingestion, the ingestion checks (one request per object:
+# OpenCTI accepts a query field at most twice per request, so they cannot be
+# batched) and the retries of parked reports all count. Once spent, the later
+# results check their objects once and park them, and leave the parked reports
+# to the next alert run.
 EVIDENCE_WAIT_BUDGET_SECONDS = 60
 # Evidence still not ingested is attached by a later report of the same run,
 # within this delay.
@@ -79,6 +83,18 @@ def hunt_targets(context, hunt_run_id):
     return targets, hunt.get("name")
 
 
+def _start_budget(context):
+    """The evidence budget of an alert run starts with its first evidence report."""
+    if getattr(context, "evidence_deadline", None) is None:
+        context.evidence_deadline = time.monotonic() + EVIDENCE_WAIT_BUDGET_SECONDS
+
+
+def _budget_left(context):
+    """:return: seconds left of the evidence budget of the alert run"""
+    _start_budget(context)
+    return context.evidence_deadline - time.monotonic()
+
+
 def _ingested(context, object_ids):
     """
     :return: the ids among object_ids that OpenCTI already holds
@@ -98,10 +114,8 @@ def wait_for_ingestion(context, object_ids, delays=EVIDENCE_INGESTION_DELAYS_SEC
     pending = list(object_ids)
     for delay in (0,) + tuple(delays):
         if delay:
-            left = getattr(context, "evidence_wait_left", EVIDENCE_WAIT_BUDGET_SECONDS)
-            if delay > left:
+            if delay > _budget_left(context):
                 break
-            context.evidence_wait_left = left - delay
             time.sleep(delay)
         present = set(_ingested(context, pending))
         pending = [object_id for object_id in pending if object_id not in present]
@@ -183,6 +197,9 @@ def _attach_pending(context, hunt_run_id):
 
 def _attach_listed(context, hunt_run_id, prefix, waiting):
     for key, item in context.cache.items(prefix):
+        if _budget_left(context) <= 0:
+            # The entries not reached are the least recently written: the next run takes them first.
+            break
         if "|" in key[len(prefix):]:
             continue
         claim = f"{key}|claim"
@@ -235,6 +252,7 @@ def report_hunt_evidence(context, hunt_run_id, result_ids, hits_count, platform_
     """
     if not context.detector.require(FEATURE_HUNT_EVIDENCE, "Hunt evidence attachment to the run"):
         return False
+    _start_budget(context)
     try:
         _drop_expired_pending(context)
     except Exception as ex:
