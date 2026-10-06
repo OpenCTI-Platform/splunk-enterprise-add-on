@@ -2,6 +2,7 @@ import datetime
 import functools
 import hashlib
 import ipaddress
+import json
 import re
 import uuid
 
@@ -301,7 +302,8 @@ def incident_event_key(event, explicit_key=None):
     if explicit_key:
         names = [name.strip() for name in explicit_key.split(",") if name.strip()]
         if any(name in event for name in names):
-            return "fields|" + "|".join(f"{name}={event.get(name, '')}" for name in names)
+            # JSON keeps values holding "|" or "=" from reading as other fields
+            return "fields|" + json.dumps([[name, str(event.get(name, ""))] for name in names])
         return "key|" + explicit_key
     return event_identity_key(event)
 
@@ -441,9 +443,10 @@ def event_identity_key(event):
         return "cd|{}|{}|{}".format(event.get("index", ""), event.get("splunk_server", ""), cd)
     raw = event.get("_raw")
     if raw:
-        # splunk_server is left out: replicated buckets are served by any peer
-        origin = "|".join(str(event.get(field) or "") for field in ("index", "host", "source", "sourcetype"))
-        return "raw|{}|{}".format(origin, raw)
+        # splunk_server is left out: replicated buckets are served by any peer.
+        # JSON keeps a separator inside a value from shifting the other fields.
+        origin = [str(event.get(field) or "") for field in ("index", "host", "source", "sourcetype")]
+        return "raw|" + json.dumps(origin + [str(raw)])
     return ""
 
 

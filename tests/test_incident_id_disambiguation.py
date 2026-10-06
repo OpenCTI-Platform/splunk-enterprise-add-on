@@ -84,9 +84,14 @@ class EventIdentityKeyTest(unittest.TestCase):
 
     def test_falls_back_to_raw(self):
         ev = {"_time": WHOLE_SECOND, "_raw": "hello"}
-        self.assertEqual(event_identity_key(ev), "raw|||||hello")
+        self.assertEqual(event_identity_key(ev), 'raw|["", "", "", "", "hello"]')
         ev.update({"index": "main", "host": "fw01", "source": "/var/log/fw.log", "sourcetype": "pan:traffic"})
-        self.assertEqual(event_identity_key(ev), "raw|main|fw01|/var/log/fw.log|pan:traffic|hello")
+        self.assertEqual(event_identity_key(ev), 'raw|["main", "fw01", "/var/log/fw.log", "pan:traffic", "hello"]')
+
+    def test_separators_inside_origin_values_never_merge_events(self):
+        a = {"_time": WHOLE_SECOND, "_raw": "hello", "host": "fw01|fw02", "source": ""}
+        b = {"_time": WHOLE_SECOND, "_raw": "hello", "host": "fw01", "source": "fw02|"}
+        self.assertNotEqual(event_identity_key(a), event_identity_key(b))
 
     def test_same_raw_text_from_two_hosts_is_two_events(self):
         a = _raw_event(1, host="fw01")

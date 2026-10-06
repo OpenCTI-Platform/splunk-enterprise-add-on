@@ -337,6 +337,11 @@ class IncidentKeyTest(unittest.TestCase):
         self.assertEqual(len(set(ids)), 2)
         self.assertEqual(set(ids), set(reordered), "ids do not depend on the row order")
 
+    def test_key_values_holding_separators_never_merge_rows(self):
+        a = self._id({"_time": "1727000000", "user": "a|src=b", "src": "c"}, key="user,src")
+        b = self._id({"_time": "1727000000", "user": "a", "src": "b|src=c"}, key="user,src")
+        self.assertNotEqual(a, b)
+
     def test_literal_key_is_used_as_is(self):
         a = self._id({"_time": "1727000000"}, key="notable-123")
         self.assertEqual(a, self._id({"_time": "1727000000", "user": "eve"}, key="notable-123"))
