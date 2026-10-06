@@ -31,11 +31,11 @@ def _usable(node):
 
 def find_indicator_by_id(client, indicator_id):
     """
-    :return: STIX id of the indicator, or None when not readable
+    :return: the indicator node (standard_id, revoked), or None when not readable
     """
     data = client.graphql_query(INDICATOR_BY_ID_QUERY, {"id": indicator_id})
     node = data.get("indicator")
-    return node.get("standard_id") if isinstance(node, dict) and node.get("standard_id") else None
+    return node if isinstance(node, dict) and node.get("standard_id") else None
 
 
 def find_indicator_in_kvstore(kv_collection, value, kind=None, main_type=None):
@@ -100,7 +100,9 @@ def resolve_sighted_indicator(context, sighting_of_type, value, kind):
         found = find_indicator_by_id(context.client, value)
         if found is None:
             raise ValueError(f"Indicator {value} not found in OpenCTI or not readable by the add-on account")
-        return {"id": found}
+        if not _usable(found):
+            raise ValueError(f"Indicator {value} is revoked in OpenCTI: revoked indicators are not sighted")
+        return {"id": found["standard_id"]}
     patterns, main_type = indicator_patterns(kind, value)
     case_insensitive = kind in CASE_INSENSITIVE_KINDS
     if case_insensitive:

@@ -198,6 +198,11 @@ class IndicatorResolutionTest(unittest.TestCase):
         self.assertEqual(program_actions.resolve_sighted_indicator(self._context(client), "indicator_id", INDICATOR_ID, None),
                          {"id": INDICATOR_ID})
 
+    def test_revoked_id_is_an_error(self):
+        client = FakeClient({"SplunkSightedIndicator": {"indicator": {"id": "i", "standard_id": INDICATOR_ID, "revoked": True}}})
+        with self.assertRaisesRegex(ValueError, "revoked"):
+            program_actions.resolve_sighted_indicator(self._context(client), "indicator_id", INDICATOR_ID, None)
+
     def test_unknown_id_is_an_error(self):
         client = FakeClient({"SplunkSightedIndicator": {"indicator": None}})
         with self.assertRaises(ValueError):

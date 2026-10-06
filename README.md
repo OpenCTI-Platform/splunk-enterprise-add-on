@@ -376,8 +376,9 @@ the alert creates a new one.
 "Raise incident based on sighting" and the sighting propagation only apply to them.
 - `Indicator ID`: pass the STIX id of an indicator imported by the add-on, for example
   `... | lookup opencti_indicators value AS dest OUTPUT id AS indicator_id | where isnotnull(indicator_id)` and
-  `Sighting of Value = $result.indicator_id$`. The sighting references this indicator directly.
-- `<type> Indicator`: pass a raw value. The add-on looks for the indicator in `opencti_indicators`, then in
+  `Sighting of Value = $result.indicator_id$`. The sighting references this indicator directly; a revoked
+  indicator is not sighted and the action fails with a message naming it.
+- `<type> Indicator`: pass a raw value. The add-on looks for a non-revoked indicator in `opencti_indicators`, then in
   OpenCTI by its exact STIX pattern, and otherwise creates the indicator from this single value (for
   example `[domain-name:value = 'example.com']`), with the id OpenCTI gives this pattern.
 - `<type> Observable` types are kept for existing alerts only (the default is now `Domain Indicator`).
