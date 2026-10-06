@@ -26,7 +26,16 @@ def report_hunt_evidence(context, event):
     try:
         targets, hunt_name = hunt_targets(context, hunt_run_id) if hunt_run_id else ([], None)
         platform = context.platform
-        platform_ref = platform.get("standard_id") if platform else None
+    except Exception as ex:
+        helper.log_error(
+            "Unable to report hunt evidence, "
+            f"an exception occurred while reading the hunt run {hunt_run_id} or the Security Platform in OpenCTI, "
+            f"exception: {str(ex)}"
+        )
+        return False
+    platform_ref = platform.get("standard_id") if platform else None
+
+    try:
         bundle, result_ids = convert_to_hunt_evidence(
             alert_params=params,
             event=event,

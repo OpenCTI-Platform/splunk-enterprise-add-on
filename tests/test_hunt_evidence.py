@@ -136,6 +136,20 @@ class ActionTest(unittest.TestCase):
         context = FakeAlertContext(helper, client=client, detector=FakeDetector((FEATURE_HUNTS,)), platform=PLATFORM)
         code = alert_common.run_alert(helper, "report_hunt_evidence", action.report_hunt_evidence, context_factory=lambda h: context)
         self.assertEqual(code, 2)
+        self.assertTrue(any("reading the hunt run run-x" in message for message in helper.errors()))
+
+    def test_hunt_lookup_failure_is_not_reported_as_a_conversion_error(self):
+        client = FakeClient({"SplunkHuntRun": graphql_error("timeout")})
+        helper = FakeAlertHelper(params={"hunt_run_id": "run-1", "tlp": "tlp_green"}, events=[EVENT])
+        context = FakeAlertContext(helper, client=client, detector=FakeDetector((FEATURE_HUNTS,)), platform=PLATFORM)
+        code = alert_common.run_alert(helper, "report_hunt_evidence", action.report_hunt_evidence, context_factory=lambda h: context)
+        self.assertEqual(code, 2)
+        errors = [message for message in helper.errors() if "Unable to report hunt evidence" in message]
+        self.assertEqual(len(errors), 1)
+        self.assertIn("reading the hunt run run-1", errors[0])
+        self.assertIn("timeout", errors[0])
+        self.assertNotIn("converting event to STIX", errors[0])
+        self.assertEqual(client.bundles, [])
 
     def test_link_failure_fails_the_result_and_parks_the_evidence(self):
         client = FakeClient({
