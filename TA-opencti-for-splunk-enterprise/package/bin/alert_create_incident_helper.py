@@ -60,7 +60,7 @@ def create_incident(context, event):
                          f"exception: {str(ex)}")
         return False
 
-    schedule_container_followups(context, incident_id, event)
+    schedule_container_followups(context, incident_id, event, container_name=params["name"])
     return True
 
 

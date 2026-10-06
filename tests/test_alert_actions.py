@@ -1,5 +1,7 @@
 """Tests for the incident alert actions: timeline milestones and their follow-ups (#18, #68)."""
 import json
+import os
+import re
 import unittest
 from unittest import mock
 
@@ -16,6 +18,7 @@ from opencti_features import FEATURE_TIMELINE
 PLATFORM = {"id": "platform-internal", "standard_id": "identity--5b1fb3f9-2d4e-5f2c-9c6a-1d0f1e2f3a4b", "name": "Splunk sh01"}
 INDICATOR_ID = "indicator--51b92778-cef0-4a90-b7ec-ebd620d01ac9"
 EVENT = {"_time": "1727000000", "_raw": "dns query evil.example", "_cd": "1:2", "host": "sh01"}
+TA = os.path.join(os.path.dirname(__file__), "..", "TA-opencti-for-splunk-enterprise")
 
 
 def _objects(bundle, stix_type):
@@ -73,6 +76,21 @@ class FollowupTest(unittest.TestCase):
         self.assertTrue(milestone["external_id"].startswith("splunk-alert:"), "no sid in the payload")
         self.assertNotIn("createdBy", milestone, "no Security Platform resolved")
         self.assertNotIn("element_id", milestone)
+
+    def test_milestone_log_line_feeds_the_timeline_dashboard_tab(self):
+        """The Timeline tab shows the incident and the alert by name, read from this log line with rex."""
+        helper = FakeAlertHelper(params={"name": 'Brute force on "vpn"', "tlp": "tlp_clear",
+                                         "observables_extraction": "disable", "timeline_milestone": "1"},
+                                 events=[EVENT], settings={"search_name": "Brute force detection"})
+        client = FakeClient({"SplunkTimelineMilestone": {"timelineEventAdd": {"id": "event-1"}}})
+        context = FakeAlertContext(helper, client=client, detector=FakeDetector((FEATURE_TIMELINE,)))
+        self.assertEqual(_run(alert_create_incident_helper.create_incident, helper, context), 0)
+        line = [m for level, m in context.logger.lines if level == "info" and m.startswith("Timeline milestone added on")][0]
+        with open(os.path.join(TA, "custom_dashboard.json"), encoding="utf-8") as handle:
+            query = json.load(handle)["dataSources"]["ds_tl_milestones"]["options"]["query"]
+        pattern = re.search(r'\| rex "((?:[^"\\]|\\.)*)"', query).group(1).replace('\\"', '"').replace("(?<", "(?P<")
+        fields = re.search(pattern, line).groupdict()
+        self.assertEqual(fields, {"container": "Brute force on 'vpn'", "alert": "Brute force detection"})
 
     def test_incident_response_schedules_the_milestone(self):
         helper = FakeAlertHelper(params={"name": "Brute force", "tlp": "tlp_clear", "observables_extraction": "disable",

@@ -79,21 +79,28 @@ def _platform_id(context):
     return (platform or {}).get("id")
 
 
+def _log_quoted(value):
+    """Double-quoted for the log line the Timeline dashboard tab extracts with rex."""
+    return '"' + " ".join(str(value or "").replace('"', "'").split()) + '"'
+
+
 def add_timeline_milestone(context, container_id, event_time=None, trigger_time=None, search_name=None,
-                           results_link=None, sid=None, element_id=None):
+                           results_link=None, sid=None, element_id=None, container_name=None):
     """
     :param context: alert_common.AlertContext
     :param search_name: alert that created the container (default: the running alert)
     :param results_link: its search results (default: those of the running alert)
     :param sid: Splunk search id of the triggered alert
     :param element_id: indicator the alert is about, when known
+    :param container_name: name of the Incident / Case-Incident (logged for the dashboard)
     :return: True when added, False when the platform has no timeline
     """
     if not context.detector.require(FEATURE_TIMELINE, "Timeline milestone"):
         return False
+    search_name = context.search_name if search_name is None else search_name
     milestone = build_milestone_input(
         container_id,
-        context.search_name if search_name is None else search_name,
+        search_name,
         trigger_time or datetime.now(timezone.utc),
         event_time,
         context.results_link if results_link is None else results_link,
@@ -114,7 +121,10 @@ def add_timeline_milestone(context, container_id, event_time=None, trigger_time=
         context.client.graphql_query(TIMELINE_ADD_MUTATION, {
             "input": {key: value for key, value in milestone.items() if key not in unknown},
         })
-    context.logger.info(f"Timeline milestone added on {container_id}")
+    context.logger.info(
+        f"Timeline milestone added on {container_id} to {_log_quoted(container_name)} "
+        f"for the alert {_log_quoted(search_name)}"
+    )
     return True
 # endregion
 
@@ -126,7 +136,7 @@ def _event_time(event):
         return None
 
 
-def schedule_container_followups(context, container_id, event):
+def schedule_container_followups(context, container_id, event, container_name=None):
     """
     Defer the timeline milestone of a container created by an alert until
     OpenCTI has ingested it (alert_common).
@@ -134,6 +144,7 @@ def schedule_container_followups(context, container_id, event):
     :param context: alert_common.AlertContext
     :param container_id: STIX id of the Incident / Case-Incident
     :param event: the Splunk result
+    :param container_name: name of the Incident / Case-Incident
     """
     if context.flag("timeline_milestone", True) and context.detector.require(FEATURE_TIMELINE, "Timeline milestone"):
         indicator_id = str(event.get("indicator_id") or "").strip()
@@ -144,6 +155,7 @@ def schedule_container_followups(context, container_id, event):
             "trigger_time": to_iso(datetime.now(timezone.utc)),
             "event_time": to_iso(_event_time(event)),
             "element_id": indicator_id if INDICATOR_ID_RE.match(indicator_id) else None,
+            "container_name": container_name,
         })
 
 
@@ -166,5 +178,6 @@ def run_followup(context, kind, container_id, params):
             params.get("results_link"),
             params.get("sid"),
             params.get("element_id"),
+            params.get("container_name"),
         )
     raise ValueError(f"Unknown follow-up {kind}")

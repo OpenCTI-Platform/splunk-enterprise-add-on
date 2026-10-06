@@ -456,4 +456,5 @@ capabilities are skipped with one log line such as
 
 ### Monitoring
 
-The Monitoring dashboard has a **Timeline** tab: the timeline milestones added by the incident alert actions.
+The Monitoring dashboard has a **Timeline** tab: the timeline milestones added by the incident alert actions,
+with their time, the incident or case they were added to and the alert that added them.
