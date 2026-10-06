@@ -489,8 +489,9 @@ matrix then knows which techniques Splunk has telemetry for.
 The lookup (`lookups/opencti_cim_data_components.csv`) is editable: one row per `source`
 (`datamodel:<Model>[.<Dataset>]` or `sourcetype:<sourcetype>`, wildcards allowed) and `data_component`
 (the MITRE Data Component name, as imported in OpenCTI). Data components unknown to OpenCTI are reported
-with the status `unmatched_data_component`, and a failed declaration with the status `error`; both are kept
-in `opencti_provides` with their message, so the dashboard shows them. A data component that holds provides
+with the status `unmatched_data_component`, and a failed declaration with the status `error`, like every
+data component of a run whose Data Component lookup in OpenCTI failed; they are kept in `opencti_provides`
+with their message, so the dashboard shows them. A data component that holds provides
 relationships in OpenCTI (declared by an earlier run, or partly by this one before the failure) stays
 `declared` with all of them, the failure in its message, so pruning can still delete them.
 `| openctiprovides prune=true` also deletes the provides relationships the add-on declared earlier for data

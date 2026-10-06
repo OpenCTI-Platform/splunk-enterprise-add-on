@@ -3,7 +3,7 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from program_fakes import FakeCache, FakeClient, FakeDetector, FakeKV, FakeLogger, graphql_error
+from program_fakes import FakeCache, FakeClient, FakeDetector, FakeKV, FakeLogger, graphql_error, transport_error
 
 import openctiprovides
 from addon_config import AddonSettings
@@ -63,6 +63,29 @@ class ProvidesTest(unittest.TestCase):
         self.assertEqual((earlier["status"], earlier["relationship_ids"]), (STATUS_DECLARED, "rel-2"),
                          "an earlier declaration stays prunable")
         self.assertIn("denied", earlier["message"])
+
+    def test_failed_data_component_lookup_is_kept_for_monitoring_and_blocks_pruning(self):
+        for answer in (transport_error("timeout"), {}):
+            with self.subTest(answer=answer):
+                client = FakeClient({"SplunkDataComponents": answer})
+                declared = state_key("platform-internal", "network traffic flow")
+                state = FakeKV([
+                    {"_key": declared, "platform_id": "platform-internal", "data_component": "Network Traffic Flow",
+                     "relationship_ids": "rel-2", "status": STATUS_DECLARED, "message": ""},
+                    {"_key": "gone", "platform_id": "platform-internal", "data_component": "Module Load",
+                     "relationship_ids": "rel-old", "status": STATUS_DECLARED},
+                ])
+                rows = ProvidesPublisher(client, FakeDetector((FEATURE_PROVIDES,)), PLATFORM, state,
+                                         logger=FakeLogger()).publish(self.INVENTORY[:2], prune=True)
+                self.assertEqual({row["status"] for row in rows}, {STATUS_ERROR}, "never reported as unknown to OpenCTI")
+                self.assertTrue(all(row["message"].startswith("Data Component lookup failed") for row in rows))
+                self.assertEqual(state.records[state_key("platform-internal", "process creation")]["status"], STATUS_ERROR)
+                earlier = state.records[declared]
+                self.assertEqual((earlier["status"], earlier["relationship_ids"]), (STATUS_DECLARED, "rel-2"))
+                self.assertIn("Data Component lookup failed", earlier["message"])
+                self.assertEqual(client.calls_of("SplunkProvides"), [])
+                self.assertEqual(client.calls_of("SplunkProvidesDelete"), [], "nothing is pruned after a failed lookup")
+                self.assertEqual(state.records["gone"]["status"], STATUS_DECLARED)
 
     def test_relationships_created_before_a_failure_stay_prunable(self):
         def two_components(variables):

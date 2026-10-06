@@ -128,6 +128,7 @@ class ProvidesPublisher:
     def resolve_data_components(self, names):
         """
         :return: dict lower(name) -> list of Data Component ids
+        :raise OpenCTIGraphQLError: OpenCTI did not answer the lookup
         """
         resolved = {}
         names = sorted(set(names))
@@ -141,7 +142,11 @@ class ProvidesPublisher:
                     "filterGroups": [],
                 },
             })
-            for edge in ((data.get("dataComponents") or {}).get("edges")) or []:
+            connection = data.get("dataComponents")
+            if connection is None:
+                # Not "no Data Component of these names": OpenCTI gave no answer to the lookup
+                raise OpenCTIGraphQLError("OpenCTI returned no dataComponents to the Data Component lookup")
+            for edge in connection.get("edges") or []:
                 node = (edge or {}).get("node") or {}
                 if node.get("name") and node.get("id"):
                     resolved.setdefault(node["name"].lower(), []).append(node["id"])
@@ -161,7 +166,12 @@ class ProvidesPublisher:
         if not self.detector.require(FEATURE_PROVIDES, "Telemetry provides declaration"):
             return [{"data_component": "", "status": "skipped", "message": "The OpenCTI platform has no provides relationship"}]
         inventory = aggregate_inventory(records)
-        resolved = self.resolve_data_components([entry["name"] for entry in inventory.values()])
+        unresolved = ""
+        try:
+            resolved = self.resolve_data_components([entry["name"] for entry in inventory.values()])
+        except OpenCTIGraphQLError as ex:
+            self.logger.error(f"Data Components not resolved in OpenCTI: {ex}")
+            resolved, unresolved = {}, f"Data Component lookup failed: {str(ex)[:1000]}"
         rows, states, failures = [], [], []
         for key, entry in sorted(inventory.items()):
             row = {
@@ -169,6 +179,12 @@ class ProvidesPublisher:
                 "sources": entry["sources"],
                 "event_count": entry["event_count"],
             }
+            if unresolved:
+                # Stored as a failure, so the inventory shows it and nothing is pruned
+                row.update({"status": STATUS_ERROR, "message": unresolved})
+                rows.append(row)
+                failures.append((key, entry, row, [], []))
+                continue
             ids = resolved.get(key)
             if not ids:
                 row.update({"status": STATUS_UNMATCHED, "message": "no Data Component with this name in OpenCTI"})
