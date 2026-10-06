@@ -469,8 +469,10 @@ left to the next alert run. The objects still not ingested are attached by the n
 evidence reports of the same run, the least recently tried first (within a day; evidence OpenCTI never
 ingests is dropped after a day by the next evidence report of any run); that deferral is not a failure.
 Attaching an object again is harmless (OpenCTI keeps one link per object). A link OpenCTI rejects
-fails the result (the alert action reports it) and is retried by the next evidence report of the run,
-as is evidence that cannot be deferred because the KV Store is unavailable.
+fails the result (the alert action reports it) and is retried by the next evidence report of the run.
+Both retries need the add-on state collection in the KV Store: when it is unavailable, evidence that is
+not ingested in time, or whose link OpenCTI rejects, fails the result (the alert action reports it) and
+is not retried.
 
 Example hunt search, run with the id of the hunt run OpenCTI created:
 
