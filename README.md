@@ -16,6 +16,11 @@ It enables analysts to collect, normalize, and enrich OpenCTI indicators and obs
 - Modular inputs for ingesting OpenCTI data via the OpenCTI Stream API.
 - Ability to trigger OpenCTI actions in response of Alerts and to investigate them directly in OpenCTI
 - Support for multiple object types (Indicators, Observables, Relationships, Sightings).
+- Dynamic timeline: the incident alert actions add a milestone (alert name, trigger time, link to the
+  results) to the timeline of the incident or case they create, authored by a named Splunk Security
+  Platform. See [OpenCTI program compatibility](#opencti-program-compatibility).
+- Every program feature is detected from the OpenCTI schema: on OpenCTI releases without it the add-on
+  behaves as before and logs why the feature is skipped.
 
 ---
 
@@ -71,6 +76,28 @@ If a proxy configuration is required to connect to OpenCTI platform, you can con
 | `Proxy Port`     | The proxy port                                                              |
 | `Proxy Username` | An optional proxy username                                                  |
 | `Proxy Password` | An optional proxy password                                                  |
+
+### Security Platform settings
+
+The add-on identifies this Splunk deployment in OpenCTI as a **Security Platform** of type SIEM. The
+timeline milestones of the add-on are authored by it. Configure it on the "Security Platform" tab of the
+Configuration page:
+
+| Parameter                                | Description                                                                                                                                  | Default            |
+|------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------|--------------------|
+| `Security Platform ID`                   | Id (internal or STIX) of an existing OpenCTI Security Platform. Takes precedence over the name                                               | empty              |
+| `Create the Security Platform`           | When no id is set, find the Security Platform by name, or create it (type SIEM)                                                               | enabled            |
+| `Security Platform name`                 | Name used to find or create it                                                                                                               | `Splunk <server>`  |
+| `Feature detection cache (minutes)`      | How long the capabilities read from the OpenCTI GraphQL schema are cached                                                                     | 60                 |
+
+The resolved Security Platform is cached in the KV Store (`opencti_addon_state`) and shared by every
+search head of a cluster, so members with different server names keep one Security Platform. Without a
+configured name, the first default name recorded in that collection is used by every member, so members
+resolving it for the first time at the same moment create one platform, not one each.
+
+**OpenCTI account permissions.** The account of the add-on needs the capabilities of a connector service
+account (bundle push and connector registration) plus "Knowledge: create / update" for the timeline
+milestones and the Security Platform creation.
 
 ## OpenCTI Data Inputs Configuration
 
@@ -317,6 +344,16 @@ You can create an incident or an incident response case in OpenCTI from a custom
 | `Labels`                 | Labels (separated by a comma) to be applied           | Incident & Incident response case | 
 | `TLP`                    | Markings to be applied                                | Incident & Incident response case | 
 | `Observables extraction` | Method for extracting observables                     | Incident & Incident response case | 
+| `Add a timeline milestone` | Adds the alert (name, trigger time, link to the Splunk results) as a milestone of the timeline of the created object (OpenCTI with incident and case timelines) | Incident & Incident response case |
+
+The timeline milestone (lane `detection`, so the alert drives the container's first detection; kind `milestone`;
+external id `splunk:<alert sid>`, one per triggered alert and container; authored by the Splunk Security Platform;
+pointing to the indicator when the result carries an `indicator_id`) is added once OpenCTI has ingested the
+created object (the bundle is processed asynchronously by the OpenCTI workers, the action waits up to 60
+seconds). A follow-up whose object is still not ingested, or whose call failed, is parked in the `opencti_addon_state` KV Store
+collection and retried by the next runs of any OpenCTI alert action, with the alert name and results link of
+the run that deferred it; the milestone is idempotent. A parked follow-up is dropped (logged as an error) after 24 hours
+without ingestion or after 5 failed calls.
 
 7. To create a sighting, complete the form with the following settings:
 
@@ -395,3 +432,27 @@ Logs related to OpenCTI customer alerts are available in the following two log f
 ```$SPLUNK_HOME/var/log/splunk/opencti_create_incident_modalert.log```
 
 ```$SPLUNK_HOME/var/log/splunk/opencti_create_incident_response_modalert.log```
+
+---
+
+## OpenCTI program compatibility
+
+The add-on feeds the dynamic timeline of OpenCTI incidents and cases: the alert that created an incident or
+a case is a detection milestone of its timeline.
+
+### Compatibility matrix
+
+The add-on reads the OpenCTI GraphQL schema once per platform (cached in the KV Store, see
+`Feature detection cache`) and enables each capability only where the platform provides it. Missing
+capabilities are skipped with one log line such as
+`Timeline milestone: skipped, the OpenCTI platform (<version>) does not provide the incident and case timeline (timelineEventAdd)`.
+
+| Add-on capability                                            | OpenCTI capability (detected)                                    | OpenCTI releases without it          |
+|--------------------------------------------------------------|------------------------------------------------------------------|--------------------------------------|
+| Ingestion, enrichment, Create Incident / Case / Sighting     | live streams, `stixBundlePush`                                   | always available                     |
+| Splunk Security Platform (configured or auto-created)        | `securityPlatformAdd`, `securityPlatforms`                       | milestones added without an author   |
+| Timeline milestone                                           | `timelineEventAdd`                                               | skipped                              |
+
+### Monitoring
+
+The Monitoring dashboard has a **Timeline** tab: the timeline milestones added by the incident alert actions.

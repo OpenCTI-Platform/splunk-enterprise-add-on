@@ -276,11 +276,12 @@ def _convert_observables_to_stix(observables, marking, creator):
     return stix_observables
 
 
-def convert_to_incident_response(alert_params, event):
+def convert_to_incident_response(alert_params, event, return_id=False):
     """
     :param alert_params:
     :param event:
-    :return:
+    :param return_id: also return the Case-Incident STIX id
+    :return: serialized bundle, or (bundle, case id) when return_id
     """
     bundle_objects = []
 
@@ -344,14 +345,17 @@ def convert_to_incident_response(alert_params, event):
     bundle_objects.append(stix_case_incident)
 
     bundle = stix2.Bundle(objects=bundle_objects, allow_custom=True)
+    if return_id:
+        return bundle.serialize(), stix_case_incident.id
     return bundle.serialize()
 
 
-def convert_to_incident(alert_params, event):
+def convert_to_incident(alert_params, event, return_id=False):
     """
     :param alert_params:
     :param event:
-    :return:
+    :param return_id: also return the Incident STIX id
+    :return: serialized bundle, or (bundle, incident id) when return_id
     """
     bundle_objects = []
 
@@ -429,6 +433,8 @@ def convert_to_incident(alert_params, event):
         bundle_objects.append(stix_relation_account)
 
     bundle = stix2.Bundle(objects=bundle_objects, allow_custom=True)
+    if return_id:
+        return bundle.serialize(), stix_incident.id
     return bundle.serialize()
 
 
