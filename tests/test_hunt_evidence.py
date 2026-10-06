@@ -55,6 +55,26 @@ class ConverterTest(unittest.TestCase):
         self.assertEqual(first[0], later[0])
         self.assertNotEqual(first[1], later[1], "a sighting of another window is another sighting")
 
+    def test_documented_dns_hunt_reports_the_queried_domain(self):
+        """The README example: tstats over Network_Resolution.DNS renamed to query and src."""
+        event = {"_time": "1727000000", "query": "beacon.example-c2.top.", "src": "10.1.2.3", "count": "4"}
+        bundle, _ = convert_to_hunt_evidence(PARAMS, event, "run-1", PLATFORM["standard_id"], [TECHNIQUE])
+        self.assertEqual([d["value"] for d in _objects(bundle, "domain-name")], ["beacon.example-c2.top"])
+        self.assertEqual([i["value"] for i in _objects(bundle, "ipv4-addr")], ["10.1.2.3"])
+
+    def test_query_that_is_not_a_host_name_is_not_a_domain(self):
+        for query in ("select * from users", "wpad", "10.9.8.7"):
+            with self.subTest(query=query):
+                bundle, _ = convert_to_hunt_evidence(PARAMS, dict(EVENT, query=query), "run-1", PLATFORM["standard_id"], [TECHNIQUE])
+                self.assertEqual(_objects(bundle, "domain-name"), [])
+        bundle, _ = convert_to_hunt_evidence(PARAMS, dict(EVENT, query="10.9.8.7"), "run-1", PLATFORM["standard_id"], [TECHNIQUE])
+        self.assertIn("10.9.8.7", [i["value"] for i in _objects(bundle, "ipv4-addr")])
+
+    def test_user_agent_field_gives_its_own_value(self):
+        event = {"_time": "1727000000", "user_agent": "curl/8.4.0", "count": "1"}
+        bundle, _ = convert_to_hunt_evidence(PARAMS, event, "run-1", PLATFORM["standard_id"], [TECHNIQUE])
+        self.assertEqual([u["value"] for u in _objects(bundle, "user-agent")], ["curl/8.4.0"])
+
     def test_without_platform_the_author_is_where_sighted(self):
         bundle, _ = convert_to_hunt_evidence(PARAMS, EVENT, "run-1", None, [TECHNIQUE])
         author = _objects(bundle, "identity")[0]["id"]

@@ -380,6 +380,7 @@ The “CIM model” method is based on the definition of CIM model fields. With 
 | `src_ip`          | IPv4 or IPv6 observable             |
 | `file_hash`       | File observable                     |
 | `file_name`       | File observable                     |
+| `query`           | Domain, IPv4 or IPv6 observable (the name or address of a `Network_Resolution` DNS lookup; a value that is not a host name is skipped) |
 
 
 #### Field mapping

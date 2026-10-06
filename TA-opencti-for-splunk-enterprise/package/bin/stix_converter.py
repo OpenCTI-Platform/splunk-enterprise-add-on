@@ -1,3 +1,5 @@
+import re
+
 import stix2
 from datetime import datetime, timezone
 
@@ -7,6 +9,9 @@ from utils import generate_incident_id, generate_identity_id, generate_relation_
 from utils import generate_observed_data_id
 
 FAKE_INDICATOR_ID = "indicator--51b92778-cef0-4a90-b7ec-ebd620d01ac8"
+
+# "query" is a generic field name outside the CIM: only a host name makes a Domain observable
+DNS_NAME = re.compile(r"^(?=.{1,253}$)([A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z0-9-]{2,63}$")
 
 # TLP:AMBER+STRICT is not a stix2 built-in; the ID is OpenCTI's static one
 # (pycti MarkingDefinition.generate_id("TLP", "TLP:AMBER+STRICT"))
@@ -54,9 +59,18 @@ def _extract_observables_from_cim_model(event, marking, creator):
     if "user_name" in event and event.get("user_name") != "unknown" and event.get("user_name") != "":
         observables.append({"type": "user_account", "value": event.get("user_name")})
     if "user_agent" in event and event.get("user_agent") != "":
-        observables.append({"type": "user_agent", "value": event.get("http_user_agent")})
+        observables.append({"type": "user_agent", "value": event.get("user_agent")})
     if "http_user_agent" in event and event.get("http_user_agent") != "":
         observables.append({"type": "user_agent", "value": event.get("http_user_agent")})
+    if "query" in event and event.get("query") != "":
+        # Network_Resolution.DNS: the name or address looked up
+        query = str(event.get("query")).strip().rstrip(".")
+        if is_ipv4(query):
+            observables.append({"type": "ipv4", "value": query})
+        elif is_ipv6(query):
+            observables.append({"type": "ipv6", "value": query})
+        elif DNS_NAME.match(query):
+            observables.append({"type": "domain", "value": query})
     if "dest" in event and event.get("dest") != "":
         if is_ipv4(event.get("dest")):
             observables.append({"type": "ipv4", "value": event.get("dest")})
