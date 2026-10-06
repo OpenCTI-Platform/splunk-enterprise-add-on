@@ -510,7 +510,9 @@ relationship and stable hits sighting Indicator -> Security Platform). On platfo
 on the Security Platform is created instead. Each indicator is reported once per window; replays are
 ignored, by the add-on and by OpenCTI. Each data model matches its values against the indicators of the
 same kind only (IP addresses, domains and hostnames, URLs, file hashes, email addresses: a file name
-indicator never hits on a DNS query), and revoked or expired indicators never hit.
+indicator never hits on a DNS query), and revoked or expired indicators never hit. A URL hits only the
+indicator of that exact URL: the scheme and host match in any case, the path, query and fragment exactly
+(`/Payload` never hits an indicator for `/payload`).
 
 Configure the scope with the `opencti_hits_scope` macro (tstats `where` clause, for example
 `index=proxy OR index=firewall`) and set `opencti_hits_summariesonly` to `summariesonly=true` when the data
