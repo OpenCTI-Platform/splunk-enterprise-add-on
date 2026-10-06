@@ -360,6 +360,24 @@ class ActionTest(unittest.TestCase):
         self.assertEqual([call["input"]["result_ids"] for call in context.client.calls_of("SplunkHuntRunEvidence")],
                          [["sighting--2"]])
 
+    def test_entry_attached_by_another_report_once_released_is_not_written_back(self):
+        context = self._evidence_context({"sighting--2"})
+        key = "hunt_evidence_pending|run-1|a"
+        context.cache.set(key, {"result_ids": ["observed-data--1"], "hits_count": 1, "source": "splunk-alert-action",
+                                "parked_at": program_actions.utc_now_iso()})
+        release = context.cache.release
+
+        def release_then_attach_elsewhere(released):
+            release(released)
+            if released == f"{key}|claim":
+                # Another report claims the entry as soon as it is free, finds it ingested and attaches it
+                release(key)
+
+        context.cache.release = release_then_attach_elsewhere
+        with mock.patch.object(program_actions.time, "sleep"):
+            program_actions.report_hunt_evidence(context, "run-1", ["sighting--2"], 1)
+        self.assertIsNone(context.cache.get(key), "evidence attached by another report is never attached again")
+
     def test_malformed_or_failing_deferred_evidence_never_blocks_the_others(self):
         context = self._evidence_context({"observed-data--1", "observed-data--2", "sighting--3"})
         parked_at = program_actions.utc_now_iso()

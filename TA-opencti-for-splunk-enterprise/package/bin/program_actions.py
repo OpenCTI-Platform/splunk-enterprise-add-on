@@ -178,24 +178,21 @@ def _drop_expired_pending(context):
             _drop(context, key, item, run_and_entry[0])
 
 
+def _move_behind(context, key, item, hunt_run_id):
+    """
+    items() returns the least recently written entries first: an entry still
+    waiting goes behind the others, so a run with more parked reports than one
+    listing holds gets all of them attached in turn.
+    """
+    try:
+        context.cache.touch([(key, item)])
+    except Exception as ex:
+        context.logger.warning(f"Deferred hunt evidence {key} of run {hunt_run_id} not moved behind the rest: {ex}")
+
+
 def _attach_pending(context, hunt_run_id):
     """Attach the evidence of earlier reports of this run that is now ingested."""
     prefix = _pending_prefix(hunt_run_id)
-    waiting = []
-    try:
-        _attach_listed(context, hunt_run_id, prefix, waiting)
-    finally:
-        # items() returns the least recently written entries first: the ones still
-        # waiting go behind the others, so a run with more parked reports than one
-        # listing holds gets all of them attached in turn.
-        if waiting:
-            try:
-                context.cache.touch(waiting)
-            except Exception as ex:
-                context.logger.warning(f"Deferred hunt evidence of run {hunt_run_id} not moved behind the rest: {ex}")
-
-
-def _attach_listed(context, hunt_run_id, prefix, waiting):
     for key, item in context.cache.items(prefix):
         if _budget_left(context) <= 0:
             # The entries not reached are the least recently written: the next run takes them first.
@@ -230,7 +227,9 @@ def _attach_listed(context, hunt_run_id, prefix, waiting):
             elif present:
                 context.cache.set(key, dict(item, result_ids=remaining, hits_count=0))
             else:
-                waiting.append((key, item))
+                # Under the claim only: once it is released another report may attach and
+                # release the entry, and a later rewrite would bring it back.
+                _move_behind(context, key, item, hunt_run_id)
         except Exception as ex:
             # One entry failing never keeps the others of the run waiting
             context.logger.warning(f"Deferred hunt evidence {key} of run {hunt_run_id} not attached yet: {ex}")
