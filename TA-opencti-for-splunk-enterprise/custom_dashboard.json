@@ -1,6 +1,6 @@
 {
   "title": "OpenCTI",
-  "description": "A summary of indicators ingested from OpenCTI",
+  "description": "Indicators ingested from OpenCTI, and what Splunk proves back: deployments, hits and IOC validation",
   "inputs": {
     "input_global_trp": {
       "options": {
@@ -231,6 +231,132 @@
       },
       "title": "Indicator types",
       "type": "splunk.pie"
+    },
+    "viz_dep_status": {
+      "dataSources": {
+        "primary": "ds_dep_status"
+      },
+      "options": {
+        "seriesColors": [
+          "#009CEB",
+          "#00CDAF",
+          "#DD9900",
+          "#FF677B",
+          "#CB2196",
+          "#813193",
+          "#0051B5",
+          "#008C80",
+          "#99B100"
+        ]
+      },
+      "showLastUpdated": false,
+      "showProgressBar": false,
+      "title": "Deployments by status",
+      "type": "splunk.pie"
+    },
+    "viz_dep_failures_count": {
+      "dataSources": {
+        "primary": "ds_dep_failures_count"
+      },
+      "options": {},
+      "showLastUpdated": false,
+      "showProgressBar": false,
+      "title": "Failed deployments",
+      "type": "splunk.singlevalue"
+    },
+    "viz_dep_last_sync": {
+      "dataSources": {
+        "primary": "ds_dep_last_sync"
+      },
+      "options": {},
+      "showLastUpdated": false,
+      "showProgressBar": false,
+      "title": "Last sync",
+      "type": "splunk.singlevalue"
+    },
+    "viz_val_outcomes": {
+      "dataSources": {
+        "primary": "ds_val_outcomes"
+      },
+      "options": {
+        "seriesColors": [
+          "#009CEB",
+          "#00CDAF",
+          "#DD9900",
+          "#FF677B",
+          "#CB2196",
+          "#813193",
+          "#0051B5",
+          "#008C80",
+          "#99B100"
+        ]
+      },
+      "showLastUpdated": false,
+      "showProgressBar": false,
+      "title": "Validation statuses",
+      "type": "splunk.pie"
+    },
+    "viz_dep_failures": {
+      "dataSources": {
+        "primary": "ds_dep_failures"
+      },
+      "options": {},
+      "showLastUpdated": false,
+      "showProgressBar": false,
+      "title": "Failed deployments (latest)",
+      "type": "splunk.table"
+    },
+    "viz_hits_top": {
+      "dataSources": {
+        "primary": "ds_hits_top"
+      },
+      "options": {},
+      "showLastUpdated": false,
+      "showProgressBar": false,
+      "title": "Most hit indicators",
+      "type": "splunk.table"
+    },
+    "viz_hits_daily": {
+      "dataSources": {
+        "primary": "ds_hits_daily"
+      },
+      "options": {
+        "seriesColors": [
+          "#009CEB",
+          "#00CDAF",
+          "#DD9900",
+          "#FF677B",
+          "#CB2196",
+          "#813193",
+          "#0051B5",
+          "#008C80",
+          "#99B100"
+        ]
+      },
+      "showLastUpdated": false,
+      "showProgressBar": false,
+      "title": "Indicators hit per day (last hit)",
+      "type": "splunk.column"
+    },
+    "viz_val_latest": {
+      "dataSources": {
+        "primary": "ds_val_latest"
+      },
+      "options": {},
+      "showLastUpdated": false,
+      "showProgressBar": false,
+      "title": "Latest validations",
+      "type": "splunk.table"
+    },
+    "viz_writeback_errors": {
+      "dataSources": {
+        "primary": "ds_writeback_errors"
+      },
+      "options": {},
+      "showLastUpdated": false,
+      "showProgressBar": false,
+      "title": "Write-back errors and warnings",
+      "type": "splunk.table"
     }
   },
   "dataSources": {
@@ -330,6 +456,77 @@
       "options": {
         "query": "| inputlookup opencti_indicators | stats by revoked",
         "queryParameters": {}
+      },
+      "type": "ds.search"
+    },
+    "ds_dep_status": {
+      "name": "Deployments by status",
+      "options": {
+        "query": "| inputlookup opencti_deployments | stats count by status | rename status AS deployment_status",
+        "queryParameters": {}
+      },
+      "type": "ds.search"
+    },
+    "ds_dep_failures_count": {
+      "name": "Failed deployments",
+      "options": {
+        "query": "| inputlookup opencti_deployments | where result=\"error\" OR status=\"failed\" | stats count",
+        "queryParameters": {}
+      },
+      "type": "ds.search"
+    },
+    "ds_dep_last_sync": {
+      "name": "Last sync",
+      "options": {
+        "query": "| inputlookup opencti_deployments | eval t=coalesce(strptime(reported_at, \"%Y-%m-%dT%H:%M:%S.%3NZ\"), strptime(reported_at, \"%Y-%m-%dT%H:%M:%SZ\")) | stats max(t) AS last | eval last_sync=strftime(last, \"%Y-%m-%d %H:%M:%S UTC\") | fields last_sync",
+        "queryParameters": {}
+      },
+      "type": "ds.search"
+    },
+    "ds_val_outcomes": {
+      "name": "Validation statuses",
+      "options": {
+        "query": "| inputlookup opencti_validation_results | stats count by outcome | rename outcome AS validation_status",
+        "queryParameters": {}
+      },
+      "type": "ds.search"
+    },
+    "ds_dep_failures": {
+      "name": "Failed deployments (latest)",
+      "options": {
+        "query": "| inputlookup opencti_deployments | where result=\"error\" OR status=\"failed\" | lookup opencti_indicators id AS indicator_id OUTPUT value type | sort - reported_at | head 100 | eval value = coalesce(value, \"(indicator not in Splunk)\"), status = case(status==\"deployed\", \"Deployed\", status==\"removed\", \"Removed\", status==\"failed\", \"Failed\", status==\"expired\", \"Expired\", true(), status) | table reported_at value type status error | rename reported_at AS \"Reported at\", value AS \"Value\", type AS \"Type\", status AS \"Status\", error AS \"Error\"",
+        "queryParameters": {}
+      },
+      "type": "ds.search"
+    },
+    "ds_hits_top": {
+      "name": "Most hit indicators",
+      "options": {
+        "query": "| inputlookup opencti_indicator_hits | sort - hit_count | head 20 | eval first_hit = replace(first_hit, \"\\.\\d+Z$\", \"Z\"), last_hit = replace(last_hit, \"\\.\\d+Z$\", \"Z\"), last_status = case(last_status==\"reported\", \"Reported\", last_status==\"reported_as_sighting\", \"Reported as a sighting\", true(), last_status) | table value type hit_count first_hit last_hit last_status | rename value AS \"Value\", type AS \"Type\", hit_count AS \"Hits\", first_hit AS \"First hit\", last_hit AS \"Last hit\", last_status AS \"Last status\"",
+        "queryParameters": {}
+      },
+      "type": "ds.search"
+    },
+    "ds_hits_daily": {
+      "name": "Indicators hit per day (last hit)",
+      "options": {
+        "query": "| inputlookup opencti_indicator_hits | eval _time=coalesce(strptime(last_hit, \"%Y-%m-%dT%H:%M:%S.%3NZ\"), strptime(last_hit, \"%Y-%m-%dT%H:%M:%SZ\")) | where _time >= relative_time(now(), \"-30d@d\") | timechart span=1d count AS indicators_hit",
+        "queryParameters": {}
+      },
+      "type": "ds.search"
+    },
+    "ds_val_latest": {
+      "name": "Latest validations",
+      "options": {
+        "query": "| inputlookup opencti_validation_results | sort - decided_at | head 100 | eval test_kind = case(test_kind==\"dns_resolution\", \"DNS resolution\", test_kind==\"http_head\", \"HTTP HEAD through the egress proxy\", test_kind==\"network_traffic\", \"Network connection (safe mode)\", test_kind==\"file_drop\", \"Benign file surrogate\", test_kind==\"log_injection\", \"Log injection\", true(), replace(test_kind, \"_\", \" \")), first_matching_hit = replace(first_matching_hit, \"\\.\\d+Z$\", \"Z\"), outcome = case(outcome==\"detected\", \"Detected\", outcome==\"missed\", \"Missed\", outcome==\"requested\", \"Waiting\", true(), outcome), channel = case(channel==\"iocValidationReportResults\", \"Validation results\", channel==\"bundle\", \"Sighting bundle\", isnull(channel) OR channel==\"\", \"Not reported\", true(), channel) | table decided_at request_name value test_kind outcome first_matching_hit channel | rename decided_at AS \"Decided at\", request_name AS \"Request\", value AS \"Value\", test_kind AS \"Test\", outcome AS \"Outcome\", first_matching_hit AS \"First matching hit\", channel AS \"Channel\"",
+        "queryParameters": {}
+      },
+      "type": "ds.search"
+    },
+    "ds_writeback_errors": {
+      "name": "Write-back errors and warnings",
+      "options": {
+        "query": "index=_internal sourcetype=\"taopenctiforsplunkenterprise:log\" (\"Deployment write-back\" OR \"Hit report\" OR \"IOC validation\" OR \"Security Platform\") (ERROR OR WARNING) | head 100 | table _time source _raw"
       },
       "type": "ds.search"
     }
@@ -438,14 +635,118 @@
           }
         ],
         "type": "absolute"
+      },
+      "layout_assurance": {
+        "options": {
+          "display": "fit-to-width",
+          "height": 1240,
+          "width": 1440
+        },
+        "structure": [
+          {
+            "item": "viz_dep_status",
+            "position": {
+              "h": 300,
+              "w": 470,
+              "x": 10,
+              "y": 0
+            },
+            "type": "block"
+          },
+          {
+            "item": "viz_dep_failures_count",
+            "position": {
+              "h": 145,
+              "w": 300,
+              "x": 490,
+              "y": 0
+            },
+            "type": "block"
+          },
+          {
+            "item": "viz_dep_last_sync",
+            "position": {
+              "h": 145,
+              "w": 300,
+              "x": 490,
+              "y": 155
+            },
+            "type": "block"
+          },
+          {
+            "item": "viz_val_outcomes",
+            "position": {
+              "h": 300,
+              "w": 630,
+              "x": 800,
+              "y": 0
+            },
+            "type": "block"
+          },
+          {
+            "item": "viz_dep_failures",
+            "position": {
+              "h": 300,
+              "w": 710,
+              "x": 10,
+              "y": 310
+            },
+            "type": "block"
+          },
+          {
+            "item": "viz_hits_top",
+            "position": {
+              "h": 300,
+              "w": 700,
+              "x": 730,
+              "y": 310
+            },
+            "type": "block"
+          },
+          {
+            "item": "viz_hits_daily",
+            "position": {
+              "h": 300,
+              "w": 710,
+              "x": 10,
+              "y": 620
+            },
+            "type": "block"
+          },
+          {
+            "item": "viz_val_latest",
+            "position": {
+              "h": 300,
+              "w": 700,
+              "x": 730,
+              "y": 620
+            },
+            "type": "block"
+          },
+          {
+            "item": "viz_writeback_errors",
+            "position": {
+              "h": 300,
+              "w": 1420,
+              "x": 10,
+              "y": 930
+            },
+            "type": "block"
+          }
+        ],
+        "type": "absolute"
       }
     },
     "options": {},
     "tabs": {
       "items": [
         {
-          "label": "New tab",
+          "label": "Indicators",
           "layoutId": "layout_1"
+        },
+        {
+          "label": "Dissemination assurance",
+          "layoutId": "layout_assurance"
         }
       ]
     }
