@@ -505,7 +505,9 @@ windows never overlap and late events are indexed) matches the indicators agains
 into `| openctireporthits`, which calls `indicatorReportHits` (hit counter of the `deployed-on`
 relationship and stable hits sighting Indicator -> Security Platform). On platforms without it, a sighting
 on the Security Platform is created instead. Each indicator is reported once per window; replays are
-ignored, by the add-on and by OpenCTI.
+ignored, by the add-on and by OpenCTI. Each data model matches its values against the indicators of the
+same kind only (IP addresses, domains and hostnames, URLs, file hashes, email addresses: a file name
+indicator never hits on a DNS query), and revoked or expired indicators never hit.
 
 Configure the scope with the `opencti_hits_scope` macro (tstats `where` clause, for example
 `index=proxy OR index=firewall`) and set `opencti_hits_summariesonly` to `summariesonly=true` when the data
@@ -518,6 +520,16 @@ when every row of the run was reported, it records the search time range as sear
 per Security Platform, restarted after a failed or skipped run). The IOC validation proof declares a miss
 only over a searched span, so keep the heartbeat when you adapt the search.
 
+Two limits of a scheduled search bound what "searched" means, and both are yours to size:
+- **Indexing lag**: the window ends 5 minutes before the run, so an event indexed more than 5 minutes after
+  its time is never counted, and no later run searches its time again. For slower pipelines, move both
+  dispatch times back by the same amount (for example `-35m@m` to `-20m@m`).
+- **Subsearch limits**: each data model after the first runs as an `append` subsearch, which Splunk
+  finalizes after 60 seconds by default and then returns partial results without telling the command.
+  Use accelerated data models (`opencti_hits_summariesonly` = `summariesonly=true`) or narrow
+  `opencti_hits_scope` so every branch completes well within that time; a branch cut short still records
+  the window as searched.
+
 #### IOC validation proof
 
 OpenCTI asks OpenAEV to run benign tests built from deployed indicators (IOC validation requests).
@@ -527,8 +539,9 @@ platform:
 
 - **detected** when a recorded hit falls in the test window (dispatch to completion of the request,
   give or take 5 minutes of clock skew), or when the last hit OpenCTI recorded on the deployment does.
-  Hits carry their event time: the grace period delays the decision for indexing lag, it does not widen
-  the window;
+  Hits carry their event time: the grace period gives the hit reporting time to search the end of the
+  test window before a miss is decided; it does not widen the window, nor recover an event indexed after
+  the run that searched its time (see the limits above);
 - **missed** when the request is completed, the grace period is over, `OpenCTI - Report indicator hits`
   searched the whole test window (see the heartbeat above) and no hit falls in it; a sighting
   with `x_opencti_negative = true` records the miss on the Security Platform;

@@ -71,6 +71,15 @@ class SavedSearchesTest(unittest.TestCase):
                 self.assertIn(f"rex field={field} max_match=0", search)
                 self.assertNotIn(f'rename "{field}" AS value', search)
 
+    def test_kv_sync_searches_read_both_timestamp_precisions(self):
+        """A whole-second update must never lose the delete tie-break to an older delete."""
+        for stanza in ("Update OpenCTI Indicators Lookup", "Nightly Rebuild OpenCTI Indicators Lookup"):
+            search = self.searches.get(stanza, "search")
+            with self.subTest(stanza=stanza):
+                for field in ("modified", "updated_at", "created_at"):
+                    self.assertIn(f'strptime({field}, "%Y-%m-%dT%H:%M:%S.%3NZ"), strptime({field}, "%Y-%m-%dT%H:%M:%SZ")', search)
+                self.assertNotIn("case( match(modified", " ".join(search.split()))
+
     def test_kv_sync_searches_never_restore_deleted_indicators(self):
         for stanza in ("Update OpenCTI Indicators Lookup", "Nightly Rebuild OpenCTI Indicators Lookup"):
             search = self.searches.get(stanza, "search")
@@ -148,9 +157,29 @@ class CommandsTest(unittest.TestCase):
                          "revoked is read per indicator, never as a multivalue aligned by position")
         self.assertLess(steps.index("eval indicator_id = mvdedup(indicator_id)"), steps.index("mvexpand indicator_id"))
         self.assertLess(steps.index("mvexpand indicator_id"),
-                        steps.index("lookup opencti_indicators id AS indicator_id OUTPUT revoked"))
-        self.assertEqual(steps[-1], "where `opencti_usable_indicator`")
-        self.assertIn("mvfind(revoked", _conf("macros.conf").get("opencti_usable_indicator", "definition"))
+                        steps.index("lookup opencti_indicators id AS indicator_id OUTPUT revoked valid_until type AS indicator_type"))
+        self.assertEqual(steps[-1], "where `opencti_usable_indicator` AND `opencti_kind_indicator`")
+        usable = _conf("macros.conf").get("opencti_usable_indicator", "definition")
+        self.assertIn("mvfind(revoked", usable)
+        self.assertIn("isnull(valid_until) OR coalesce(", usable, "expired indicators never hit")
+        self.assertIn("> now()", usable)
+
+    def test_every_matched_value_declares_its_kind(self):
+        """A value only hits the indicators of its observable type (a file name is not a domain)."""
+        kinds = _conf("macros.conf").get("opencti_kind_indicator", "definition")
+        for kind, types in (("ip", "ipv[46]-addr"), ("domain", "domain-name|hostname"), ("url", '"url"'),
+                            ("hash", "md5|sha1|sha256"), ("email", '"email-addr"')):
+            self.assertIn(f'opencti_value_kind == "{kind}"', kinds)
+            self.assertIn(types, kinds)
+        self.assertNotIn("filename", kinds)
+        searches = _conf("savedsearches.conf")
+        calls = 0
+        for name in searches.sections():
+            search = " ".join(searches.get(name, "search", fallback="").split())
+            for match in re.finditer(r"\| `opencti_hits_match`", search):
+                calls += 1
+                self.assertRegex(search[:match.start()], r'eval opencti_value_kind="(ip|domain|url|hash|email)" $', name)
+        self.assertGreaterEqual(calls, 7)
 
     def test_hits_match_applies_once_per_row(self):
         # The macro yields one row per matching indicator: a second pass squares the rows of shared values
