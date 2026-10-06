@@ -133,7 +133,7 @@ class CommandsTest(unittest.TestCase):
     def test_macros(self):
         macros = _conf("macros.conf")
         for name in ("opencti_hits_scope", "opencti_hits_summariesonly", "opencti_usable_indicator", "opencti_hits_match",
-                     "opencti_inventory_scope", "opencti_inventory_summariesonly"):
+                     "opencti_inventory_scope", "opencti_inventory_summariesonly", "opencti_provides_current"):
             self.assertIn(name, macros.sections())
 
     def test_hits_match_yields_one_row_per_indicator(self):
@@ -277,6 +277,33 @@ class DashboardTest(unittest.TestCase):
             query = json.load(handle)["dataSources"]["ds_df_inventory"]["options"]["query"]
         for status in (provides.STATUS_DECLARED, provides.STATUS_UNMATCHED, provides.STATUS_ERROR, provides.STATUS_PRUNED):
             self.assertIn(f'status=="{status}"', query)
+
+    def test_defense_matrix_reads_the_current_platform_only(self):
+        """The entries a previously configured Security Platform left in opencti_provides are not current."""
+        from datetime import datetime
+
+        from addon_state import utc_now_iso
+
+        definition = _conf("macros.conf").get("opencti_provides_current", "definition")
+        steps = [" ".join(step.split()) for step in definition.split("|")]
+        self.assertEqual(steps[0], "inputlookup opencti_provides")
+        self.assertIn("eventstats max(provides_reported) AS platform_reported by platform_id", steps)
+        self.assertIn("where platform_reported == latest_reported", steps)
+        reported_format = "%Y-%m-%dT%H:%M:%SZ"
+        self.assertIn(f'strptime(reported_at, "{reported_format}")', definition)
+        datetime.strptime(utc_now_iso(), reported_format)
+        with open(os.path.join(TA, "custom_dashboard.json"), encoding="utf-8") as handle:
+            sources = json.load(handle)["dataSources"]
+        checked = 0
+        for name, source in sources.items():
+            query = source.get("options", {}).get("query", "")
+            if "opencti_provides" not in query:
+                continue
+            checked += 1
+            with self.subTest(source=name):
+                self.assertTrue(query.startswith("| `opencti_provides_current` |"), query)
+                self.assertNotIn("inputlookup opencti_provides", query)
+        self.assertEqual(checked, 2)
 
 
 if __name__ == "__main__":
