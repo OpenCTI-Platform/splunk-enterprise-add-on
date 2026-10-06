@@ -7,8 +7,10 @@ from program_fakes import FakeCache, FakeClient, FakeDetector, FakeKV, FakeLogge
 
 import openctiprovides
 from addon_config import AddonSettings
+from addon_state import state_key
 from opencti_features import FEATURE_PROVIDES
-from provides import STATUS_DECLARED, STATUS_PRUNED, STATUS_UNMATCHED, ProvidesPublisher, RateLimiter, aggregate_inventory, provides_description
+from provides import (STATUS_DECLARED, STATUS_ERROR, STATUS_PRUNED, STATUS_UNMATCHED, ProvidesPublisher, RateLimiter,
+                      aggregate_inventory, provides_description)
 
 PLATFORM = {"id": "platform-internal", "standard_id": "identity--p"}
 
@@ -42,7 +44,42 @@ class ProvidesTest(unittest.TestCase):
         relation = client.calls_of("SplunkProvides")[0]["input"]
         self.assertEqual((relation["fromId"], relation["relationship_type"]), ("platform-internal", "provides"))
         self.assertTrue(relation["description"].startswith("Telemetry available in Splunk from:"))
-        self.assertEqual(len(state.records), 2)
+        self.assertEqual(len(state.records), 3)
+        unmatched = [r for r in state.records.values() if r["data_component"] == "Unknown Thing"][0]
+        self.assertEqual((unmatched["status"], unmatched["message"]),
+                         (STATUS_UNMATCHED, "no Data Component with this name in OpenCTI"))
+        self.assertEqual(unmatched.get("relationship_ids", ""), "")
+
+    def test_failed_declaration_is_kept_for_monitoring(self):
+        client = FakeClient({"SplunkDataComponents": self._dc, "SplunkProvides": graphql_error("denied")})
+        state = FakeKV([{"_key": state_key("platform-internal", "network traffic flow"), "platform_id": "platform-internal",
+                         "data_component": "Network Traffic Flow", "relationship_ids": "rel-2", "status": STATUS_DECLARED}])
+        ProvidesPublisher(client, FakeDetector((FEATURE_PROVIDES,)), PLATFORM, state, logger=FakeLogger()).publish(
+            self.INVENTORY[:2])
+        new = state.records[state_key("platform-internal", "process creation")]
+        self.assertEqual(new["status"], STATUS_ERROR)
+        self.assertIn("denied", new["message"])
+        earlier = state.records[state_key("platform-internal", "network traffic flow")]
+        self.assertEqual((earlier["status"], earlier["relationship_ids"]), (STATUS_DECLARED, "rel-2"),
+                         "an earlier declaration stays prunable")
+        self.assertIn("denied", earlier["message"])
+
+    def test_successful_declaration_clears_the_message(self):
+        client = FakeClient({"SplunkDataComponents": self._dc, "SplunkProvides": {"stixCoreRelationshipAdd": {"id": "rel"}}})
+        key = state_key("platform-internal", "process creation")
+        state = FakeKV([{"_key": key, "platform_id": "platform-internal", "data_component": "Process Creation",
+                         "status": STATUS_ERROR, "message": "denied"}])
+        ProvidesPublisher(client, FakeDetector((FEATURE_PROVIDES,)), PLATFORM, state).publish(self.INVENTORY[:1])
+        self.assertEqual((state.records[key]["status"], state.records[key]["message"]), (STATUS_DECLARED, ""))
+
+    def test_prune_retires_unmatched_entries_of_vanished_telemetry(self):
+        client = FakeClient({"SplunkDataComponents": self._dc, "SplunkProvides": {"stixCoreRelationshipAdd": {"id": "rel"}}})
+        state = FakeKV([{"_key": "gone", "platform_id": "platform-internal", "data_component": "Unknown Thing",
+                         "status": STATUS_UNMATCHED, "message": "no Data Component with this name in OpenCTI"}])
+        rows = ProvidesPublisher(client, FakeDetector((FEATURE_PROVIDES,)), PLATFORM, state).publish(self.INVENTORY[:1], prune=True)
+        self.assertEqual(state.records["gone"]["status"], STATUS_PRUNED)
+        self.assertIn({"data_component": "Unknown Thing", "status": STATUS_PRUNED, "message": ""}, rows)
+        self.assertEqual(client.calls_of("SplunkProvidesDelete"), [])
 
     def test_prune_removes_vanished_telemetry(self):
         client = FakeClient({"SplunkDataComponents": self._dc,
@@ -169,6 +206,37 @@ class CommandContextTest(unittest.TestCase):
             with mock.patch.object(context.detector, "require", return_value=True), \
                     mock.patch.object(context.detector, "snapshot", return_value={"features": []}):
                 self.assertIsNone(context.platform, "auto creation disabled and no id")
+
+
+class LoadSettingsTest(unittest.TestCase):
+    def _load(self, proxy):
+        import logging
+
+        import addon_config
+        import utils
+        from solnlib import conf_manager, splunkenv
+
+        conf = mock.Mock()
+        conf.get.side_effect = lambda name: {"account": {"opencti_url": "https://opencti.example/",
+                                                         "opencti_api_key": "key"}}.get(name, {})
+        manager = mock.Mock()
+        manager.get_conf.return_value = conf
+        with mock.patch.object(conf_manager, "ConfManager", return_value=manager), \
+                mock.patch.object(conf_manager, "get_proxy_dict", **proxy), \
+                mock.patch.object(splunkenv, "get_splunk_host_info", return_value=("sh1", "sh1")), \
+                mock.patch.object(utils, "get_user_agent", return_value="ua"):
+            return addon_config.load_settings("session", logging.getLogger("settings-test"))
+
+    def test_reads_the_proxy_settings(self):
+        proxy = {"proxy_enabled": "1", "proxy_url": "proxy.example", "proxy_port": "3128"}
+        settings = self._load({"return_value": proxy})
+        self.assertEqual(settings.proxy_settings, proxy)
+        self.assertEqual(settings.opencti_url, "https://opencti.example")
+        self.assertEqual(settings.server_name, "sh1")
+
+    def test_unreadable_proxy_settings_never_connect_directly(self):
+        with self.assertRaisesRegex(RuntimeError, "Proxy settings unreadable"):
+            self._load({"side_effect": Exception("Failed to fetch 'proxy'")})
 
 
 if __name__ == "__main__":

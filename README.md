@@ -488,8 +488,11 @@ matrix then knows which techniques Splunk has telemetry for.
 The lookup (`lookups/opencti_cim_data_components.csv`) is editable: one row per `source`
 (`datamodel:<Model>[.<Dataset>]` or `sourcetype:<sourcetype>`, wildcards allowed) and `data_component`
 (the MITRE Data Component name, as imported in OpenCTI). Data components unknown to OpenCTI are reported
-with the status `unmatched_data_component`. `| openctiprovides prune=true` also deletes the provides
-relationships the add-on declared earlier for data components absent from the inventory; nothing is
+with the status `unmatched_data_component`, and a failed declaration with the status `error`; both are kept
+in `opencti_provides` with their message, so the dashboard shows them. A data component declared by an
+earlier run stays `declared` when a later declaration fails, with the failure in its message.
+`| openctiprovides prune=true` also deletes the provides relationships the add-on declared earlier for data
+components absent from the inventory (and retires their unmatched or failed entries); nothing is
 pruned when the inventory is empty or when a declaration of the run failed. With the
 default `opencti_inventory_summariesonly` (`summariesonly=true`), only accelerated data models count.
 
@@ -507,7 +510,7 @@ interactive search reports once, on its final results. Its logs are in `$SPLUNK_
 ### Monitoring
 
 The Monitoring dashboard has a **Defense matrix** tab: data components declared to OpenCTI (provides) and
-the telemetry inventory.
+the telemetry inventory, with the status and message of each data component.
 
 ### Program saved searches (all shipped disabled)
 

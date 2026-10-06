@@ -162,7 +162,7 @@ class ProvidesPublisher:
             return [{"data_component": "", "status": "skipped", "message": "The OpenCTI platform has no provides relationship"}]
         inventory = aggregate_inventory(records)
         resolved = self.resolve_data_components([entry["name"] for entry in inventory.values()])
-        rows, states = [], []
+        rows, states, failures = [], [], []
         for key, entry in sorted(inventory.items()):
             row = {
                 "data_component": entry["name"],
@@ -173,6 +173,7 @@ class ProvidesPublisher:
             if not ids:
                 row.update({"status": STATUS_UNMATCHED, "message": "no Data Component with this name in OpenCTI"})
                 rows.append(row)
+                failures.append((key, entry, row))
                 continue
             relationship_ids = []
             try:
@@ -200,10 +201,14 @@ class ProvidesPublisher:
                     "sources": ", ".join(entry["sources"]),
                     "event_count": entry["event_count"],
                     "status": STATUS_DECLARED,
+                    "message": "",
                     "reported_at": utc_now_iso(),
                 })
+            else:
+                failures.append((key, entry, row))
         if any(row["status"] == STATUS_ERROR for row in rows):
             self._had_error = True
+        states.extend(self._failure_states(failures))
         if prune:
             current_keys = set(inventory) | set(known_keys or ())
             if not current_keys:
@@ -218,10 +223,54 @@ class ProvidesPublisher:
             self.logger.warning(f"Unable to store the telemetry inventory in the KV Store: {ex}")
         return rows
 
+    def _failure_states(self, failures):
+        """
+        Keep the data components this run could not declare in opencti_provides
+        for monitoring. An earlier declaration keeps its status and relationships
+        (pruning still finds them, the next run retries); the failure goes to
+        its message.
+
+        :param failures: list of (lower-cased name, inventory entry, output row)
+        """
+        if not failures:
+            return []
+        keys = [state_key(self.platform["id"], key) for key, _, _ in failures]
+        try:
+            existing = self.state.get_many(keys)
+        except Exception as ex:
+            self.logger.warning(f"Unable to read the telemetry inventory from the KV Store: {ex}")
+            existing = {}
+        states = []
+        for (key, entry, row), state_id in zip(failures, keys):
+            previous = existing.get(state_id) or {}
+            declared = previous.get("status") == STATUS_DECLARED
+            states.append(dict(
+                {k: v for k, v in previous.items() if not k.startswith("_")},
+                _key=state_id,
+                platform_id=self.platform["id"],
+                data_component=entry["name"],
+                sources=", ".join(entry["sources"]),
+                event_count=entry["event_count"],
+                status=STATUS_DECLARED if declared else row["status"],
+                message=row["message"],
+                reported_at=utc_now_iso(),
+            ))
+        return states
+
     def _prune(self, current_keys, states):
         rows = []
-        for record in self.state.query_all(query={"platform_id": self.platform["id"], "status": STATUS_DECLARED}):
+        for record in self.state.query_all(query={"platform_id": self.platform["id"]}):
             if (record.get("data_component") or "").lower() in current_keys:
+                continue
+            if record.get("status") in (STATUS_ERROR, STATUS_UNMATCHED):
+                # Never declared: nothing to delete in OpenCTI
+                states.append(dict(
+                    {k: v for k, v in record.items() if k == "_key" or not k.startswith("_")},
+                    status=STATUS_PRUNED, message="", reported_at=utc_now_iso(),
+                ))
+                rows.append({"data_component": record.get("data_component"), "status": STATUS_PRUNED, "message": ""})
+                continue
+            if record.get("status") != STATUS_DECLARED:
                 continue
             remaining, error = [], None
             for relationship_id in [r for r in (record.get("relationship_ids") or "").split(",") if r]:
