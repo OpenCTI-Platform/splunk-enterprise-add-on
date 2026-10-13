@@ -3,7 +3,7 @@ import json
 from app_connector_helper import SplunkAppConnectorHelper
 from stix_converter import convert_to_sighting
 from constants import CONNECTOR_NAME, CONNECTOR_ID, resolve_ssl_verify
-from utils import get_user_agent
+from utils import get_user_agent, parse_labels
 from splunktaucclib.alert_actions_base import ModularAlertBase  # type: ignore
 
 
@@ -13,12 +13,7 @@ def create_sighting(helper, event):
     :param event:
     :return:
     """
-    if helper.get_param("labels"):
-        labels = [x.strip() for x in helper.get_param("labels").split(',')]
-    else:
-        labels = []
-    # remove potential empty labels
-    labels = list(filter(None, labels))
+    labels = parse_labels(helper.get_param("labels"))
 
     params = {
         "sighting_of_value": helper.get_param("sighting_of_value"),

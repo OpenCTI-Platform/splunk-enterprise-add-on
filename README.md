@@ -314,7 +314,7 @@ You can create an incident or an incident response case in OpenCTI from a custom
 | `Type`                   | Incident Type or incident response case type          | Incident & Incident response case |                              
 | `Severity`               | Severity of the incident or incident response case    | Incident & Incident response case | 
 | `Priority`               | Priority of the incident response case                | Incident response case            | 
-| `Labels`                 | Labels (separated by a comma) to be applied           | Incident & Incident response case | 
+| `Labels`                 | Labels to apply, separated by commas or line breaks   | Incident & Incident response case | 
 | `TLP`                    | Markings to be applied                                | Incident & Incident response case | 
 | `Observables extraction` | Method for extracting observables                     | Incident & Incident response case | 
 
@@ -326,7 +326,7 @@ You can create an incident or an incident response case in OpenCTI from a custom
 | `Sighting Of (type)`    | Type of what was sighted (URL, Domain, IPV4, IPV6, File Hash, Indicator STIX ID) | Sighting |
 | `Where Sighted (value)` | Value of the 'System' or 'Organization' that saw the sighting                    | Sighting |
 | `Where Sighted (type)`  | 'System' or 'Organization' that saw the sighting                                 | Sighting |
-| `Labels`                | Labels (separated by a comma) to be applied                                      | Sighting |
+| `Labels`                | Labels to apply, separated by commas or line breaks                              | Sighting |
 | `TLP`                   | Markings to be applied                                                           | Sighting |
 
 To sight an indicator that already exists in OpenCTI (instead of an observable), select the `Indicator STIX ID` type and pass the STIX ID of the indicator (`indicator--<uuid>`) as value. The sighting then directly references the indicator, so OpenCTI rules such as "Raise incident based on sighting" apply. Indicators imported by the app are stored in the `opencti_indicators` KV Store, for example:
@@ -339,12 +339,22 @@ To sight an indicator that already exists in OpenCTI (instead of an observable),
 
 Then set `Sighting Of (value)` to `$result.indicator_id$`. Only one indicator ID per result is accepted.
 
-Configure the alert with **Trigger: For each result**. Splunk resolves `$result.<field>$` tokens from the first result only, so with **Trigger: Once** every result is sighted against the first result's indicator and the other indicators are not sighted.
+Configure the alert with **Trigger: For each result** (see the note on tokens below).
 
 If the indicator does not exist in OpenCTI, the sighting is rejected by OpenCTI when the bundle is ingested.
 
 You can use [Splunk "tokens"](https://docs.splunk.com/Documentation/Splunk/9.2.2/Alert/EmailNotificationTokens#Result_tokens) as variables in the form to contextualize the data imported into OpenCTI.
 Tokens represent data that a search generates. They work as placeholders or variables for data values that populate when the search completes.
+
+`Labels` accepts labels separated by commas or line breaks, so a multivalue field can be passed as a token. For example, to apply the labels of the matched OpenCTI indicators (stored in the `opencti_indicators` KV Store):
+
+```
+... | lookup opencti_indicators value OUTPUT labels AS ioc_labels
+```
+
+Then set `Labels` to `splunk,$result.ioc_labels$`: each value of `ioc_labels` becomes a separate label.
+
+Splunk resolves `$result.<field>$` tokens from the first result only. To use the values of every result, configure the alert with **Trigger: For each result**.
 
 Example of a configuration to create an incident in OpenCTI
 

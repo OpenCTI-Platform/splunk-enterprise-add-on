@@ -27,6 +27,23 @@ def get_bool_val(value):
     if isinstance(value, str):
         return value != "0" and value != "false"
 
+
+def parse_labels(value):
+    """
+    Split the Labels alert parameter into a list of labels.
+
+    Labels are separated by commas or line breaks: Splunk renders a
+    multivalue $result.<field>$ token as its values joined by "\n".
+    Empty and duplicate labels are dropped, order is kept.
+    :param value: raw Labels parameter
+    :return: list of labels
+    """
+    if not value:
+        return []
+    labels = (label.strip() for label in re.split(r"[,\r\n]", value))
+    return list(dict.fromkeys(label for label in labels if label))
+
+
 @functools.lru_cache(maxsize=None)
 def get_app_version(session_key):
     """
