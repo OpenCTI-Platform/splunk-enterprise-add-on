@@ -644,10 +644,14 @@
                             {
                                 "value": "file_hash_observable",
                                 "label": "File Hash Observable (MD5, SHA-1, SHA-256, SHA-512)"
+                            },
+                            {
+                                "value": "indicator_stix_id",
+                                "label": "Indicator STIX ID"
                             }
                         ]
                     },
-                    "help": "Select any one option from the list. For File Hash, the algorithm is detected from the value",
+                    "help": "Select any one option from the list. For File Hash, the algorithm is detected from the value. For Indicator STIX ID, the value must be the STIX ID of an existing OpenCTI indicator (indicator--<uuid>)",
                     "required": false,
                     "defaultValue": "domain_observable"
                 },
