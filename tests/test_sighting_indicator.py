@@ -94,6 +94,12 @@ class SightingIndicatorTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unsupported sighting_of_type"):
             convert_to_sighting(_params(INDICATOR_ID, "unknown"), EVENT)
 
+    def test_missing_type_raises_clear_error(self):
+        for sighting_of_type in [None, ""]:
+            with self.subTest(sighting_of_type=sighting_of_type):
+                with self.assertRaisesRegex(ValueError, "Unsupported sighting_of_type"):
+                    convert_to_sighting(_params(INDICATOR_ID, sighting_of_type), EVENT)
+
 
 if __name__ == "__main__":
     unittest.main()

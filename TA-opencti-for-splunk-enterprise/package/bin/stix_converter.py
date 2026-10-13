@@ -465,7 +465,7 @@ def convert_to_sighting(alert_params, event):
     bundle_objects.append(stix_author)
 
     sighting_of_value=alert_params.get("sighting_of_value")
-    sighting_of_type=alert_params.get("sighting_of_type")
+    sighting_of_type=alert_params.get("sighting_of_type") or ""
     where_sighted_value=alert_params.get("where_sighted_value")
     where_sighted_type=alert_params.get("where_sighted_type")
 
