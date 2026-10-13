@@ -47,16 +47,18 @@ class SendStixBundleTest(unittest.TestCase):
 
     def _send(self, *payloads):
         with mock.patch("app_connector_helper.requests.post", side_effect=list(payloads)) as post:
-            _connector().send_stix_bundle(bundle="{}")
+            self.registered = _connector().send_stix_bundle(bundle="{}")
         return post
 
     def test_registered_connector_is_not_registered_again(self):
         post = self._send(_response(OK))
         self.assertEqual(_operations(post), ["stixBundlePush"])
+        self.assertFalse(self.registered)
 
     def test_unregistered_connector_registers_then_pushes_again(self):
         post = self._send(_response(INVALID_CONNECTOR), _response(OK), _response(OK), _response(OK))
         self.assertEqual(_operations(post), ["stixBundlePush", "registerConnector", "pingConnector", "stixBundlePush"])
+        self.assertTrue(self.registered)
 
     def test_ping_declares_an_external_schedule(self):
         post = self._send(_response(INVALID_CONNECTOR), _response(OK), _response(OK), _response(OK))

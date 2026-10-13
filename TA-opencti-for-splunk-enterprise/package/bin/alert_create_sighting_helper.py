@@ -59,7 +59,10 @@ def create_sighting(helper, event):
 
     # registers the App as an OpenCTI connector only when needed
     try:
-        splunk_app_connector.send_stix_bundle(bundle=bundle)
+        registered = splunk_app_connector.send_stix_bundle(bundle=bundle)
+        if registered:
+            helper.log_info("Splunk App registered in OpenCTI as connector "
+                            f"'{CONNECTOR_NAME}' ({CONNECTOR_ID})")
         helper.log_info("STIX bundle has been sent successfully")
     except Exception as ex:
         helper.log_error(f"Unable to create sighting, "

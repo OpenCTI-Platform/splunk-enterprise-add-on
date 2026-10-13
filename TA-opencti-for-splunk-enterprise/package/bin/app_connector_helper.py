@@ -229,10 +229,11 @@ class SplunkAppConnectorHelper:
         HTTP and network errors are raised without retry, so a bundle is
         never pushed twice.
         :param bundle:
-        :return:
+        :return: True if the App was registered during this push
         """
         try:
             self._push_stix_bundle(bundle)
+            return False
         except GraphQLError as push_error:
             try:
                 self.register()
@@ -240,3 +241,4 @@ class SplunkAppConnectorHelper:
                 raise push_error
             self.ping()
             self._push_stix_bundle(bundle)
+            return True
