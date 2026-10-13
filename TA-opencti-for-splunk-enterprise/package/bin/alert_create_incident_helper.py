@@ -4,7 +4,7 @@ import json
 from app_connector_helper import SplunkAppConnectorHelper
 from constants import CONNECTOR_ID, CONNECTOR_NAME, resolve_ssl_verify
 from stix_converter import convert_to_incident
-from utils import get_user_agent
+from utils import get_user_agent, parse_labels
 from splunktaucclib.alert_actions_base import ModularAlertBase  # type: ignore
 
 
@@ -14,12 +14,7 @@ def create_incident(helper, event):
     :param event:
     :return:
     """
-    if helper.get_param("labels"):
-        labels = [x.strip() for x in helper.get_param("labels").split(',')]
-    else:
-        labels = []
-    # remove potential empty labels
-    labels = list(filter(None, labels))
+    labels = parse_labels(helper.get_param("labels"))
 
     helper.log_info(helper.get_param("observables_extraction"))
 
