@@ -314,7 +314,7 @@ You can create an incident or an incident response case in OpenCTI from a custom
 | `Type`                   | Incident Type or incident response case type          | Incident & Incident response case |                              
 | `Severity`               | Severity of the incident or incident response case    | Incident & Incident response case | 
 | `Priority`               | Priority of the incident response case                | Incident response case            | 
-| `Labels`                 | Labels (separated by a comma) to be applied           | Incident & Incident response case | 
+| `Labels`                 | Labels to apply, separated by commas or line breaks   | Incident & Incident response case | 
 | `TLP`                    | Markings to be applied                                | Incident & Incident response case | 
 | `Observables extraction` | Method for extracting observables                     | Incident & Incident response case | 
 
@@ -326,7 +326,7 @@ You can create an incident or an incident response case in OpenCTI from a custom
 | `Sighting Of (type)`     | Type of what was sighted (URL, Domain, IPV4, IPV6, File Hash) | Sighting   |                              
 | `Where Sighted (value)`  | Value of the 'System' or 'Organization' that saw the sighting | Sighting   |                              
 | `Where Sighted (type)`   | 'System' or 'Organization' that saw the sighting              | Sighting   | 
-| `Labels`                 | Labels (separated by a comma) to be applied                   | Sighting   | 
+| `Labels`                 | Labels to apply, separated by commas or line breaks           | Sighting   | 
 | `TLP`                    | Markings to be applied                                        | Sighting   | 
 
 You can use [Splunk "tokens"](https://docs.splunk.com/Documentation/Splunk/9.2.2/Alert/EmailNotificationTokens#Result_tokens) as variables in the form to contextualize the data imported into OpenCTI.
