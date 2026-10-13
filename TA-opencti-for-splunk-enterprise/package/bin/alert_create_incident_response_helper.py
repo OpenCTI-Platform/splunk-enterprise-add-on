@@ -60,21 +60,12 @@ def create_incident_response(helper, event):
         )
         return
 
-    # going to register App as an OpenCTI connector
-    # TODO: Do this only on time (at first run)
+    # registers the App as an OpenCTI connector only when needed
     try:
-        splunk_app_connector.register()
-    except Exception as ex:
-        helper.log_error(
-            "Unable to create incident response case, "
-            "an exception occurred while registering App as OpenCTI "
-            "connector, "
-            f"exception: {str(ex)}"
-        )
-        return
-
-    try:
-        splunk_app_connector.send_stix_bundle(bundle=bundle)
+        registered = splunk_app_connector.send_stix_bundle(bundle=bundle)
+        if registered:
+            helper.log_info("Splunk App registered in OpenCTI as connector "
+                            f"'{CONNECTOR_NAME}' ({CONNECTOR_ID})")
         helper.log_info("STIX bundle has been sent successfully")
     except Exception as ex:
         helper.log_error(f"Unable to create incident response case, "
