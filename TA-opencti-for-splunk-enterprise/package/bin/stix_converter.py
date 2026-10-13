@@ -521,7 +521,8 @@ def convert_to_sighting(alert_params, event):
 
     # existing OpenCTI indicator: referenced directly, not added to the bundle
     elif sighting_of_type == "indicator_stix_id":
-        sighted_id = (sighting_of_value or "").strip()
+        # lowercased: stix2 rejects an uppercase prefix and OpenCTI matches IDs case-sensitively
+        sighted_id = (sighting_of_value or "").strip().lower()
         if not INDICATOR_ID_REGEX.match(sighted_id):
             raise ValueError(
                 f"Invalid indicator ID: {sighting_of_value!r} "

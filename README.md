@@ -337,7 +337,11 @@ To sight an indicator that already exists in OpenCTI (instead of an observable),
     | mvexpand indicator_id
 ```
 
-Then set `Sighting Of (value)` to `$result.indicator_id$`. Only one indicator ID per result is accepted. If the indicator does not exist in OpenCTI, the sighting is rejected by OpenCTI when the bundle is ingested.
+Then set `Sighting Of (value)` to `$result.indicator_id$`. Only one indicator ID per result is accepted.
+
+Configure the alert with **Trigger: For each result**. Splunk resolves `$result.<field>$` tokens from the first result only, so with **Trigger: Once** every result is sighted against the first result's indicator and the other indicators are not sighted.
+
+If the indicator does not exist in OpenCTI, the sighting is rejected by OpenCTI when the bundle is ingested.
 
 You can use [Splunk "tokens"](https://docs.splunk.com/Documentation/Splunk/9.2.2/Alert/EmailNotificationTokens#Result_tokens) as variables in the form to contextualize the data imported into OpenCTI.
 Tokens represent data that a search generates. They work as placeholders or variables for data values that populate when the search completes.

@@ -65,6 +65,17 @@ class SightingIndicatorTest(unittest.TestCase):
                     if o["type"] == "sighting"][0]
         self.assertEqual(sighting["sighting_of_ref"], INDICATOR_ID)
 
+    def test_value_is_lowercased(self):
+        for value in [INDICATOR_ID.upper(), "indicator--" + INDICATOR_ID.split("--")[1].upper()]:
+            with self.subTest(value=value):
+                sighting = [o for o in _objects(convert_to_sighting(_params(value), EVENT))
+                            if o["type"] == "sighting"][0]
+                self.assertEqual(sighting["sighting_of_ref"], INDICATOR_ID)
+                self.assertEqual(
+                    sighting["id"],
+                    generate_sighting_id(INDICATOR_ID, generate_identity_id("edr01", "system")),
+                )
+
     def test_invalid_indicator_id_raises_clear_error(self):
         for value in [
             "",
