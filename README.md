@@ -332,6 +332,16 @@ You can create an incident or an incident response case in OpenCTI from a custom
 You can use [Splunk "tokens"](https://docs.splunk.com/Documentation/Splunk/9.2.2/Alert/EmailNotificationTokens#Result_tokens) as variables in the form to contextualize the data imported into OpenCTI.
 Tokens represent data that a search generates. They work as placeholders or variables for data values that populate when the search completes.
 
+`Labels` accepts labels separated by commas or line breaks, so a multivalue field can be passed as a token. For example, to apply the labels of the matched OpenCTI indicators (stored in the `opencti_indicators` KV Store):
+
+```
+... | lookup opencti_indicators value OUTPUT labels AS ioc_labels
+```
+
+Then set `Labels` to `splunk,$result.ioc_labels$`: each value of `ioc_labels` becomes a separate label.
+
+Splunk resolves `$result.<field>$` tokens from the first result only. To use the values of every result, configure the alert with **Trigger: For each result**.
+
 Example of a configuration to create an incident in OpenCTI
 
 ![](./.github/img/alert_example.png "Alert Example")
