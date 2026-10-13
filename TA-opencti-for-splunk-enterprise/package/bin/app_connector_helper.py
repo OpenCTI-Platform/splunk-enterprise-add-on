@@ -3,6 +3,10 @@ import utils
 from typing import Union
 
 
+class GraphQLError(Exception):
+    """OpenCTI answered HTTP 200 with GraphQL errors."""
+
+
 class SplunkAppConnectorHelper:
     def __init__(
         self,
@@ -65,7 +69,7 @@ class SplunkAppConnectorHelper:
 
         data = r.json()
         if "errors" in data:
-            raise Exception(f"OpenCTI GraphQL errors: {data['errors']}")
+            raise GraphQLError(f"OpenCTI GraphQL errors: {data['errors']}")
 
         return data.get("data", {})
 
@@ -154,9 +158,10 @@ class SplunkAppConnectorHelper:
 
     def register(self):
         """
+        Register the Splunk App as an OpenCTI connector (create or update).
         :return:
         """
-        input = {
+        variables = {
             "input": {
                 "id": self.connector_id,
                 "name": self.connector_name,
@@ -167,49 +172,44 @@ class SplunkAppConnectorHelper:
                 "playbook_compatible": False,
             }
         }
-
         query = """
             mutation RegisterConnector($input: RegisterConnectorInput) {
                 registerConnector(input: $input) {
                     id
-                    connector_state
-                    config {
-                        connection {
-                            host
-                            vhost
-                            use_ssl
-                            port
-                            user
-                            pass
-                        }
-                        listen
-                        listen_routing
-                        listen_exchange
-                        push
-                        push_routing
-                        push_exchange
-                    }
-                    connector_user_id
                 }
             }
         """
+        self.graphql_query(query, variables)
 
-        r = requests.post(
-            url=self.api_url,
-            json={"query": query, "variables": input},
-            headers=self.headers,
-            verify=self.verify,
-            proxies=self.proxies,
-        )
+    def ping(self):
+        """
+        Declare the connector as run by an external schedule: OpenCTI shows
+        "Next run: External schedule". Best effort, connector_info exists
+        since OpenCTI 6.2.12.
+        :return:
+        """
+        variables = {
+            "id": self.connector_id,
+            "connectorInfo": {
+                "run_and_terminate": True,
+                "buffering": False,
+                "queue_threshold": 500,
+                "queue_messages_size": 0,
+            },
+        }
+        query = """
+            mutation PingConnector($id: ID!, $connectorInfo: ConnectorInfoInput) {
+                pingConnector(id: $id, connectorInfo: $connectorInfo) {
+                    id
+                }
+            }
+        """
+        try:
+            self.graphql_query(query, variables)
+        except Exception:
+            pass
 
-        if r.status_code != 200:
-            raise Exception(
-                f"An exception occurred while registering Splunk App, "
-                f"received status code: {r.status_code}, "
-                f"exception: {r.content}"
-            )
-
-    def send_stix_bundle(self, bundle):
+    def _push_stix_bundle(self, bundle):
         """
         :param bundle:
         :return:
@@ -219,19 +219,24 @@ class SplunkAppConnectorHelper:
                 stixBundlePush(connectorId: $id, bundle: $bundle)
             }
         """
+        self.graphql_query(query, {"id": self.connector_id, "bundle": bundle})
 
-        variables = {"id": self.connector_id, "bundle": bundle}
-
-        r = requests.post(
-            url=self.api_url,
-            json={"query": query, "variables": variables},
-            headers=self.headers,
-            verify=self.verify,
-            proxies=self.proxies,
-        )
-        if r.status_code != 200:
-            raise Exception(
-                f"An exception occurred while sending STIX bundle, "
-                f"received status code: {r.status_code}, "
-                f"exception: {r.content}"
-            )
+    def send_stix_bundle(self, bundle):
+        """
+        Push a STIX bundle. The Splunk App is registered only when needed:
+        if OpenCTI rejects the push (connector not registered yet, or
+        deleted in OpenCTI), the App registers and pushes again, once.
+        HTTP and network errors are raised without retry, so a bundle is
+        never pushed twice.
+        :param bundle:
+        :return:
+        """
+        try:
+            self._push_stix_bundle(bundle)
+        except GraphQLError as push_error:
+            try:
+                self.register()
+            except Exception:
+                raise push_error
+            self.ping()
+            self._push_stix_bundle(bundle)
