@@ -14,9 +14,15 @@ jobs:
       - name: Create subfolder
         run: mkdir my-package
 
+      # UCC 6.x requires Python < 3.14; on a newer Python pip silently falls back to UCC 5.x
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
       - name: Install UCC
         run: |
-          pip install splunk-add-on-ucc-framework
+          pip install splunk-add-on-ucc-framework==6.6.1
 
       - name: Build an app using UCC
         # ucc-gen does not read the version from our tags (no "v" prefix): pass it explicitly
