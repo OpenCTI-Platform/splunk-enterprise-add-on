@@ -328,7 +328,7 @@
     "ds_z5ZhhLJx_ds_PYxsaacd": {
       "name": "OpenCTI Indicators Revoked",
       "options": {
-        "query": "| inputlookup opencti_indicators | stats by revoked",
+        "query": "| inputlookup opencti_indicators | search revoked=1 OR revoked=true | stats count AS revoked",
         "queryParameters": {}
       },
       "type": "ds.search"
